@@ -27,6 +27,7 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
@@ -136,6 +137,13 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    /** Hide the soft keyboard and drop focus (used when you tap off the message field). */
+    private fun dismissKeyboard() {
+        val v = currentFocus ?: window.decorView
+        getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(v.windowToken, 0)
+        currentFocus?.clearFocus()
+    }
+
     private fun tv(s: String, size: Float = 16f, color: Int = white, bold: Boolean = false) = TextView(this).apply {
         text = s
         textSize = size * look.ui
@@ -191,6 +199,10 @@ class MainActivity : Activity() {
         background = round(white, 10)
         setOnClickListener { onClick() }
     }
+
+    /** A primary button sized to its label and centred, rather than stretched edge to edge. */
+    private fun cta(s: String, onClick: () -> Unit) = mainButton(s, onClick).apply { setPadding(dp(40), dp(13), dp(40), dp(13)) }
+    private fun ctaParams() = LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL }
 
     private fun field(hint: String, value: String = "", password: Boolean = false) = EditText(this).apply {
         setText(value)
@@ -274,7 +286,7 @@ class MainActivity : Activity() {
             col.addView(tv(it, 14f, red).apply { gravity = Gravity.CENTER })
         }
         col.addView(gap(40))
-        col.addView(mainButton("Start Messaging") { connectThen { showSignup() } }, LinearLayout.LayoutParams(-1, -2))
+        col.addView(cta("Start Messaging") { connectThen { showSignup() } }, ctaParams())
         col.addView(gap(14))
         col.addView(tv("I already have an account", 16f, white, true).apply {
             gravity = Gravity.CENTER
@@ -339,7 +351,7 @@ class MainActivity : Activity() {
             13.5f, dim,
         ).apply { setLineSpacing(0f, 1.15f); gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, -2))
         col.addView(gap(24))
-        val go = mainButton(if (signup) "Create Account" else "Log In") {}
+        val go = cta(if (signup) "Create Account" else "Log In") {}
         go.setOnClickListener {
             val u = user.text.toString().trim().removePrefix("@").lowercase()
             val p = pass.text.toString()
@@ -358,7 +370,7 @@ class MainActivity : Activity() {
                 toast(errorText(e))
             }
         }
-        col.addView(go, LinearLayout.LayoutParams(-1, -2))
+        col.addView(go, ctaParams())
         setContentView(page(topBar(title, left = icon(R.drawable.ic_back) { showWelcome() }), ScrollView(this).apply {
             isFillViewport = true
             addView(col, android.widget.FrameLayout.LayoutParams(-1, -1))
@@ -583,13 +595,13 @@ class MainActivity : Activity() {
             })
         }
         col.addView(gap(20))
-        col.addView(mainButton("Create group") {
+        col.addView(cta("Create group") {
             val n = name.text.toString().trim()
-            if (n.isEmpty()) { toast("Give the group a name"); return@mainButton }
+            if (n.isEmpty()) { toast("Give the group a name"); return@cta }
             Messenger.run({ val g = Messenger.core.createGroup(n, public, if (public) emptyList() else picked.toList()); Messenger.kick(); groupToOpen = g.id }, {
                 groupToOpen?.let { showGroup(it) }
             }) { e -> toast(errorText(e)) }
-        }, LinearLayout.LayoutParams(-1, -2))
+        }, ctaParams())
         setContentView(page(topBar("New Group", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
     }
 
@@ -618,23 +630,31 @@ class MainActivity : Activity() {
         Messenger.core.openChat = "g:$id"
         groupShown = -1
         groupTop = LinearLayout(this)
-        groupBubbles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        groupBubbles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
+            isClickable = true; setOnClickListener { dismissKeyboard() }
+        }
         groupScroller = ScrollView(this).apply { addView(groupBubbles); isFillViewport = true }
         val bar2 = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(listBg); setPadding(dp(14), dp(4), dp(6), dp(4))
         }
         val box = EditText(this).apply {
             hint = "Message"; setHintTextColor(dim); setTextColor(white); textSize = look.msg; background = null; maxLines = 5
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setHorizontallyScrolling(false)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         }
+        fun doSend() {
+            val t = box.text.toString().trim(); if (t.isEmpty()) return
+            if (t.length > Core.MAX_TEXT) { toast("Too long"); return }
+            box.setText(""); box.requestFocus()
+            val g2 = Messenger.core.group(id) ?: return
+            Messenger.io.execute { Messenger.core.sendGroup(g2, t) }
+        }
+        box.setOnEditorActionListener { _, aid, _ -> if (aid == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         bar2.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         bar2.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box) } })
-        bar2.addView(icon(R.drawable.ic_send, white) {
-            val t = box.text.toString().trim(); if (t.isEmpty()) return@icon
-            if (t.length > Core.MAX_TEXT) { toast("Too long"); return@icon }
-            box.setText(""); val g2 = Messenger.core.group(id) ?: return@icon
-            Messenger.io.execute { Messenger.core.sendGroup(g2, t) }
-        })
+        bar2.addView(icon(R.drawable.ic_send, white) { doSend() })
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(wall); fitsSystemWindows = true
             addView(groupTop, LinearLayout.LayoutParams(-1, -2))
@@ -656,7 +676,7 @@ class MainActivity : Activity() {
         list.removeAllViews()
         list.addView(note("Messages in this group are end-to-end encrypted."))
         for (m in msgs) list.addView(if (m.state == Msg.NOTE) note(m.text) else groupBubble(g, m))
-        if (msgs.size != groupShown) { groupShown = msgs.size; groupScroller?.post { groupScroller?.fullScroll(View.FOCUS_DOWN) } }
+        if (msgs.size != groupShown) { groupShown = msgs.size; groupScroller?.post { groupScroller?.smoothScrollTo(0, groupScroller?.getChildAt(0)?.bottom ?: 0) } }
     }
 
     private fun groupBubble(g: Group, m: Msg): View {
@@ -737,7 +757,7 @@ class MainActivity : Activity() {
             addView(user, LinearLayout.LayoutParams(0, -2, 1f))
         })
         col.addView(gap(16))
-        val go = mainButton("Send Friend Request") {}
+        val go = cta("Send Friend Request") {}
         go.setOnClickListener {
             go.isEnabled = false
             go.text = "Looking…"
@@ -748,7 +768,7 @@ class MainActivity : Activity() {
                 toast(errorText(e))
             }
         }
-        col.addView(go)
+        col.addView(go, ctaParams())
         col.addView(gap(36))
         col.addView(tv("Your username", 14f, dim, true))
         col.addView(gap(6))
@@ -792,7 +812,10 @@ class MainActivity : Activity() {
 
         chatTop = LinearLayout(this)
         banner = FrameLayout(this)
-        bubbles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        bubbles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
+            isClickable = true; setOnClickListener { dismissKeyboard() }   // tap empty area to close the keyboard
+        }
         scroller = ScrollView(this).apply { addView(bubbles); isFillViewport = true }
 
         val input = LinearLayout(this).apply {
@@ -806,19 +829,25 @@ class MainActivity : Activity() {
             setTextColor(white)
             textSize = look.msg
             background = null
+            // wraps to several lines, but Enter sends (no multi-line flag) so you can keep typing
             maxLines = 5
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setHorizontallyScrolling(false)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         }
+        fun doSend() {
+            val t = box.text.toString().trim()
+            if (t.isEmpty()) return
+            if (t.length > Core.MAX_TEXT) { toast("Too long (max ${Core.MAX_TEXT} characters)"); return }
+            box.setText("")
+            box.requestFocus()                 // stay in the field so you can keep typing
+            Messenger.send(c, t)
+        }
+        box.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         input.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box) } })
         input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachMenu(c, v) } })
-        input.addView(icon(R.drawable.ic_send, white) {
-            val t = box.text.toString().trim()
-            if (t.isEmpty()) return@icon
-            if (t.length > Core.MAX_TEXT) { toast("Too long (max ${Core.MAX_TEXT} characters)"); return@icon }
-            box.setText("")
-            Messenger.send(c, t)
-        })
+        input.addView(icon(R.drawable.ic_send, white) { doSend() })
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -882,7 +911,8 @@ class MainActivity : Activity() {
         for (m in msgs) list.addView(if (m.state == Msg.NOTE) note(m.text) else bubble(c, m))
         if (msgs.size != shownCount) {
             shownCount = msgs.size
-            scroller?.post { scroller?.fullScroll(View.FOCUS_DOWN) }
+            // scroll to the newest without fullScroll(), which would steal focus out of the input box
+            scroller?.post { scroller?.smoothScrollTo(0, scroller?.getChildAt(0)?.bottom ?: 0) }
         }
     }
 
@@ -1553,7 +1583,14 @@ class MainActivity : Activity() {
             }
         })
         col.addView(row("Recovery backup", if (Messenger.recoveryUri.isEmpty()) "Off. Save an encrypted backup file so your chats survive reinstalling the app." else "On. Your chats are saved, encrypted, to the file you chose. The server still keeps nothing.") {
-            if (Messenger.recoveryUri.isEmpty()) chooseRecoveryFile()
+            if (Messenger.recoveryUri.isEmpty()) popup("Turn on recovery backup",
+                "Here's exactly what this does:\n\n" +
+                "• MSNGR keeps a copy of all your chats in one file and keeps it up to date as you message.\n\n" +
+                "• You choose where that file goes next — your phone's storage, an SD card, or a cloud folder like Drive. It never goes to the server; only you hold it.\n\n" +
+                "• The file is locked with your account password (AES-256). Without that password it can't be read — not by us, not by the server, not by anyone who finds the file.\n\n" +
+                "• To get your chats back after reinstalling: open MSNGR → Restore from a backup file → enter your password.\n\n" +
+                "One caveat: if you save it into a synced folder like Drive, that service may keep older versions of the file. For zero copies anywhere, leave this off.", null,
+                "Not now" to dim, "Choose file" to white) { i -> if (i == 1) chooseRecoveryFile() }
             else popup("Recovery backup", "Your chats are being saved to your chosen file, encrypted with your password. The server keeps nothing.", null,
                 "Turn off" to red, "Change file" to white) { i ->
                 if (i == 0) { Messenger.recoveryUri = ""; Messenger.settingsChanged(); showSettings() }

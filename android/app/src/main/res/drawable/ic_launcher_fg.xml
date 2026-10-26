@@ -1,5 +1,7 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+  <!-- scaled to 2/3 and centred so the circular icon mask can't clip the bubbles -->
+  <group android:scaleX="0.66" android:scaleY="0.66" android:pivotX="52" android:pivotY="55" android:translateX="2" android:translateY="-1">
     <!-- two overlapping chat bubbles, white on the black background -->
     <!-- back bubble -->
     <path android:fillColor="#FFFFFF" android:pathData="M55,22 L75,22 Q84,22 84,31 L84,41 Q84,50 75,50 L55,50 Q46,50 46,41 L46,31 Q46,22 55,22 Z" />
@@ -13,4 +15,5 @@
     <path android:fillColor="#000000" android:pathData="M29.2,63 a2.8,2.8 0 1,0 5.6,0 a2.8,2.8 0 1,0 -5.6,0 z" />
     <path android:fillColor="#000000" android:pathData="M39.2,63 a2.8,2.8 0 1,0 5.6,0 a2.8,2.8 0 1,0 -5.6,0 z" />
     <path android:fillColor="#000000" android:pathData="M49.2,63 a2.8,2.8 0 1,0 5.6,0 a2.8,2.8 0 1,0 -5.6,0 z" />
+  </group>
 </vector>
