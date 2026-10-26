@@ -486,6 +486,12 @@ class Core(server: String) {
                 }
                 addGroupMsg(g, u, id, String(text))
             }
+            "gdel" -> {
+                val id = inner.optString("id")
+                // only the original sender may erase a group message
+                synchronized(this) { g.msgs.removeAll { it.id == id && it.sender == u } }
+                onChange()
+            }
             "leave" -> synchronized(this) { g.members.remove(u) }
         }
     }
@@ -635,6 +641,25 @@ class Core(server: String) {
             Msg.FAILED
         }
         onChange()
+    }
+
+    /** Removes a message here; [forEveryone] also tells the other side to erase it. */
+    fun deleteMessage(c: Contact, msg: Msg, forEveryone: Boolean) {
+        synchronized(this) { c.msgs.remove(msg) }
+        if (forEveryone && msg.mine && c.canChat) {
+            val m = me
+            if (m != null) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "del").put("id", msg.id)) }
+        }
+        changed()
+    }
+
+    fun deleteGroupMessage(g: Group, msg: Msg, forEveryone: Boolean) {
+        synchronized(this) { g.msgs.remove(msg) }
+        if (forEveryone && msg.mine) {
+            val m = me
+            if (m != null) runCatching { relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gdel").put("u", m.user).put("id", msg.id))) }
+        }
+        changed()
     }
 
     private fun flush(c: Contact) {
@@ -832,6 +857,11 @@ class Core(server: String) {
                     synchronized(this) { g.members.add(c.user) }
                 }
             }
+            "del" -> {
+                val id = inner.optString("id")
+                synchronized(this) { c.msgs.removeAll { it.id == id && !it.mine } } // only lets them erase their own
+                onChange()
+            }
             "read" -> {
                 val ts = inner.optLong("ts", 0)
                 if (ts > c.theirReadUpto) { c.theirReadUpto = ts; onChange() }
@@ -894,6 +924,37 @@ class Core(server: String) {
     }
 
     /** Signal's safety number: 60 digits from both identity keys, the same on both phones. */
+    /** The whole local state, encrypted with the password-derived key. Survives an uninstall when
+     *  saved to a file the user keeps. Header is cleartext so a restore screen can name the account. */
+    fun fullBackup(): ByteArray {
+        val m = me ?: throw UserError("Not signed in")
+        val cipher = Crypto.gcmSeal(m.backupKey, "msgr01-device|${m.user}", toJson().toString().toByteArray())
+        return ("MSGR01\n${m.user}\n").toByteArray() + cipher
+    }
+
+    /** Reads who a backup file belongs to (from its cleartext header), or null if it isn't one. */
+    fun backupOwner(bytes: ByteArray): String? {
+        val head = String(bytes.copyOf(minOf(bytes.size, 80)))
+        if (!head.startsWith("MSGR01\n")) return null
+        val nl = head.indexOf('\n', 7)
+        return if (nl > 7) head.substring(7, nl) else null
+    }
+
+    /** Restores a device backup with the account password. Returns true on success. */
+    fun restoreFull(bytes: ByteArray, password: String): Boolean {
+        val user = backupOwner(bytes) ?: return false
+        val header = "MSGR01\n$user\n".toByteArray()
+        if (bytes.size <= header.size) return false
+        val key = Crypto.passwordKeys(user, password).backup
+        val plain = Crypto.gcmOpen(key, "msgr01-device|$user", bytes.copyOfRange(header.size, bytes.size)) ?: return false
+        synchronized(this) {
+            loadJson(JSONObject(String(plain)))
+            me?.keysPublished = false // re-announce prekeys; the old phone's are stale
+        }
+        onChange()
+        return me != null
+    }
+
     fun safetyCode(c: Contact): String? {
         val m = me ?: return null
         val theirs = c.theirIdent ?: return null

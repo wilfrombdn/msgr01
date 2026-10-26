@@ -271,6 +271,41 @@ class RelayFlowTest {
         assertTrue(gtexts(guest.group(gg.id)).any { it == "$hu:still me" })
     }
 
+    @Test fun deleteForEveryoneErasesOnBothSides() {
+        assumeTrue(Relay(server).ping())
+        val pat = Core(server); val quin = Core(server)
+        val pu = "patd_$tag"; val qu = "quind_$tag"
+        pat.signup(pu, "pats long password", "Pat"); quin.signup(qu, "quins long password", "Quin")
+        pat.addFriend(qu); quin.poll(5); quin.accept(quin.contact(pu)!!); pat.poll(5)
+        val toQuin = pat.contact(qu)!!
+        val m = pat.queue(toQuin, "oops wrong chat"); pat.deliver(toQuin, m)
+        quin.poll(5)
+        assertTrue(quin.contact(pu)!!.msgs.any { it.text == "oops wrong chat" })
+        pat.deleteMessage(toQuin, m, forEveryone = true)
+        assertTrue(toQuin.msgs.none { it.text == "oops wrong chat" }) // gone for me immediately
+        quin.poll(5)
+        assertTrue("erased on their side too", quin.contact(pu)!!.msgs.none { it.text == "oops wrong chat" })
+    }
+
+    @Test fun recoveryBackupRoundTripsAfterReinstall() {
+        assumeTrue(Relay(server).ping())
+        val al = Core(server); val bo = Core(server)
+        val au = "alr_$tag"; val bu = "bor_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo")
+        al.addFriend(bu); bo.poll(5); bo.accept(bo.contact(au)!!); al.poll(5)
+        al.deliver(al.contact(bu)!!, al.queue(al.contact(bu)!!, "keep this message"))
+        val file = al.fullBackup()
+        assertEquals(au, al.backupOwner(file))
+
+        // a fresh install: new Core, restore only from the file + password (no server login)
+        val fresh = Core(server)
+        assertTrue(fresh.restoreFull(file, "als long password"))
+        assertEquals(au, fresh.me!!.user)
+        assertTrue(fresh.contact(bu)!!.msgs.any { it.text == "keep this message" })
+        // wrong password fails cleanly
+        assertFalse(Core(server).restoreFull(file, "not the password"))
+    }
+
     @Test fun lockoutAfterFiveWrongPasswords() {
         assumeTrue(Relay(server).ping())
         val u = "carol_$tag"

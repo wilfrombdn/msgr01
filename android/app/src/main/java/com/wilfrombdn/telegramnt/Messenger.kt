@@ -1,6 +1,7 @@
 package com.wilfrombdn.telegramnt
 
 import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import com.google.crypto.tink.Aead
@@ -26,6 +27,9 @@ object Messenger {
     lateinit var core: Core
     var background = true
     val look = Look()
+    /** A user-chosen file (via the system picker) we keep an encrypted full backup in, so chats
+     *  survive uninstall/reinstall. Empty = off. Nothing goes to the server. */
+    var recoveryUri: String = ""
     /** False while the server can't be reached (top bar says "Connecting…"). */
     @Volatile var connected = false
         private set
@@ -34,8 +38,10 @@ object Messenger {
     @Volatile var visible = false
     var onNotify: ((Contact) -> Unit)? = null
 
+    private lateinit var app: Context
     private var disk: Aead? = null
     private var file: File? = null
+    private val recoveryPending = java.util.concurrent.atomic.AtomicBoolean(false)
     private var ready = false
     private val ui = Handler(Looper.getMainLooper())
     private val listeners = mutableListOf<() -> Unit>()
@@ -45,7 +51,7 @@ object Messenger {
     fun init(ctx: Context) {
         if (ready) return
         Crypto.ensureInit()
-        val app = ctx.applicationContext
+        app = ctx.applicationContext
         disk = AndroidKeysetManager.Builder()
             .withSharedPref(app, "disk", "telegramnt_keys")
             .withKeyTemplate(KeyTemplates.get(Crypto.AEAD_TEMPLATE))
@@ -93,6 +99,7 @@ object Messenger {
         try {
             val o = JSONObject(String(d.decrypt(f.readBytes(), "store".toByteArray())))
             background = o.optBoolean("background", true)
+            recoveryUri = o.optString("recoveryUri")
             o.optJSONObject("look")?.let { look.load(it) }
             core.loadJson(o)
         } catch (e: Exception) {
@@ -104,10 +111,33 @@ object Messenger {
     fun save() {
         val f = file ?: return
         val d = disk ?: return
-        val o = core.toJson().put("background", background).put("look", look.json())
+        val o = core.toJson().put("background", background).put("look", look.json()).put("recoveryUri", recoveryUri)
         val tmp = File(f.path + ".tmp")
         tmp.writeBytes(d.encrypt(o.toString().toByteArray(), "store".toByteArray()))
         tmp.renameTo(f)
+        scheduleRecovery()
+    }
+
+    /** Writes the encrypted full backup to the user's chosen file, at most one pending at a time. */
+    private fun scheduleRecovery() {
+        if (recoveryUri.isEmpty() || !signedIn) return
+        if (!recoveryPending.compareAndSet(false, true)) return
+        io.execute {
+            Thread.sleep(1500) // coalesce bursts of saves into one write
+            recoveryPending.set(false)
+            writeRecovery()
+        }
+    }
+
+    /** Returns null on success, or a message if the backup file couldn't be written. */
+    fun writeRecovery(): String? {
+        if (recoveryUri.isEmpty() || !signedIn) return null
+        return try {
+            app.contentResolver.openOutputStream(Uri.parse(recoveryUri), "wt")?.use { it.write(core.fullBackup()) }
+            null
+        } catch (e: Exception) {
+            "Couldn't update your recovery file. Pick it again in Settings."
+        }
     }
 
     fun settingsChanged() {

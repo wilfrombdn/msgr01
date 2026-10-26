@@ -275,6 +275,11 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(10), dp(8), dp(10))
             setOnClickListener { connectThen { showLogin() } }
         })
+        col.addView(tv("Restore from a backup file", 15f, dim).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { pickRecoveryToRestore() }
+        })
         col.addView(gap(24))
         welcomeStatus = tv(if (Messenger.connected || pendingNext == null) "" else "Connecting…", 14f, dim).apply { gravity = Gravity.CENTER }
         col.addView(welcomeStatus)
@@ -413,6 +418,8 @@ class MainActivity : Activity() {
         private const val PICK_PHOTO = 7
         private const val PICK_ATTACH_PHOTO = 8
         private const val PICK_ATTACH_FILE = 9
+        private const val CREATE_RECOVERY = 10
+        private const val OPEN_RECOVERY = 11
     }
 
     private fun searchBar(): View {
@@ -468,20 +475,24 @@ class MainActivity : Activity() {
         })
         mid.addView(line2)
         row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
+        val swipe = SwipeRow(this, row, R.drawable.ic_trash, onOpen = { showChat(c.user) }, onDelete = { deleteChatConfirm(c) })
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(row)
+            addView(swipe, LinearLayout.LayoutParams(-1, -2))
             addView(View(context).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(76) })
         }
+    }
+
+    private fun deleteChatConfirm(c: Contact) {
+        popup("Delete chat with ${c.name}?", "This erases the whole chat from this phone for good. The server keeps no copy, no backup and no way to recover it — once it's gone, it's gone. Are you sure?",
+            null, "Cancel" to dim, "Delete" to red) { i -> if (i == 1) { Messenger.core.remove(c); showChats() } }
     }
 
     private fun groupRow(g: Group): View {
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(listBg)
             setPadding(dp(10), dp(8), dp(14), dp(8))
-            background = pressable()
-            isClickable = true
-            setOnClickListener { showGroup(g.id) }
         }
         // group avatar: initials on a ring so groups read differently from people
         row.addView(FrameLayout(this).apply {
@@ -508,9 +519,13 @@ class MainActivity : Activity() {
         })
         mid.addView(line2)
         row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
+        val swipe = SwipeRow(this, row, R.drawable.ic_trash, onOpen = { showGroup(g.id) }, onDelete = {
+            popup("Leave \"${g.name}\"?", "You'll stop getting its messages and it's removed from this phone. Nothing is kept on the server to recover. You can be re-invited later.",
+                null, "Cancel" to dim, "Leave" to red) { i -> if (i == 1) { Messenger.io.execute { Messenger.core.leaveGroup(g) }; showChats() } }
+        })
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(row)
+            addView(swipe, LinearLayout.LayoutParams(-1, -2))
             addView(View(context).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(76) })
         }
     }
@@ -658,8 +673,21 @@ class MainActivity : Activity() {
             Msg.FAILED -> meta.addView(tv("  not sent · tap", 12f, red).apply { setOnClickListener { Messenger.io.execute { Messenger.core.deliverGroup(g, m) } } })
         }
         b.addView(meta, LinearLayout.LayoutParams(-1, -2))
+        b.setOnLongClickListener { groupMessageMenu(g, m); true }
         wrap.addView(b, LinearLayout.LayoutParams(-2, -2).apply { if (m.mine) leftMargin = dp(56) else rightMargin = dp(56) })
         return wrap
+    }
+
+    private fun groupMessageMenu(g: Group, m: Msg) {
+        val opts = mutableListOf<Pair<String, () -> Unit>>()
+        if (m.text.isNotEmpty()) opts.add("Copy" to {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
+        })
+        if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
+            Messenger.io.execute { Messenger.core.deleteGroupMessage(g, m, forEveryone = true) }
+        })
+        opts.add("Delete for me" to { Messenger.core.deleteGroupMessage(g, m, forEveryone = false); fillGroup() })
+        pickList("Message", null, opts.map { it.first }.toTypedArray()) { i -> opts[i].second() }
     }
 
     private fun groupMenu(g: Group) {
@@ -890,8 +918,21 @@ class MainActivity : Activity() {
             Msg.FAILED -> meta.addView(tv("  not sent · tap to retry", 12f, red).apply { setOnClickListener { Messenger.retry(c, m) } })
         }
         b.addView(meta, LinearLayout.LayoutParams(-1, -2))
+        b.setOnLongClickListener { messageMenu(c, m); true }
         wrap.addView(b, LinearLayout.LayoutParams(-2, -2).apply { if (m.mine) leftMargin = dp(56) else rightMargin = dp(56) })
         return wrap
+    }
+
+    private fun messageMenu(c: Contact, m: Msg) {
+        val opts = mutableListOf<Pair<String, () -> Unit>>()
+        if (m.text.isNotEmpty()) opts.add("Copy" to {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
+        })
+        if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
+            Messenger.run({ Messenger.core.deleteMessage(c, m, forEveryone = true) }, { fillChat() })
+        })
+        opts.add("Delete for me" to { Messenger.core.deleteMessage(c, m, forEveryone = false); fillChat() })
+        pickList("Message", null, opts.map { it.first }.toTypedArray()) { i -> opts[i].second() }
     }
 
     private fun chatMenu(c: Contact, anchor: View) {
@@ -905,8 +946,8 @@ class MainActivity : Activity() {
                 }
             },
             "Remove friend" to {
-                popup("Remove ${c.name}?", "Deletes the chat from this phone. To talk again, one of you sends a new friend request.", null,
-                    "Cancel" to dim, "Remove" to red) { i -> if (i == 1) { Messenger.core.remove(c); showChats() } }
+                popup("Delete chat with ${c.name}?", "This erases the whole chat from this phone for good. The server keeps no copy, no backup and no way to recover it — once it's gone it's gone. Are you sure?", null,
+                    "Cancel" to dim, "Delete" to red) { i -> if (i == 1) { Messenger.core.remove(c); showChats() } }
             },
         )
     }
@@ -954,19 +995,19 @@ class MainActivity : Activity() {
             setBackgroundColor(listBg)
             fitsSystemWindows = true
         }
-        // header: big avatar, name + @username, tappable to open your profile
+        // header: avatar on the left, name + @username to its right
         col.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
             background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.parseColor("#2A2A2A"), bar))
-            setPadding(dp(20), dp(26), dp(20), dp(18))
-            addView(avatar(me?.name ?: "", 64, me?.avatar))
+            setPadding(dp(20), dp(24), dp(16), dp(20))
+            addView(avatar(me?.name ?: "", 58, me?.avatar))
             addView(LinearLayout(context).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(12), 0, 0)
-                addView(tv(me?.name ?: "", 18f, white, true), LinearLayout.LayoutParams(0, -2, 1f))
-                addView(tv("›", 26f, dim))
-            })
-            addView(tv("@${me?.user ?: ""}", 14f, dim))
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), 0, 0, 0)
+                addView(tv(me?.name ?: "", 18f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                addView(tv("@${me?.user ?: ""}", 14f, dim).apply { setPadding(0, dp(2), 0, 0) })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(tv("›", 26f, dim))
             isClickable = true
             foreground = pressable()
             setOnClickListener { d.closeDrawer(GravityCompat.START); showSettings() }
@@ -1235,6 +1276,50 @@ class MainActivity : Activity() {
         }) { e -> toast(errorText(e)) }
     }
 
+    // ---------- recovery backup (survives uninstall; encrypted; nothing server-side) ----------
+
+    private fun takePersist(uri: android.net.Uri) = runCatching {
+        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+    }
+
+    private fun chooseRecoveryFile() {
+        val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "msgr01-recovery-${Messenger.core.me?.user}.m01")
+        @Suppress("DEPRECATION") startActivityForResult(i, CREATE_RECOVERY)
+    }
+
+    private fun setupRecovery(uri: android.net.Uri) {
+        takePersist(uri)
+        Messenger.recoveryUri = uri.toString()
+        Messenger.run({ Messenger.writeRecovery() }, { showSettings(); toast("Recovery backup on. Keep this file safe.") }) { toast("Couldn't write the file") }
+    }
+
+    private fun pickRecoveryToRestore() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+        @Suppress("DEPRECATION") startActivityForResult(i, OPEN_RECOVERY)
+    }
+
+    private fun restoreFromFile(uri: android.net.Uri) {
+        var bytes: ByteArray? = null
+        Messenger.run({ bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } }, {
+            val b = bytes
+            val owner = b?.let { Messenger.core.backupOwner(it) }
+            if (b == null || owner == null) { toast("That isn't a msgr01 recovery file."); return@run }
+            val pass = field("Password", password = true)
+            popup("Restore @$owner", "Enter the account password to unlock this backup. Your chats will be restored on this phone.", pass,
+                "Cancel" to dim, "Restore" to white) { i ->
+                if (i == 1) Messenger.run({
+                    if (!Messenger.core.restoreFull(b, pass.text.toString())) throw UserError("Wrong password, or the file is damaged")
+                    takePersist(uri); Messenger.recoveryUri = uri.toString(); Messenger.save()
+                }, {
+                    Messenger.signedOutReason = null
+                    startForegroundService(Intent(this, SyncService::class.java))
+                    showChats()
+                }) { e -> toast(errorText(e)) }
+            }
+        }) { toast("Couldn't read that file") }
+    }
+
     // ---------- profile photo ----------
 
     private fun photoMenu(anchor: View) {
@@ -1255,6 +1340,8 @@ class MainActivity : Activity() {
         @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data
         if (resultCode != RESULT_OK || uri == null) return
+        if (requestCode == CREATE_RECOVERY) return setupRecovery(uri)
+        if (requestCode == OPEN_RECOVERY) return restoreFromFile(uri)
         if (requestCode == PICK_ATTACH_PHOTO || requestCode == PICK_ATTACH_FILE) return attachPicked(uri, requestCode == PICK_ATTACH_PHOTO)
         if (requestCode != PICK_PHOTO) return
         var bmp: android.graphics.Bitmap? = null
@@ -1378,6 +1465,14 @@ class MainActivity : Activity() {
                 if (i == 1) Messenger.run({ Messenger.core.setCloudBackup(true) }, { showSettings() }) { e -> toast(errorText(e)) }
             }
         })
+        col.addView(row("Recovery backup", if (Messenger.recoveryUri.isEmpty()) "Off. Save an encrypted backup file so your chats survive reinstalling the app." else "On. Your chats are saved, encrypted, to the file you chose. The server still keeps nothing.") {
+            if (Messenger.recoveryUri.isEmpty()) chooseRecoveryFile()
+            else popup("Recovery backup", "Your chats are being saved to your chosen file, encrypted with your password. The server keeps nothing.", null,
+                "Turn off" to red, "Change file" to white) { i ->
+                if (i == 0) { Messenger.recoveryUri = ""; Messenger.settingsChanged(); showSettings() }
+                if (i == 1) chooseRecoveryFile()
+            }
+        })
         col.addView(row("Log out", "Your chats stay locked on this phone for when you log back in.") {
             popup("Log out?", "You can log back in any time with your username and password.", null,
                 "Cancel" to dim, "Log out" to red) { i ->
@@ -1390,7 +1485,7 @@ class MainActivity : Activity() {
         })
         col.addView(row("Delete account", "Removes @${me.user} from the server for good.", red) {
             val pass = field("Password", password = true)
-            popup("Delete your account?", "Type your password to confirm. This can't be undone.", pass,
+            popup("Delete your account?", "This permanently removes @${me.user} and all your chats. The server keeps no backup and nobody — not even us — can recover anything. Type your password to confirm.", pass,
                 "Cancel" to dim, "Delete" to red) { i ->
                 if (i == 1) Messenger.run({ Messenger.deleteAccount(pass.text.toString()) }, {
                     stopService(Intent(this, SyncService::class.java))
