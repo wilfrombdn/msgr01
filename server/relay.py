@@ -37,6 +37,7 @@ MAX_BLOB = 32 * 1024            # biggest sealed message (Signal overhead + a pa
 MAX_BACKUP = 96 * 1024          # biggest password-locked backup
 MAX_KEY = 512                   # biggest public key
 MAX_PER_BOX = 1000              # messages waiting in one mailbox
+MAX_PER_GROUP = 5000           # messages kept in one group mailbox
 MAX_TOKENS_PER_FETCH = 500
 MAX_WAIT = 30                   # seconds a fetch may wait for new mail
 MSG_TTL = 30 * 24 * 3600        # undelivered messages are dropped after this
@@ -123,6 +124,8 @@ class Store:
             CREATE INDEX IF NOT EXISTS msgs_addr ON msgs(addr);
             CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY, size INTEGER, ts REAL);
             CREATE TABLE IF NOT EXISTS otpk(user TEXT, id INTEGER, pub BLOB, PRIMARY KEY(user, id));
+            CREATE TABLE IF NOT EXISTS gmsgs(seq INTEGER PRIMARY KEY AUTOINCREMENT, addr TEXT, ts REAL, blob BLOB);
+            CREATE INDEX IF NOT EXISTS gmsgs_addr ON gmsgs(addr, seq);
         """)
         # Signal keys: identity, registration id, signed prekey and Kyber (post-quantum) prekey
         cols = [r[1] for r in self.db.execute("PRAGMA table_info(accounts)")]
@@ -184,6 +187,28 @@ class Store:
                     return [{"box": index[a], "id": i, "blob": base64.b64encode(b).decode()} for i, a, b in rows]
                 self.cond.wait(left)
 
+    # ---- group mailboxes (fan-out; no per-reader delete, TTL cleans up) ----
+
+    def gput(self, address, blob):
+        with self.cond:
+            n = self.db.execute("SELECT COUNT(*) FROM gmsgs WHERE addr=?", (address,)).fetchone()[0]
+            if n >= MAX_PER_GROUP:
+                self.db.execute("DELETE FROM gmsgs WHERE seq IN (SELECT seq FROM gmsgs WHERE addr=? ORDER BY seq LIMIT ?)",
+                                (address, n - MAX_PER_GROUP + 1))
+            self.db.execute("INSERT INTO gmsgs(addr, ts, blob) VALUES(?,?,?)", (address, hour(), blob))
+            self.cond.notify_all()
+
+    def gtake(self, address, since, wait):
+        deadline = time.time() + wait
+        with self.cond:
+            while True:
+                rows = self.db.execute("SELECT seq, blob FROM gmsgs WHERE addr=? AND seq>? ORDER BY seq LIMIT 200",
+                                       (address, since)).fetchall()
+                left = deadline - time.time()
+                if rows or left <= 0:
+                    return [{"seq": r[0], "blob": base64.b64encode(r[1]).decode()} for r in rows]
+                self.cond.wait(left)
+
     def sweep(self):
         now = time.time()
         with self.lock:
@@ -194,6 +219,8 @@ class Store:
             old = [r[0] for r in self.db.execute("SELECT id FROM files WHERE ts < ?", (now - MSG_TTL,))]
         for fid in old:
             self.drop_file(fid)
+        with self.lock:
+            self.db.execute("DELETE FROM gmsgs WHERE ts < ?", (now - MSG_TTL,))
 
     # ---- attachments: sealed blobs the phones encrypted; the key never comes here ----
 
@@ -396,6 +423,24 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(fid, str) and len(fid) == 32 and set(fid) <= HEX:
             self.server.store.drop_file(fid)
         self.reply(200, {"ok": True})
+
+    # ---- group mailboxes ----
+
+    def api_gsend(self, req, who):
+        to = req["to"]
+        blob = b64(req["blob"], MAX_BLOB)
+        if not is_hex32(to) or blob is None:
+            return self.reply(400, {"error": "bad request"})
+        self.server.store.gput(to, blob)
+        self.reply(200, {"ok": True})
+
+    def api_gfetch(self, req, who):
+        addr = req["addr"]
+        since = req.get("since", 0)
+        wait = max(0, min(MAX_WAIT, int(req.get("wait", 0))))
+        if not is_hex32(addr) or not isinstance(since, int) or since < 0:
+            return self.reply(400, {"error": "bad request"})
+        self.reply(200, {"msgs": self.server.store.gtake(addr, since, wait)})
 
     # ---- accounts ----
 

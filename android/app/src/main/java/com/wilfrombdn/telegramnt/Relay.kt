@@ -19,6 +19,24 @@ class Relay(val server: String) {
         live?.disconnect()
     }
 
+    class GroupMsg(val seq: Long, val blob: ByteArray)
+
+    /** Posts a sealed blob to a group mailbox (kept until TTL; every member reads it). */
+    fun gsend(address: String, blob: ByteArray) {
+        post("/gsend", JSONObject().put("to", address).put("blob", Base64.getEncoder().encodeToString(blob)), 20)
+    }
+
+    /** Group messages with seq greater than [since]. */
+    fun gfetch(address: String, since: Long, waitSec: Int): List<GroupMsg> {
+        val body = JSONObject().put("addr", address).put("since", since).put("wait", waitSec)
+        val arr = post("/gfetch", body, waitSec + 20, track = true).optJSONArray("msgs") ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val m = arr.getJSONObject(i)
+            try { GroupMsg(m.getLong("seq"), Base64.getDecoder().decode(m.getString("blob"))) }
+            catch (e: IllegalArgumentException) { null }
+        }
+    }
+
     fun send(address: String, blob: ByteArray) {
         post("/send", JSONObject().put("to", address).put("blob", b64(blob)), 20)
     }

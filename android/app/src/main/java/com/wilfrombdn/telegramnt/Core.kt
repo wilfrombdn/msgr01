@@ -9,6 +9,10 @@ import org.signal.libsignal.protocol.SessionBuilder
 import org.signal.libsignal.protocol.SessionCipher
 import org.signal.libsignal.protocol.SignalProtocolAddress
 import org.signal.libsignal.protocol.ecc.ECPublicKey
+import org.signal.libsignal.protocol.groups.GroupCipher
+import org.signal.libsignal.protocol.groups.GroupSessionBuilder
+import org.signal.libsignal.protocol.message.SenderKeyDistributionMessage
+import java.util.UUID
 import org.signal.libsignal.protocol.fingerprint.NumericFingerprintGenerator
 import org.signal.libsignal.protocol.kem.KEMPublicKey
 import org.signal.libsignal.protocol.message.CiphertextMessage
@@ -24,9 +28,11 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
     var file: JSONObject? = null
     /** Disappearing messages: epoch ms when this is wiped from both phones, or 0 = never. */
     var expires: Long = 0
+    /** In a group, the @username of whoever sent it (shown above the bubble). */
+    var sender: String? = null
 
     fun json(): JSONObject = JSONObject().put("id", id).put("mine", mine).put("text", text).put("ts", ts).put("state", state)
-        .put("file", file).put("expires", expires)
+        .put("file", file).put("expires", expires).put("sender", sender)
 
     companion object {
         const val SENDING = 0
@@ -35,7 +41,7 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
         const val FAILED = 3
         const val NOTE = 4 // grey line in the middle, e.g. "You are now friends"
         fun from(o: JSONObject) = Msg(o.getString("id"), o.getBoolean("mine"), o.getString("text"), o.getLong("ts"), o.getInt("state"))
-            .also { it.file = o.optJSONObject("file"); it.expires = o.optLong("expires") }
+            .also { it.file = o.optJSONObject("file"); it.expires = o.optLong("expires"); it.sender = o.optString("sender").ifEmpty { null } }
     }
 }
 
@@ -118,6 +124,45 @@ class Me(
     val sigPub: ByteArray get() = Crypto.publicBytes(sig)
 }
 
+/**
+ * A group chat. Encryption uses Signal "sender keys": each member sends one sealed distribution
+ * message to the group's shared mailbox, after which everyone can read everyone's messages. The
+ * server only ever sees blobs sealed with the group key (derived from the group's secret).
+ */
+class Group(
+    val id: String,
+    var name: String,
+    val secret: String,          // the shared secret; whoever has it is in the group
+    val public: Boolean,         // true = joinable by invite link; false = friends added directly
+    var cursor: Long = 0,        // last group-mailbox position read
+    var unread: Int = 0,
+    val created: Long = System.currentTimeMillis(),
+    val members: MutableSet<String> = mutableSetOf(),
+    val msgs: MutableList<Msg> = mutableListOf(),
+) {
+    @Volatile var distSent = false   // have I posted my sender key this session (not persisted)
+    val pending = mutableListOf<Triple<String, String, ByteArray>>() // gmsgs waiting for a sender key
+    val lastTs get() = msgs.lastOrNull()?.ts ?: created
+    val addr get() = Crypto.sha256(("msgr01-group|$secret").toByteArray()).hex()
+    val key get() = Crypto.sha256(("msgr01-group-key|$secret").toByteArray())
+    val distId: UUID get() = UUID.nameUUIDFromBytes(secret.unhex())
+
+    fun json(withMsgs: Boolean): JSONObject = JSONObject()
+        .put("id", id).put("name", name).put("secret", secret).put("public", public)
+        .put("cursor", cursor).put("created", created).put("members", JSONArray(members.toList()))
+        .apply { if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() })) }
+
+    companion object {
+        fun from(o: JSONObject): Group {
+            val g = Group(o.getString("id"), o.getString("name"), o.getString("secret"), o.getBoolean("public"),
+                o.optLong("cursor"), o.optInt("unread"), o.optLong("created"))
+            o.optJSONArray("members")?.let { for (i in 0 until it.length()) g.members.add(it.getString(i)) }
+            o.optJSONArray("msgs")?.let { for (i in 0 until it.length()) g.msgs.add(Msg.from(it.getJSONObject(i))) }
+            return g
+        }
+    }
+}
+
 class UserError(msg: String) : IOException(msg)
 
 /**
@@ -128,6 +173,7 @@ class Core(server: String) {
     var relay = Relay(server)
     @Volatile var me: Me? = null
     val contacts = mutableListOf<Contact>()
+    val groups = mutableListOf<Group>()
 
     /** Friend whose chat is on screen (no unread count for it). */
     @Volatile var openChat: String? = null
@@ -143,6 +189,7 @@ class Core(server: String) {
     private val acks = mutableSetOf<String>()
 
     @Synchronized fun contact(user: String) = contacts.firstOrNull { it.user == user }
+    @Synchronized fun group(id: String) = groups.firstOrNull { it.id == id }
     @Synchronized fun sorted(): List<Contact> = contacts.sortedByDescending { it.lastTs }
 
     // ---------- account ----------
@@ -188,11 +235,14 @@ class Core(server: String) {
             acks.clear()
             for (i in 0 until list.length()) contacts.add(Contact.from(list.getJSONObject(i)))
             for (c in contacts) if (c.status == Contact.FRIENDS) c.msgs.add(note("Chat history stays on your old phone"))
+            groups.clear()
+            o.optJSONArray("groups")?.let { for (i in 0 until it.length()) groups.add(Group.from(it.getJSONObject(i)).also { g -> g.cursor = 0 }) }
         }
         onChange()
         // Friends' photos aren't in the backup: send ours and ask for theirs. This also starts
         // new Signal sessions, since the old ones stayed on the old phone.
         for (c in synchronized(this) { contacts.filter { it.status == Contact.FRIENDS } }) runCatching { sendAvatar(c, ask = true) }
+        for (g in synchronized(this) { groups.toList() }) runCatching { postMyDist(m, g) }
     }
 
     fun deleteAccount(password: String) {
@@ -253,6 +303,7 @@ class Core(server: String) {
             .put("inbox", m.inboxToken)
             .put("avatar", m.avatar?.let { b64(it) })
             .put("sident", b64(m.signal.identity.serialize())).put("sreg", m.signal.regId)
+            .put("groups", JSONArray(synchronized(this) { groups.map { it.json(withMsgs = false) } }))
             .put("contacts", JSONArray(list.map { it.json(withMsgs = false) }))
         return Crypto.lockBackup(m.backupKey, m.user, o.toString().toByteArray())
     }
@@ -295,6 +346,168 @@ class Core(server: String) {
 
     /** From a message-request chat I accepted: add them as a friend after all. */
     fun makeFriend(c: Contact) = accept(c, friend = true)
+
+    // ---------- groups ----------
+
+    fun createGroup(name: String, public: Boolean, invite: List<String> = emptyList()): Group {
+        val m = me ?: throw UserError("Not signed in")
+        val g = Group(Crypto.randomHex(8), name.trim().take(80).ifEmpty { "Group" }, Crypto.randomHex(), public)
+        g.members.add(m.user)
+        postMyDist(m, g)
+        synchronized(this) { groups.add(g) }
+        g.msgs.add(note(if (public) "Group created. Share the invite link to let people join." else "Group created. Add friends from the group menu."))
+        changed()
+        for (u in invite) runCatching { inviteToGroup(g, u) }
+        return g
+    }
+
+    /** Private group: send a friend a sealed 1:1 invite. */
+    fun inviteToGroup(g: Group, rawUser: String) {
+        val m = me ?: return
+        val user = rawUser.trim().removePrefix("@").lowercase()
+        val c = contact(user) ?: throw UserError("@$user isn't in your friends")
+        if (!c.canChat) throw UserError("@$user hasn't accepted you yet")
+        sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "ginvite").put("secret", g.secret).put("n", g.name).put("public", g.public))
+        synchronized(this) { g.members.add(user) }
+        changed()
+    }
+
+    fun groupInviteLink(g: Group): String {
+        val o = JSONObject().put("s", g.secret).put("n", g.name)
+        return "msgr01://group#" + Base64.getUrlEncoder().withoutPadding().encodeToString(o.toString().toByteArray())
+    }
+
+    fun joinGroupLink(link: String): Group {
+        val frag = link.trim().substringAfter('#', "")
+        val o = try { JSONObject(String(Base64.getUrlDecoder().decode(frag))) } catch (e: Exception) { throw UserError("That isn't a valid group link") }
+        val secret = o.optString("s")
+        if (secret.length != 64 || !secret.all { it in "0123456789abcdef" }) throw UserError("That isn't a valid group link")
+        return joinGroup(secret, o.optString("n").take(80).ifBlank { "Group" }, public = true)
+    }
+
+    private fun joinGroup(secret: String, name: String, public: Boolean): Group {
+        val m = me ?: throw UserError("Not signed in")
+        synchronized(this) { groups.firstOrNull { it.secret == secret } }?.let { return it }
+        val g = Group(Crypto.randomHex(8), name, secret, public)
+        g.members.add(m.user)
+        postMyDist(m, g)
+        synchronized(this) { groups.add(g) }
+        g.msgs.add(note("You joined \"$name\"."))
+        changed()
+        return g
+    }
+
+    fun leaveGroup(g: Group) {
+        val m = me
+        if (m != null) runCatching { relay.gsend(g.addr, gseal(g, JSONObject().put("t", "leave").put("u", m.user))) }
+        synchronized(this) { groups.remove(g) }
+        changed()
+    }
+
+    fun sendGroup(g: Group, text: String): Msg {
+        val msg = Msg(Crypto.randomHex(16), true, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.SENDING)
+        synchronized(this) { g.msgs.add(msg) }
+        onChange()
+        deliverGroup(g, msg)
+        return msg
+    }
+
+    fun deliverGroup(g: Group, msg: Msg) {
+        val m = me ?: return
+        msg.state = try {
+            if (!g.distSent) postMyDist(m, g)
+            val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, msg.text.toByteArray()) }
+            relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gmsg").put("u", m.user).put("id", msg.id).put("c", b64(ct.serialize()))))
+            Msg.SENT
+        } catch (e: Exception) {
+            Msg.FAILED
+        }
+        onChange()
+    }
+
+    /** Posts my sender-key distribution message, signed with my identity so nobody can post as me. */
+    private fun postMyDist(m: Me, g: Group) {
+        val skdm = synchronized(m.signal) { GroupSessionBuilder(m.signal).create(m.address, g.distId) }.serialize()
+        val sig = m.signal.identity.privateKey.calculateSignature(skdm)
+        relay.gsend(g.addr, gseal(g, JSONObject().put("t", "skdm").put("u", m.user).put("d", b64(skdm)).put("sig", b64(sig))))
+        g.distSent = true
+    }
+
+    private fun gseal(g: Group, inner: JSONObject) = Crypto.gcmSeal(g.key, "msgr01-group", inner.toString().toByteArray())
+
+    // test hooks (used only by unit tests to simulate a malicious member)
+    fun signalFor() = me!!.signal
+    fun postRaw(g: Group, inner: JSONObject) = relay.gsend(g.addr, gseal(g, inner))
+
+    /** Reads new group-mailbox messages for [g]. */
+    private fun pollGroup(m: Me, g: Group, wait: Int) {
+        val got = relay.gfetch(g.addr, g.cursor, wait)
+        if (got.isEmpty()) return
+        // decode everything, then handle sender-key announcements before chat messages so a
+        // message and its sender's key that arrive in the same batch still decrypt
+        data class Decoded(val seq: Long, val u: String, val inner: JSONObject)
+        val decoded = got.mapNotNull { gm ->
+            val plain = Crypto.gcmOpen(g.key, "msgr01-group", gm.blob) ?: return@mapNotNull null
+            val inner = try { JSONObject(String(plain)) } catch (e: Exception) { return@mapNotNull null }
+            val u = inner.optString("u")
+            if (!USERNAME.matches(u) || u == m.user) null else Decoded(gm.seq, u, inner)
+        }
+        for (d in decoded.sortedBy { if (it.inner.optString("t") == "gmsg") 1 else 0 }) {
+            try { onGroupInner(m, g, d.u, d.inner) } catch (e: IOException) { continue }
+        }
+        g.cursor = maxOf(g.cursor, got.maxOf { it.seq })
+        retryPending(m, g)
+        onChange()
+    }
+
+    private fun onGroupInner(m: Me, g: Group, u: String, inner: JSONObject) {
+        when (inner.optString("t")) {
+            "skdm" -> {
+                val p = relay.lookup(u) ?: return
+                if (p.ident.isEmpty()) return
+                val skdm = unb64(inner.optString("d"))
+                val sig = unb64(inner.optString("sig"))
+                val identKey = try { IdentityKey(unb64(p.ident)) } catch (e: Exception) { return }
+                if (!identKey.publicKey.verifySignature(skdm, sig)) return // someone posting as @u
+                synchronized(m.signal) { GroupSessionBuilder(m.signal).process(SignalProtocolAddress(u, 1), SenderKeyDistributionMessage(skdm)) }
+                synchronized(this) { g.members.add(u) }
+            }
+            "gmsg" -> {
+                val id = inner.optString("id")
+                val ct = unb64(inner.optString("c"))
+                if (id.isEmpty() || synchronized(this) { g.msgs.any { it.id == id } }) return
+                val text = try {
+                    synchronized(m.signal) { GroupCipher(m.signal, SignalProtocolAddress(u, 1)).decrypt(ct) }
+                } catch (e: org.signal.libsignal.protocol.NoSessionException) {
+                    synchronized(g.pending) { if (g.pending.none { it.second == id }) g.pending.add(Triple(u, id, ct)) }
+                    return
+                } catch (e: Exception) {
+                    return
+                }
+                addGroupMsg(g, u, id, String(text))
+            }
+            "leave" -> synchronized(this) { g.members.remove(u) }
+        }
+    }
+
+    private fun retryPending(m: Me, g: Group) {
+        val waiting = synchronized(g.pending) { g.pending.toList() }
+        for ((u, id, ct) in waiting) {
+            val text = try { synchronized(m.signal) { GroupCipher(m.signal, SignalProtocolAddress(u, 1)).decrypt(ct) } } catch (e: Exception) { continue }
+            synchronized(g.pending) { g.pending.removeAll { it.second == id } }
+            if (synchronized(this) { g.msgs.none { it.id == id } }) addGroupMsg(g, u, id, String(text))
+        }
+    }
+
+    private fun addGroupMsg(g: Group, u: String, id: String, text: String) {
+        synchronized(this) {
+            g.members.add(u)
+            val msg = Msg(id, false, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.RECEIVED)
+            msg.sender = u
+            g.msgs.add(msg)
+            if (openChat != "g:${g.id}") g.unread++
+        }
+    }
 
     /** Marks a chat read and, if read receipts are on, tells the other side. */
     fun markRead(c: Contact) {
@@ -512,6 +725,7 @@ class Core(server: String) {
             synchronized(this) { (if (inc.token == m.inboxToken) inboxAcks else acks).add(inc.id) }
         }
         if (got.isNotEmpty()) onChange()
+        for (g in synchronized(this) { groups.toList() }) runCatching { pollGroup(m, g, 0) }
         purgeExpired()
         for (msg in synchronized(this) { toFetch.toList() }) {
             val ok = runCatching { fetchFile(msg) }.getOrDefault(false)
@@ -611,6 +825,13 @@ class Core(server: String) {
                 onChange()
                 if (inner.optBoolean("ask")) runCatching { sendAvatar(c, ask = false) }
             }
+            "ginvite" -> {
+                val secret = inner.optString("secret")
+                if (secret.length == 64 && secret.all { it in "0123456789abcdef" }) {
+                    val g = joinGroup(secret, inner.optString("n").take(80).ifBlank { "Group" }, inner.optBoolean("public"))
+                    synchronized(this) { g.members.add(c.user) }
+                }
+            }
             "read" -> {
                 val ts = inner.optLong("ts", 0)
                 if (ts > c.theirReadUpto) { c.theirReadUpto = ts; onChange() }
@@ -706,7 +927,7 @@ class Core(server: String) {
                 .put("cloudBackup", m.cloudBackup))
         }
         return o.put("contacts", JSONArray(contacts.map { it.json(withMsgs = true) })).put("backupDirty", backupDirty)
-            .put("readReceipts", readReceipts)
+            .put("readReceipts", readReceipts).put("groups", JSONArray(groups.map { it.json(withMsgs = true) }))
     }
 
     @Synchronized
@@ -731,6 +952,8 @@ class Core(server: String) {
         }
         backupDirty = o.optBoolean("backupDirty")
         readReceipts = o.optBoolean("readReceipts", true)
+        groups.clear()
+        o.optJSONArray("groups")?.let { for (i in 0 until it.length()) groups.add(Group.from(it.getJSONObject(i))) }
         // attachments that arrived but weren't downloaded yet
         for (c in contacts) for (msg in c.msgs) if (!msg.mine && msg.file?.has("local") == false) toFetch.add(msg)
     }

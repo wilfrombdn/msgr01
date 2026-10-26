@@ -216,6 +216,61 @@ class RelayFlowTest {
         assertTrue("no receipt when off", toSky.theirReadUpto < m2.ts)
     }
 
+    private fun gtexts(g: Group?) = g!!.msgs.filter { it.state != Msg.NOTE }.map { (it.sender?.let { u -> "$u:" } ?: "me:") + it.text }
+
+    @Test fun privateGroupThreeMembersTalk() {
+        assumeTrue(Relay(server).ping())
+        val al = Core(server); val bo = Core(server); val ci = Core(server)
+        val au = "al_$tag"; val bu = "bo_$tag"; val cu = "ci_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo"); ci.signup(cu, "cis long password", "Ci")
+        // al befriends bo and ci (needed to invite them to a private group)
+        for ((x, xu, y, yu) in listOf(listOf(al, au, bo, bu), listOf(al, au, ci, cu)).map { it }) {}
+        fun befriend(a: Core, au: String, b: Core, bu: String) {
+            a.addFriend(bu); b.poll(5); b.accept(b.contact(au)!!); a.poll(5)
+        }
+        befriend(al, au, bo, bu); befriend(al, au, ci, cu)
+
+        val g = al.createGroup("Road Crew", public = false, invite = listOf(bu, cu))
+        bo.poll(5); ci.poll(5)                       // bo and ci receive the invite, auto-join + post their sender keys
+        al.poll(5); bo.poll(5); ci.poll(5)           // everyone exchanges sender keys
+        assertNotNull(bo.groups.firstOrNull { it.secret == g.secret })
+        assertNotNull(ci.groups.firstOrNull { it.secret == g.secret })
+
+        al.sendGroup(g, "morning all")
+        bo.poll(5); ci.poll(5)
+        val gb = bo.groups.first { it.secret == g.secret }; val gc = ci.groups.first { it.secret == g.secret }
+        assertTrue(gtexts(gb).any { it == "$au:morning all" })
+        bo.sendGroup(gb, "on my way")
+        al.poll(5); ci.poll(5)
+        assertTrue(gtexts(al.group(g.id)).any { it == "$bu:on my way" })
+        assertTrue(gtexts(gc).any { it == "$bu:on my way" })
+    }
+
+    @Test fun publicGroupJoinByLinkAndNoImpersonation() {
+        assumeTrue(Relay(server).ping())
+        val host = Core(server); val guest = Core(server); val faker = Core(server)
+        val hu = "host_$tag"; val gu = "guest_$tag"; val fu = "faker_$tag"
+        host.signup(hu, "hosts long password", "Host"); guest.signup(gu, "guests long password", "Guest"); faker.signup(fu, "fakers long password", "Faker")
+        val g = host.createGroup("Open Room", public = true)
+        val link = host.groupInviteLink(g)
+        val gg = guest.joinGroupLink(link)
+        host.poll(5); guest.poll(5); host.poll(5)
+        host.sendGroup(g, "welcome")
+        guest.poll(5)
+        assertTrue(gtexts(guest.group(gg.id)).any { it == "$hu:welcome" })
+
+        // faker joins and tries to post a sender key claiming to be the host -> must be rejected
+        val gf = faker.joinGroupLink(link)
+        val fakeSkdm = org.signal.libsignal.protocol.groups.GroupSessionBuilder(faker.signalFor())
+            .create(org.signal.libsignal.protocol.SignalProtocolAddress(hu, 1), gf.distId).serialize()
+        faker.postRaw(gf, org.json.JSONObject().put("t", "skdm").put("u", hu).put("d", java.util.Base64.getEncoder().encodeToString(fakeSkdm)).put("sig", java.util.Base64.getEncoder().encodeToString(ByteArray(64))))
+        guest.poll(5)
+        // the guest already trusts the real host; the forged key is ignored, real messages still work
+        host.sendGroup(g, "still me")
+        guest.poll(5)
+        assertTrue(gtexts(guest.group(gg.id)).any { it == "$hu:still me" })
+    }
+
     @Test fun lockoutAfterFiveWrongPasswords() {
         assumeTrue(Relay(server).ping())
         val u = "carol_$tag"

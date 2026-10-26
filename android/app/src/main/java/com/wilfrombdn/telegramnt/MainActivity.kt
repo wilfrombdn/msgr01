@@ -50,6 +50,8 @@ class MainActivity : Activity() {
     private val white = Color.WHITE
     private val dim = Color.parseColor("#8E8E93")
     private val divider = Color.parseColor("#262626")
+    private val faint = Color.parseColor("#5A5A5A")
+    private val panel2 = Color.parseColor("#2A2A2A")
     private val red = Color.parseColor("#E5534B")
     private val avatarColors = listOf("#E17076", "#FAA774", "#A695E7", "#7BC862", "#6EC9CB", "#65AADD", "#EE7AAE")
         .map { Color.parseColor(it) }
@@ -120,6 +122,7 @@ class MainActivity : Activity() {
         when (screen) {
             "chats" -> showChats()
             "chat" -> chatUser?.let { if (Messenger.core.contact(it) != null) fillChat() else showChats() }
+            "group" -> groupId?.let { if (Messenger.core.group(it) != null) fillGroup() else showChats() }
         }
     }
 
@@ -135,6 +138,12 @@ class MainActivity : Activity() {
     }
 
     private fun round(color: Int, r: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(r).toFloat() }
+
+    /** A tappable background that lightens while pressed, so rows clearly read as buttons. */
+    private fun pressable(pressed: Int = Color.parseColor("#24FFFFFF")) = android.graphics.drawable.StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_pressed), android.graphics.drawable.ColorDrawable(pressed))
+        addState(intArrayOf(), android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+    }
     private fun circle(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
 
     private fun icon(res: Int, color: Int = white, size: Int = 24, pad: Int = 12, onClick: (() -> Unit)? = null) = ImageView(this).apply {
@@ -358,9 +367,12 @@ class MainActivity : Activity() {
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val q = search.lowercase()
         val all = core.sorted().filter { q.isEmpty() || it.name.lowercase().contains(q) || it.user.contains(q) }
+        val grps = synchronized(core) { core.groups.toList() }.filter { q.isEmpty() || it.name.lowercase().contains(q) }
         val requests = all.filter { it.status == Contact.ASKING }
-        for (c in requests + (all - requests.toSet())) list.addView(chatRow(c))
-        if (all.isEmpty()) {
+        for (c in requests) list.addView(chatRow(c))
+        val rest = (all - requests.toSet()).map { it.lastTs to chatRow(it) } + grps.map { it.lastTs to groupRow(it) }
+        for ((_, v) in rest.sortedByDescending { it.first }) list.addView(v)
+        if (all.isEmpty() && grps.isEmpty()) {
             list.addView(tv(
                 if (q.isNotEmpty()) "No chats match \"$search\""
                 else "Welcome, ${core.me?.name}!\n\nTap the pencil to add a friend by their @username.\n\nYour username is @${core.me?.user}. Share it so friends can add you.",
@@ -463,6 +475,215 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun groupRow(g: Group): View {
+        val row = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(8), dp(14), dp(8))
+            background = pressable()
+            isClickable = true
+            setOnClickListener { showGroup(g.id) }
+        }
+        // group avatar: initials on a ring so groups read differently from people
+        row.addView(FrameLayout(this).apply {
+            addView(avatar(g.name, 54))
+            addView(icon(R.drawable.ic_more, white, 12, 0).apply {
+                background = circle(Color.parseColor("#3A3A3A")); setPadding(dp(2), dp(2), dp(2), dp(2))
+            }, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.BOTTOM or Gravity.END))
+        })
+        val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+        val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        line1.addView(tv(g.name, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        line1.addView(tv(time(g.lastTs), 13f, dim).apply { setPadding(dp(4), 0, 0, 0) })
+        mid.addView(line1)
+        val last = g.msgs.lastOrNull { it.state != Msg.NOTE }
+        val preview = when {
+            last == null -> "${g.members.size} member" + if (g.members.size != 1) "s" else ""
+            last.mine -> "You: ${last.text}"
+            else -> "${last.sender ?: "?"}: ${last.text}"
+        }
+        val line2 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
+        line2.addView(tv(preview, 15f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (g.unread > 0) line2.addView(tv("${g.unread}", 12.5f, white, true).apply {
+            gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1)); background = round(blue, 11)
+        })
+        mid.addView(line2)
+        row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(row)
+            addView(View(context).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(76) })
+        }
+    }
+
+    // ---------- groups ----------
+
+    private fun showNewGroup() {
+        screen = "newgroup"
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(20), dp(20), dp(20)) }
+        col.addView(tv("New group", 20f, white, true))
+        col.addView(gap(14))
+        val name = field("Group name")
+        col.addView(name, LinearLayout.LayoutParams(-1, -2))
+        col.addView(gap(18))
+        // type: private (add friends) or public (invite link)
+        var public = false
+        val priv = tv("", 15f, white)
+        val pub = tv("", 15f, white)
+        fun paint() {
+            priv.text = "Private — only friends you add can join"
+            pub.text = "Public — anyone with the invite link can join"
+            priv.setTextColor(if (!public) ink else white); priv.background = round(if (!public) white else panel2, 8)
+            pub.setTextColor(if (public) ink else white); pub.background = round(if (public) white else panel2, 8)
+        }
+        for (t in listOf(priv, pub)) { t.gravity = Gravity.CENTER; t.setPadding(dp(14), dp(12), dp(14), dp(12)) }
+        priv.setOnClickListener { public = false; paint() }
+        pub.setOnClickListener { public = true; paint() }
+        paint()
+        col.addView(priv, LinearLayout.LayoutParams(-1, -2)); col.addView(gap(8)); col.addView(pub, LinearLayout.LayoutParams(-1, -2))
+        col.addView(gap(18))
+        // friend picker (for private)
+        val picked = mutableSetOf<String>()
+        val friends = synchronized(Messenger.core) { Messenger.core.contacts.filter { it.canChat } }
+        if (friends.isNotEmpty()) {
+            col.addView(tv("Add friends", 14f, dim, true)); col.addView(gap(6))
+            for (c in friends) col.addView(LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(8), 0, dp(8))
+                background = pressable()
+                val check = tv("○", 20f, dim)
+                addView(avatar(c.name, 38, c.avatar))
+                addView(tv(c.name, 16f, white).apply { setPadding(dp(12), 0, 0, 0) }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(check)
+                setOnClickListener {
+                    if (picked.remove(c.user)) { check.text = "○"; check.setTextColor(dim) }
+                    else { picked.add(c.user); check.text = "●"; check.setTextColor(blue) }
+                }
+            })
+        }
+        col.addView(gap(20))
+        col.addView(mainButton("Create group") {
+            val n = name.text.toString().trim()
+            if (n.isEmpty()) { toast("Give the group a name"); return@mainButton }
+            Messenger.run({ val g = Messenger.core.createGroup(n, public, if (public) emptyList() else picked.toList()); Messenger.kick(); groupToOpen = g.id }, {
+                groupToOpen?.let { showGroup(it) }
+            }) { e -> toast(errorText(e)) }
+        }, LinearLayout.LayoutParams(-1, -2))
+        setContentView(page(topBar("New Group", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
+    }
+
+    private var groupToOpen: String? = null
+
+    private fun joinGroupPrompt() {
+        val box = field("Paste the group invite link")
+        (getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString())
+            ?.let { if (it.contains("msgr01://group")) box.setText(it) }
+        popup("Join a group", "Paste a public group's invite link.", box, "Cancel" to dim, "Join" to white) { i ->
+            if (i == 1) Messenger.run({ val g = Messenger.core.joinGroupLink(box.text.toString().trim()); Messenger.kick(); groupToOpen = g.id }, {
+                groupToOpen?.let { showGroup(it) }
+            }) { e -> toast(errorText(e)) }
+        }
+    }
+
+    private var groupId: String? = null
+    private var groupBubbles: LinearLayout? = null
+    private var groupScroller: ScrollView? = null
+    private var groupTop: LinearLayout? = null
+    private var groupShown = -1
+
+    private fun showGroup(id: String) {
+        val g = Messenger.core.group(id) ?: return showChats()
+        screen = "group"; groupId = id; chatUser = null
+        Messenger.core.openChat = "g:$id"
+        groupShown = -1
+        groupTop = LinearLayout(this)
+        groupBubbles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        groupScroller = ScrollView(this).apply { addView(groupBubbles); isFillViewport = true }
+        val bar2 = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(listBg); setPadding(dp(14), dp(4), dp(6), dp(4))
+        }
+        val box = EditText(this).apply {
+            hint = "Message"; setHintTextColor(dim); setTextColor(white); textSize = look.msg; background = null; maxLines = 5
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        bar2.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
+        bar2.addView(icon(R.drawable.ic_send, white) {
+            val t = box.text.toString().trim(); if (t.isEmpty()) return@icon
+            if (t.length > Core.MAX_TEXT) { toast("Too long"); return@icon }
+            box.setText(""); val g2 = Messenger.core.group(id) ?: return@icon
+            Messenger.io.execute { Messenger.core.sendGroup(g2, t) }
+        })
+        setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setBackgroundColor(wall); fitsSystemWindows = true
+            addView(groupTop, LinearLayout.LayoutParams(-1, -2))
+            addView(groupScroller, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(bar2, LinearLayout.LayoutParams(-1, -2))
+        })
+        fillGroup()
+    }
+
+    private fun fillGroup() {
+        val g = groupId?.let { Messenger.core.group(it) } ?: return
+        if (g.unread != 0) { g.unread = 0; Messenger.save() }
+        groupTop?.removeAllViews()
+        groupTop?.addView(topBar(g.name, "${g.members.size} member" + (if (g.members.size != 1) "s" else "") + if (g.public) " · public" else "",
+            LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; addView(icon(R.drawable.ic_back) { showChats() }); addView(avatar(g.name, 40)) },
+            icon(R.drawable.ic_more) { groupMenu(g) }), LinearLayout.LayoutParams(-1, -2))
+        val list = groupBubbles ?: return
+        val msgs = synchronized(Messenger.core) { g.msgs.takeLast(300) }
+        list.removeAllViews()
+        list.addView(note("Messages in this group are end-to-end encrypted."))
+        for (m in msgs) list.addView(if (m.state == Msg.NOTE) note(m.text) else groupBubble(g, m))
+        if (msgs.size != groupShown) { groupShown = msgs.size; groupScroller?.post { groupScroller?.fullScroll(View.FOCUS_DOWN) } }
+    }
+
+    private fun groupBubble(g: Group, m: Msg): View {
+        val wrap = LinearLayout(this).apply { gravity = if (m.mine) Gravity.END else Gravity.START; setPadding(0, dp(2), 0, dp(2)) }
+        val fill = if (m.mine) look.out else look.inn
+        val tcol = Look.textOn(fill)
+        val b = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = round(fill, if (look.square) 0 else 14)
+            setPadding(dp(10), dp(6), dp(10), dp(5))
+        }
+        if (!m.mine) m.sender?.let { su ->
+            b.addView(tv("@$su", 13f, avatarColors[Math.floorMod(su.hashCode(), avatarColors.size)], true))
+        }
+        b.addView(tv(m.text, 16f, tcol).apply { textSize = look.msg; setTextIsSelectable(true) })
+        val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
+        val mc = (tcol and 0x00FFFFFF) or (0x99 shl 24)
+        meta.addView(tv(time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
+        if (m.mine) when (m.state) {
+            Msg.SENT -> meta.addView(icon(R.drawable.ic_check, mc, 14, 1))
+            Msg.SENDING -> meta.addView(tv("🕓", 11f, mc))
+            Msg.FAILED -> meta.addView(tv("  not sent · tap", 12f, red).apply { setOnClickListener { Messenger.io.execute { Messenger.core.deliverGroup(g, m) } } })
+        }
+        b.addView(meta, LinearLayout.LayoutParams(-1, -2))
+        wrap.addView(b, LinearLayout.LayoutParams(-2, -2).apply { if (m.mine) leftMargin = dp(56) else rightMargin = dp(56) })
+        return wrap
+    }
+
+    private fun groupMenu(g: Group) {
+        val items = mutableListOf<Pair<String, () -> Unit>>()
+        if (g.public) items.add("Copy invite link" to {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("group", Messenger.core.groupInviteLink(g)))
+            toast("Invite link copied")
+        }) else items.add("Add a friend" to { addToGroup(g) })
+        items.add("Leave group" to {
+            popup("Leave \"${g.name}\"?", "You'll stop getting its messages. You can be re-invited later.", null, "Cancel" to dim, "Leave" to red) { i ->
+                if (i == 1) { Messenger.io.execute { Messenger.core.leaveGroup(g) }; showChats() }
+            }
+        })
+        dropdown(groupTop!!.getChildAt(0), Gravity.END, *items.toTypedArray())
+    }
+
+    private fun addToGroup(g: Group) {
+        val friends = synchronized(Messenger.core) { Messenger.core.contacts.filter { it.canChat && it.user !in g.members } }
+        if (friends.isEmpty()) { toast("No friends left to add"); return }
+        pickList("Add to ${g.name}", null, friends.map { it.name }.toTypedArray()) { i ->
+            Messenger.run({ Messenger.core.inviteToGroup(g, friends[i].user); Messenger.kick() }, { fillGroup() }) { e -> toast(errorText(e)) }
+        }
+    }
+
     // ---------- add a friend ----------
 
     private fun showNewChat() {
@@ -553,7 +774,7 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
-        input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachMenu(c) } })
+        input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachMenu(c, v) } })
         input.addView(icon(R.drawable.ic_send, white) {
             val t = box.text.toString().trim()
             if (t.isEmpty()) return@icon
@@ -733,27 +954,50 @@ class MainActivity : Activity() {
             setBackgroundColor(listBg)
             fitsSystemWindows = true
         }
-        // header: avatar + name + @username (tap -> settings)
+        // header: big avatar, name + @username, tappable to open your profile
         col.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(bar)
-            setPadding(dp(18), dp(22), dp(18), dp(16))
-            addView(avatar(me?.name ?: "", 60, me?.avatar))
-            addView(tv(me?.name ?: "", 18f, white, true).apply { setPadding(0, dp(10), 0, 0) })
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.parseColor("#2A2A2A"), bar))
+            setPadding(dp(20), dp(26), dp(20), dp(18))
+            addView(avatar(me?.name ?: "", 64, me?.avatar))
+            addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(12), 0, 0)
+                addView(tv(me?.name ?: "", 18f, white, true), LinearLayout.LayoutParams(0, -2, 1f))
+                addView(tv("›", 26f, dim))
+            })
             addView(tv("@${me?.user ?: ""}", 14f, dim))
+            isClickable = true
+            foreground = pressable()
             setOnClickListener { d.closeDrawer(GravityCompat.START); showSettings() }
         })
-        fun item(res: Int, label: String, go: () -> Unit) = col.addView(LinearLayout(this).apply {
+        fun item(res: Int, label: String, sub: String? = null, go: () -> Unit) = col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(16))
-            addView(icon(res, dim, 22, 0))
-            addView(tv(label, 16f, white).apply { setPadding(dp(22), 0, 0, 0) })
+            setPadding(dp(22), dp(15), dp(20), dp(15))
+            background = pressable()
+            isClickable = true
+            addView(icon(res, dim, 23, 0))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(26), 0, 0, 0)
+                addView(tv(label, 16.5f, white))
+                sub?.let { addView(tv(it, 12.5f, dim).apply { setPadding(0, dp(1), 0, 0) }) }
+            })
             setOnClickListener { d.closeDrawer(GravityCompat.START); go() }
         })
+        fun divider() = col.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(6) })
+        col.addView(gap(6))
         item(R.drawable.ic_edit, "New Message") { showNewChat() }
-        item(R.drawable.ic_lock, "Appearance") { showAppearance() }
-        item(R.drawable.ic_more, "Settings") { showSettings() }
-        return ScrollView(this).apply { setBackgroundColor(listBg); addView(col) }
+        item(R.drawable.ic_more, "New Group") { showNewGroup() }
+        item(R.drawable.ic_search, "Join Group", "with an invite link") { joinGroupPrompt() }
+        divider()
+        item(R.drawable.ic_lock, "Appearance", "colours, text size, bubbles") { showAppearance() }
+        item(R.drawable.ic_menu, "Settings") { showSettings() }
+        col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        col.addView(tv("msgr01 ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
+            setPadding(dp(22), dp(14), dp(22), dp(16))
+        })
+        return LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(listBg); addView(col, LinearLayout.LayoutParams(-1, -1)) }
     }
 
     /** A plain dark rectangle that drops down right under [anchor]. */
@@ -828,41 +1072,38 @@ class MainActivity : Activity() {
         return if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
     }
 
-    private fun attachMenu(c: Contact) {
+    private fun attachMenu(c: Contact, anchor: View) {
         attachTo = c.user
-        // drop the keyboard so the sheet isn't hidden behind it, then slide up from the bottom
-        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(window.decorView.windowToken, 0)
-        val sheet = android.app.Dialog(this)
-        sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
-        fun row(res: Int, label: String, go: () -> Unit) = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(24), dp(16), dp(24), dp(16))
-            addView(icon(res, white, 24, 0))
-            addView(tv(label, 17f, white).apply { setPadding(dp(20), 0, 0, 0) })
-            setOnClickListener { sheet.dismiss(); go() }
-        }
-        val col = LinearLayout(this).apply {
+        val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = round(bar, 14)
-            setPadding(0, dp(10), 0, dp(14))
-            addView(tv("Send", 14f, dim, true).apply { setPadding(dp(24), dp(6), dp(24), dp(6)) })
-            addView(row(R.drawable.ic_attach, "Photo") {
-                val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
-                else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
-                @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_PHOTO)
-            })
-            addView(row(R.drawable.ic_file, "File") {
-                val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
-                @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_FILE)
-            })
+            background = round(menuBg, 10)
+            elevation = dp(10).toFloat()
+            setPadding(0, dp(6), 0, dp(6))
         }
-        sheet.setContentView(LinearLayout(this).apply { setPadding(dp(8), 0, dp(8), dp(8)); addView(col, LinearLayout.LayoutParams(-1, -2)) })
-        sheet.window?.apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-            setGravity(Gravity.BOTTOM)
-            setLayout(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
+        val pw = android.widget.PopupWindow(panel, dp(190), ViewGroup.LayoutParams.WRAP_CONTENT, true)
+        fun row(res: Int, label: String, go: () -> Unit) = panel.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(18), dp(14), dp(20), dp(14))
+            background = pressable()
+            isClickable = true
+            addView(icon(res, white, 22, 0))
+            addView(tv(label, 16f, white).apply { setPadding(dp(16), 0, 0, 0) })
+            setOnClickListener { pw.dismiss(); go() }
+        })
+        row(R.drawable.ic_attach, "Media") {
+            val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
+            else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
+            @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_PHOTO)
         }
-        sheet.show()
+        row(R.drawable.ic_file, "File") {
+            val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_FILE)
+        }
+        pw.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        pw.isOutsideTouchable = true
+        // expand upward, just above the clip
+        panel.measure(View.MeasureSpec.makeMeasureSpec(dp(190), View.MeasureSpec.EXACTLY), View.MeasureSpec.UNSPECIFIED)
+        pw.showAsDropDown(anchor, -dp(130), -(anchor.height + panel.measuredHeight + dp(6)))
     }
 
     private fun jpeg(b: android.graphics.Bitmap, maxSide: Int, quality: Int): ByteArray {
