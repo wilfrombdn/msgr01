@@ -639,10 +639,10 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(listBg); setPadding(dp(14), dp(4), dp(6), dp(4))
         }
         val box = EditText(this).apply {
-            hint = "Message"; setHintTextColor(dim); setTextColor(white); textSize = look.msg; background = null; maxLines = 5
-            setHorizontallyScrolling(false)
+            hint = "Message"; setHintTextColor(dim); setTextColor(white); textSize = look.msg; background = null
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setHorizontallyScrolling(false); maxLines = 5   // after inputType, so the box still wraps
         }
         fun doSend() {
             val t = box.text.toString().trim(); if (t.isEmpty()) return
@@ -829,11 +829,12 @@ class MainActivity : Activity() {
             setTextColor(white)
             textSize = look.msg
             background = null
-            // wraps to several lines, but Enter sends (no multi-line flag) so you can keep typing
-            maxLines = 5
-            setHorizontallyScrolling(false)
+            // no multi-line flag => Enter sends; but that also forces single-line, so re-enable
+            // wrapping with maxLines/horizontallyScrolling AFTER inputType (order matters)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setHorizontallyScrolling(false)
+            maxLines = 5
         }
         fun doSend() {
             val t = box.text.toString().trim()
@@ -1049,7 +1050,7 @@ class MainActivity : Activity() {
             addView(tv("›", 26f, dim))
             isClickable = true
             foreground = pressable()
-            setOnClickListener { d.closeDrawer(GravityCompat.START); showSettings() }
+            setOnClickListener { d.closeDrawer(GravityCompat.START); showProfile() }
         })
         fun item(res: Int, label: String, sub: String? = null, go: () -> Unit) = col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -1408,7 +1409,7 @@ class MainActivity : Activity() {
     private fun setupRecovery(uri: android.net.Uri) {
         takePersist(uri)
         Messenger.recoveryUri = uri.toString()
-        Messenger.run({ Messenger.writeRecovery() }, { showSettings(); toast("Recovery backup on. Keep this file safe.") }) { toast("Couldn't write the file") }
+        Messenger.run({ Messenger.writeRecovery() }, { showProfile(); toast("Recovery backup on. Keep this file safe.") }) { toast("Couldn't write the file") }
     }
 
     private fun pickRecoveryToRestore() {
@@ -1442,7 +1443,7 @@ class MainActivity : Activity() {
     private fun photoMenu(anchor: View) {
         val choose = "Choose a photo" to { pickPhoto() }
         if (Messenger.core.me?.avatar == null) dropdown(anchor, Gravity.START, choose)
-        else dropdown(anchor, Gravity.START, choose, "Remove photo" to { Messenger.run({ Messenger.core.setAvatar(null) }, { showSettings() }) })
+        else dropdown(anchor, Gravity.START, choose, "Remove photo" to { Messenger.run({ Messenger.core.setAvatar(null) }, { showProfile() }) })
     }
 
     private fun pickPhoto() {
@@ -1495,11 +1496,11 @@ class MainActivity : Activity() {
             addView(tv("Cancel", 16f, white, true).apply {
                 gravity = Gravity.CENTER
                 setPadding(dp(12), dp(14), dp(12), dp(14))
-                setOnClickListener { showSettings() }
+                setOnClickListener { showProfile() }
             }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(mainButton("Done") {
                 val jpeg = crop.crop()
-                Messenger.run({ Messenger.core.setAvatar(jpeg) }, { showSettings() }) { e -> toast(errorText(e)); showSettings() }
+                Messenger.run({ Messenger.core.setAvatar(jpeg) }, { showProfile() }) { e -> toast(errorText(e)); showProfile() }
             }, LinearLayout.LayoutParams(0, -2, 1f))
         }
         setContentView(LinearLayout(this).apply {
@@ -1517,72 +1518,68 @@ class MainActivity : Activity() {
 
     // ---------- settings ----------
 
-    private fun showSettings() {
-        screen = "settings"
+    /** A tappable settings/profile row: title + optional subtitle, with press feedback. */
+    private fun settingRow(title: String, sub: String? = null, color: Int = white, onClick: (View) -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(20), dp(14), dp(20), dp(14))
+        background = pressable()
+        isClickable = true
+        addView(tv(title, 16f, color))
+        sub?.let { addView(tv(it, 13.5f, dim)) }
+        setOnClickListener { v -> onClick(v) }
+    }
+
+    private fun settingSwitch(label: String, on: Boolean, change: (Boolean) -> Unit) = Switch(this).apply {
+        text = label
+        setTextColor(white)
+        textSize = 16f * look.ui
+        isChecked = on
+        val st = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+        thumbTintList = android.content.res.ColorStateList(st, intArrayOf(white, Color.parseColor("#9AA4AE")))
+        trackTintList = android.content.res.ColorStateList(st, intArrayOf(Color.parseColor("#80FFFFFF"), Color.parseColor("#3A4654")))
+        setPadding(dp(20), dp(14), dp(20), dp(14))
+        setOnCheckedChangeListener { _, checked -> change(checked) }
+    }
+
+    private fun settingNote(text: String) = tv(text, 13.5f, dim).apply { setPadding(dp(20), 0, dp(20), dp(10)) }
+
+    // ---------- your profile (personal) ----------
+
+    private fun showProfile() {
+        screen = "profile"
         val me = Messenger.core.me ?: return
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(bar)
-            setPadding(dp(20), dp(12), dp(20), dp(20))
-            addView(avatar(me.name, 64, me.avatar).apply { setOnClickListener { v -> photoMenu(v) } })
+            setPadding(dp(20), dp(16), dp(20), dp(22))
+            addView(avatar(me.name, 72, me.avatar).apply { setOnClickListener { v -> photoMenu(v) } })
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(16), 0, 0, 0)
-                addView(tv(me.name, 20f, white, true))
-                addView(tv("@${me.user}", 15f, dim))
+                addView(tv(me.name, 21f, white, true))
+                addView(tv("@${me.user}", 15f, dim).apply { setPadding(0, dp(2), 0, 0) })
             })
         })
-        fun row(title: String, sub: String? = null, color: Int = white, onClick: (View) -> Unit) = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(14), dp(20), dp(14))
-            addView(tv(title, 16f, color))
-            sub?.let { addView(tv(it, 13.5f, dim)) }
-            setOnClickListener { v -> onClick(v) }
-        }
-        col.addView(gap(10))
-        col.addView(row(if (me.avatar == null) "Set Profile Photo" else "Change Profile Photo", "Only your friends can see it") { v -> photoMenu(v) })
-        col.addView(row("Appearance", "Bubble colours, text size, corners") { showAppearance() })
-        col.addView(Switch(this).apply {
-            text = "Get messages when the app is closed"
-            setTextColor(white)
-            textSize = 16f * look.ui
-            isChecked = Messenger.background
-            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-            thumbTintList = android.content.res.ColorStateList(states, intArrayOf(white, Color.parseColor("#9AA4AE")))
-            trackTintList = android.content.res.ColorStateList(states, intArrayOf(Color.parseColor("#80FFFFFF"), Color.parseColor("#3A4654")))
-            setPadding(dp(20), dp(14), dp(20), dp(14))
-            setOnCheckedChangeListener { _, on -> Messenger.background = on; Messenger.settingsChanged() }
+        col.addView(gap(8))
+        col.addView(settingRow(if (me.avatar == null) "Set profile photo" else "Change profile photo", "Only your friends can see it") { v -> photoMenu(v) })
+        col.addView(settingRow("Share username", "Invite a friend to add you") {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                .putExtra(Intent.EXTRA_TEXT, "Add me on MSNGR: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
         })
-        col.addView(tv("Keeps a small \"connected\" notification. No Google push service is used.", 13.5f, dim).apply {
-            setPadding(dp(20), 0, dp(20), dp(10))
-        })
-        col.addView(Switch(this).apply {
-            text = "Read receipts"
-            setTextColor(white)
-            textSize = 16f * look.ui
-            isChecked = Messenger.core.readReceipts
-            val st = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-            thumbTintList = android.content.res.ColorStateList(st, intArrayOf(white, Color.parseColor("#9AA4AE")))
-            trackTintList = android.content.res.ColorStateList(st, intArrayOf(Color.parseColor("#80FFFFFF"), Color.parseColor("#3A4654")))
-            setPadding(dp(20), dp(14), dp(20), dp(14))
-            setOnCheckedChangeListener { _, on -> Messenger.core.readReceipts = on; Messenger.settingsChanged() }
-        })
-        col.addView(tv("When on, friends see when you've read their messages, and you see when they've read yours.", 13.5f, dim).apply {
-            setPadding(dp(20), 0, dp(20), dp(10))
-        })
-        col.addView(row("Cloud backup", if (me.cloudBackup) "On: you can log in on a new phone. The backup is locked with your password; the server can't read it." else "Off: this account only works on this phone, and the server keeps nothing to restore.") {
+        col.addView(gap(8))
+        col.addView(settingRow("Cloud backup", if (me.cloudBackup) "On: you can log in on a new phone. The backup is locked with your password; the server can't read it." else "Off: this account only works on this phone, and the server keeps nothing to restore.") {
             if (me.cloudBackup) popup("Turn off cloud backup?",
                 "The server will wipe its locked copy of your keys and friends. You'll no longer be able to log in on another phone or after reinstalling. Nothing will be left on the server to hand over.", null,
                 "Cancel" to dim, "Turn off" to red) { i ->
-                if (i == 1) Messenger.run({ Messenger.core.setCloudBackup(false) }, { showSettings() }) { e -> toast(errorText(e)) }
+                if (i == 1) Messenger.run({ Messenger.core.setCloudBackup(false) }, { showProfile() }) { e -> toast(errorText(e)) }
             } else popup("Turn on cloud backup?",
                 "A copy of your keys and friends, locked with your password, is kept on the server so you can log in on a new phone.", null,
                 "Cancel" to dim, "Turn on" to white) { i ->
-                if (i == 1) Messenger.run({ Messenger.core.setCloudBackup(true) }, { showSettings() }) { e -> toast(errorText(e)) }
+                if (i == 1) Messenger.run({ Messenger.core.setCloudBackup(true) }, { showProfile() }) { e -> toast(errorText(e)) }
             }
         })
-        col.addView(row("Recovery backup", if (Messenger.recoveryUri.isEmpty()) "Off. Save an encrypted backup file so your chats survive reinstalling the app." else "On. Your chats are saved, encrypted, to the file you chose. The server still keeps nothing.") {
+        col.addView(settingRow("Recovery backup", if (Messenger.recoveryUri.isEmpty()) "Off. Save an encrypted backup file so your chats survive reinstalling the app." else "On. Your chats are saved, encrypted, to the file you chose. The server still keeps nothing.") {
             if (Messenger.recoveryUri.isEmpty()) popup("Turn on recovery backup",
                 "Here's exactly what this does:\n\n" +
                 "• MSNGR keeps a copy of all your chats in one file and keeps it up to date as you message.\n\n" +
@@ -1593,11 +1590,12 @@ class MainActivity : Activity() {
                 "Not now" to dim, "Choose file" to white) { i -> if (i == 1) chooseRecoveryFile() }
             else popup("Recovery backup", "Your chats are being saved to your chosen file, encrypted with your password. The server keeps nothing.", null,
                 "Turn off" to red, "Change file" to white) { i ->
-                if (i == 0) { Messenger.recoveryUri = ""; Messenger.settingsChanged(); showSettings() }
+                if (i == 0) { Messenger.recoveryUri = ""; Messenger.settingsChanged(); showProfile() }
                 if (i == 1) chooseRecoveryFile()
             }
         })
-        col.addView(row("Log out", "Your chats stay locked on this phone for when you log back in.") {
+        col.addView(gap(8))
+        col.addView(settingRow("Log out", "Your chats stay locked on this phone for when you log back in.") {
             popup("Log out?", "You can log back in any time with your username and password.", null,
                 "Cancel" to dim, "Log out" to red) { i ->
                 if (i == 1) {
@@ -1607,7 +1605,7 @@ class MainActivity : Activity() {
                 }
             }
         })
-        col.addView(row("Delete account", "Removes @${me.user} from the server for good.", red) {
+        col.addView(settingRow("Delete account", "Removes @${me.user} from the server for good.", red) {
             val pass = field("Password", password = true)
             popup("Delete your account?", "This permanently removes @${me.user} and all your chats. The server keeps no backup and nobody — not even us — can recover anything. Type your password to confirm.", pass,
                 "Cancel" to dim, "Delete" to red) { i ->
@@ -1617,6 +1615,21 @@ class MainActivity : Activity() {
                 }) { e -> toast(errorText(e)) }
             }
         })
+        setContentView(page(topBar("Profile", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
+    }
+
+    // ---------- app settings ----------
+
+    private fun showSettings() {
+        screen = "settings"
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(gap(8))
+        col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
+        col.addView(gap(8))
+        col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged() })
+        col.addView(settingNote("Keeps a small \"connected\" notification. No Google push service is used."))
+        col.addView(settingSwitch("Read receipts", Messenger.core.readReceipts) { on -> Messenger.core.readReceipts = on; Messenger.settingsChanged() })
+        col.addView(settingNote("When on, friends see when you've read their messages, and you see when they've read yours."))
         col.addView(gap(20))
         col.addView(tv("MSNGR ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
             13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })

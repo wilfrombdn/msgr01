@@ -97,6 +97,7 @@ class ScreenshotTest {
         call(a, "showChat", "alex_m"); shoot(a, "3-request")
         call(a, "showNewChat"); shoot(a, "4-add-friend")
         call(a, "showSettings"); shoot(a, "5-settings")
+        call(a, "showProfile"); shoot(a, "5b-profile")
         Messenger.look.out = Look.BUBBLES[3].second; Messenger.look.square = true; Messenger.look.msg = 18f
         call(a, "showAppearance"); shoot(a, "7-appearance")
         call(a, "showChat", "sam_r"); shoot(a, "8-chat-custom")
@@ -114,5 +115,22 @@ class ScreenshotTest {
         Messenger.initForPreview(fakeCore(signedIn = false))
         call(a, "showWelcome"); shoot(a, "0-welcome")
         call(a, "showSignup"); shoot(a, "0b-signup")
+    }
+
+    /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */
+    @Test fun composerWraps() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChat", "sam_r")
+        shadowOf(Looper.getMainLooper()).idle()
+        val box = findEditText(a.window.decorView) { it.hint?.toString() == "Message" }
+        requireNotNull(box) { "message box not found" }
+        assert(box.maxLines == 5) { "composer should wrap to 5 lines, but maxLines=${box.maxLines}" }
+    }
+
+    private fun findEditText(v: android.view.View, match: (android.widget.EditText) -> Boolean): android.widget.EditText? {
+        if (v is android.widget.EditText && match(v)) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findEditText(v.getChildAt(i), match)?.let { return it }
+        return null
     }
 }
