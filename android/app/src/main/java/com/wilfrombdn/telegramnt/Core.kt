@@ -1,0 +1,764 @@
+package com.wilfrombdn.telegramnt
+
+import com.google.crypto.tink.KeysetHandle
+import org.json.JSONArray
+import org.json.JSONObject
+import org.signal.libsignal.protocol.IdentityKey
+import org.signal.libsignal.protocol.IdentityKeyPair
+import org.signal.libsignal.protocol.SessionBuilder
+import org.signal.libsignal.protocol.SessionCipher
+import org.signal.libsignal.protocol.SignalProtocolAddress
+import org.signal.libsignal.protocol.ecc.ECPublicKey
+import org.signal.libsignal.protocol.fingerprint.NumericFingerprintGenerator
+import org.signal.libsignal.protocol.kem.KEMPublicKey
+import org.signal.libsignal.protocol.message.CiphertextMessage
+import org.signal.libsignal.protocol.message.PreKeySignalMessage
+import org.signal.libsignal.protocol.message.SignalMessage
+import org.signal.libsignal.protocol.state.PreKeyBundle
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.util.Base64
+
+class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var state: Int) {
+    /** Attachment: id (on server), k (key), n (name), m (type), s (size), th (preview), local (saved here). */
+    var file: JSONObject? = null
+    /** Disappearing messages: epoch ms when this is wiped from both phones, or 0 = never. */
+    var expires: Long = 0
+
+    fun json(): JSONObject = JSONObject().put("id", id).put("mine", mine).put("text", text).put("ts", ts).put("state", state)
+        .put("file", file).put("expires", expires)
+
+    companion object {
+        const val SENDING = 0
+        const val SENT = 1
+        const val RECEIVED = 2
+        const val FAILED = 3
+        const val NOTE = 4 // grey line in the middle, e.g. "You are now friends"
+        fun from(o: JSONObject) = Msg(o.getString("id"), o.getBoolean("mine"), o.getString("text"), o.getLong("ts"), o.getInt("state"))
+            .also { it.file = o.optJSONObject("file"); it.expires = o.optLong("expires") }
+    }
+}
+
+/**
+ * A friend (or friend request). Each friendship has its own pair of mailboxes,
+ * so the server can't tell from the addresses who is talking to whom.
+ */
+class Contact(
+    val user: String,
+    var name: String,
+    var status: Int,
+    val myToken: String,
+    var theirAddr: String?,
+    val theirEnc: String,
+    val theirSig: String,
+    var verified: Boolean = false,
+    var unread: Int = 0,
+    val created: Long = System.currentTimeMillis(),
+    val msgs: MutableList<Msg> = mutableListOf(),
+    var avatar: ByteArray? = null,
+    var theirInbox: String? = null,   // where message requests go before they accept
+    var waitingForAdd: Boolean = false, // they accepted my messages but didn't add me as a friend
+    var theirIdent: String? = null,     // their Signal identity key, from the directory
+    var ttl: Int = 0,                   // disappearing-messages timer in seconds (0 = off), shared by both sides
+) {
+    val myAddr get() = Crypto.addressOf(myToken)
+    val lastTs get() = msgs.lastOrNull()?.ts ?: created
+    val canChat get() = status == Contact.FRIENDS || status == Contact.CHATTING
+
+    fun json(withMsgs: Boolean): JSONObject = JSONObject()
+        .put("user", user).put("name", name).put("status", status).put("myToken", myToken)
+        .put("theirAddr", theirAddr).put("theirEnc", theirEnc).put("theirSig", theirSig)
+        .put("verified", verified).put("created", created).put("theirInbox", theirInbox).put("waitingForAdd", waitingForAdd).put("theirIdent", theirIdent).put("ttl", ttl)
+        .apply {
+            if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() }))
+                .put("avatar", avatar?.let { Base64.getEncoder().encodeToString(it) })
+        }
+
+    companion object {
+        const val ASKED = 0    // I sent a friend request
+        const val ASKING = 1   // they sent me one
+        const val FRIENDS = 2
+        const val CHATTING = 3 // message request accepted, but not friends
+
+        fun from(o: JSONObject): Contact {
+            val c = Contact(
+                o.getString("user"), o.getString("name"), o.getInt("status"), o.getString("myToken"),
+                o.optString("theirAddr").ifEmpty { null }, o.getString("theirEnc"), o.getString("theirSig"),
+                o.optBoolean("verified"), o.optInt("unread"), o.optLong("created"),
+            )
+            val a = o.optJSONArray("msgs") ?: JSONArray()
+            for (i in 0 until a.length()) c.msgs.add(Msg.from(a.getJSONObject(i)))
+            c.theirInbox = o.optString("theirInbox").ifEmpty { null }
+            c.waitingForAdd = o.optBoolean("waitingForAdd")
+            c.theirIdent = o.optString("theirIdent").ifEmpty { null }
+            c.ttl = o.optInt("ttl")
+            c.avatar = o.optString("avatar").takeIf { it.isNotEmpty() }?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
+            return c
+        }
+    }
+}
+
+/** The signed-in account. The keys and backup key stay on this phone. */
+class Me(
+    val user: String,
+    var name: String,
+    var device: String,
+    val enc: KeysetHandle,
+    val sig: KeysetHandle,
+    val inboxToken: String,
+    val backupKey: ByteArray,
+    var avatar: ByteArray? = null,
+    var signal: SignalStore = SignalStore.create(),
+    var keysPublished: Boolean = false,
+    var cloudBackup: Boolean = true, // false = account only works on this phone, server keeps no backup
+) {
+    val address get() = SignalProtocolAddress(user, 1)
+    val inboxAddr get() = Crypto.addressOf(inboxToken)
+    val sigPub: ByteArray get() = Crypto.publicBytes(sig)
+}
+
+class UserError(msg: String) : IOException(msg)
+
+/**
+ * All the chat rules, with no Android in it, so it can be tested on a computer.
+ * Network calls happen on the caller's thread; state changes are synchronized.
+ */
+class Core(server: String) {
+    var relay = Relay(server)
+    @Volatile var me: Me? = null
+    val contacts = mutableListOf<Contact>()
+
+    /** Friend whose chat is on screen (no unread count for it). */
+    @Volatile var openChat: String? = null
+    @Volatile var backupDirty = false
+    var onChange: () -> Unit = {}
+    var onNew: (Contact) -> Unit = {}
+    /** Where encrypted attachments are kept on this device (Android: files folder; tests: memory). */
+    var saveBlob: (String, ByteArray) -> Unit = { _, _ -> }
+    var loadBlob: (String) -> ByteArray? = { null }
+    private val toFetch = mutableListOf<Msg>()
+
+    private val acks = mutableSetOf<String>()
+
+    @Synchronized fun contact(user: String) = contacts.firstOrNull { it.user == user }
+    @Synchronized fun sorted(): List<Contact> = contacts.sortedByDescending { it.lastTs }
+
+    // ---------- account ----------
+
+    fun signup(user: String, password: String, name: String) {
+        checkUsername(user)
+        if (password.length < 10) throw UserError("Password needs at least 10 characters")
+        val keys = Crypto.passwordKeys(user, password)
+        val m = Me(user, name.trim().take(60).ifEmpty { user }, "", Crypto.newKeyset(Crypto.ENC_TEMPLATE),
+            Crypto.newKeyset(Crypto.SIG_TEMPLATE), Crypto.randomHex(), keys.backup)
+        try {
+            m.device = relay.signup(user, keys.auth, Crypto.publicBytes(m.enc), m.sigPub, m.inboxToken, lockedBackup(m, emptyList()))
+        } catch (e: Relay.RelayError) {
+            throw UserError(if (e.code == 409) "That username is taken" else e.reason.ifEmpty { "Server error" })
+        }
+        synchronized(this) { me = m; contacts.clear(); acks.clear() }
+        runCatching { publishKeys(m, replace = true) }
+        onChange()
+    }
+
+    fun login(user: String, password: String) {
+        checkUsername(user)
+        val keys = Crypto.passwordKeys(user, password)
+        val (device, locked) = try {
+            relay.login(user, keys.auth)
+        } catch (e: Relay.RelayError) {
+            throw UserError(if (e.code == 403) e.reason.replaceFirstChar { it.uppercase() } else "Server error")
+        }
+        if (locked.isEmpty()) throw UserError("This account keeps no cloud backup, so it can only be used on the phone that made it.")
+        val plain = Crypto.unlockBackup(keys.backup, user, locked) ?: throw UserError("Couldn't open your backup")
+        val o = JSONObject(String(plain))
+        val enc = Crypto.parsePrivate(unb64(o.getString("enc")), Crypto.ENC_TEMPLATE) ?: throw UserError("Backup damaged")
+        val sig = Crypto.parsePrivate(unb64(o.getString("sig")), Crypto.SIG_TEMPLATE) ?: throw UserError("Backup damaged")
+        val m = Me(user, o.optString("name", user), device, enc, sig, o.getString("inbox"), keys.backup,
+            o.optString("avatar").takeIf { it.isNotEmpty() }?.let { unb64(it) })
+        // Same Signal identity as before (so safety codes don't change), but fresh prekeys and sessions.
+        o.optString("sident").takeIf { it.isNotEmpty() }?.let { m.signal = SignalStore(IdentityKeyPair(unb64(it)), o.getInt("sreg")) }
+        publishKeys(m, replace = true)
+        val list = o.optJSONArray("contacts") ?: JSONArray()
+        synchronized(this) {
+            me = m
+            contacts.clear()
+            acks.clear()
+            for (i in 0 until list.length()) contacts.add(Contact.from(list.getJSONObject(i)))
+            for (c in contacts) if (c.status == Contact.FRIENDS) c.msgs.add(note("Chat history stays on your old phone"))
+        }
+        onChange()
+        // Friends' photos aren't in the backup: send ours and ask for theirs. This also starts
+        // new Signal sessions, since the old ones stayed on the old phone.
+        for (c in synchronized(this) { contacts.filter { it.status == Contact.FRIENDS } }) runCatching { sendAvatar(c, ask = true) }
+    }
+
+    fun deleteAccount(password: String) {
+        val m = me ?: return
+        relay.deleteAccount(m.user, Crypto.passwordKeys(m.user, password).auth)
+        signOut()
+    }
+
+    fun signOut() {
+        synchronized(this) { me = null; contacts.clear(); acks.clear() }
+        onChange()
+    }
+
+    /** False when someone signed in to this account on another phone. */
+    fun sessionOk(): Boolean {
+        val m = me ?: return true
+        return relay.sessionOk(m.user, m.device)
+    }
+
+    /** Puts my Signal prekeys on the server. [replace] = new phone: forget the old phone's keys. */
+    fun publishKeys(m: Me, replace: Boolean) {
+        val count = relay.publishKeys(m.user, m.device, m.signal.freshKeys(if (replace) 50 else 40, rotateSigned = replace), replace)
+        m.keysPublished = count > 0
+        onChange()
+    }
+
+    /** Called now and then: tops up one-time prekeys when they run low. */
+    fun keepKeysStocked() {
+        val m = me ?: return
+        if (!m.keysPublished) return publishKeys(m, replace = true)
+        if (relay.keyCount(m.user, m.device) < 15) publishKeys(m, replace = false)
+    }
+
+    /** Turns the server-side encrypted backup on or off. Off also wipes the copy already there. */
+    fun setCloudBackup(on: Boolean) {
+        val m = me ?: return
+        m.cloudBackup = on
+        backupDirty = false
+        relay.saveBackup(m.user, m.device, lockedBackup(m, synchronized(this) { contacts.toList() }))
+        changed()
+    }
+
+    fun uploadBackup() {
+        val m = me ?: return
+        backupDirty = false
+        try {
+            relay.saveBackup(m.user, m.device, lockedBackup(m, synchronized(this) { contacts.toList() }))
+        } catch (e: Exception) {
+            backupDirty = true
+            throw e
+        }
+    }
+
+    private fun lockedBackup(m: Me, list: List<Contact>): ByteArray {
+        if (!m.cloudBackup) return ByteArray(0) // user chose to keep no cloud backup
+        val o = JSONObject().put("v", 2).put("name", m.name)
+            .put("enc", b64(Crypto.privateBytes(m.enc))).put("sig", b64(Crypto.privateBytes(m.sig)))
+            .put("inbox", m.inboxToken)
+            .put("avatar", m.avatar?.let { b64(it) })
+            .put("sident", b64(m.signal.identity.serialize())).put("sreg", m.signal.regId)
+            .put("contacts", JSONArray(list.map { it.json(withMsgs = false) }))
+        return Crypto.lockBackup(m.backupKey, m.user, o.toString().toByteArray())
+    }
+
+    // ---------- friends ----------
+
+    /** Sends a friend request to @user. Returns the new (or existing) chat. */
+    fun addFriend(raw: String): Contact {
+        val m = me ?: throw UserError("Not signed in")
+        val user = raw.trim().removePrefix("@").lowercase()
+        checkUsername(user)
+        if (user == m.user) throw UserError("That's you!")
+        contact(user)?.let { return it }
+        val p = relay.lookup(user) ?: throw UserError("No one has the username @$user")
+        if (p.ident.isEmpty()) throw UserError("@$user needs to update msgr01 first")
+        val c = Contact(user, "@$user", Contact.ASKED, Crypto.randomHex(), null, p.enc, p.sig, theirInbox = p.inbox, theirIdent = p.ident)
+        relay.fetch(listOf(c.myToken), emptyList(), 0) // my mailbox exists before they can answer
+        sealSignal(m, c, p.inbox, JSONObject().put("t", "request").put("u", m.user).put("n", m.name).put("a", c.myAddr))
+        c.msgs.add(note("Friend request sent. Anything you write now arrives as a message request."))
+        synchronized(this) { if (contact(user) == null) contacts.add(c) }
+        changed()
+        return contact(user)!!
+    }
+
+    /** Accepts a request: [friend] = also add them as a friend, otherwise just allow messages. */
+    fun accept(c: Contact, friend: Boolean = true) {
+        val m = me ?: return
+        relay.fetch(listOf(c.myToken), emptyList(), 0)
+        sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "accept").put("u", m.user).put("n", m.name)
+            .put("a", c.myAddr).put("f", friend))
+        synchronized(this) {
+            c.status = if (friend) Contact.FRIENDS else Contact.CHATTING
+            c.msgs.add(note(if (friend) "You are now friends. Check the safety code to be sure it's really them."
+            else "Message request accepted. You can add @${c.user} as a friend any time."))
+        }
+        changed()
+        flush(c)
+        if (friend) runCatching { sendAvatar(c, ask = false) }
+    }
+
+    /** From a message-request chat I accepted: add them as a friend after all. */
+    fun makeFriend(c: Contact) = accept(c, friend = true)
+
+    // ---------- disappearing messages ----------
+
+    /** Sets (or clears, with 0) the disappearing-messages timer for this chat and tells the other side. */
+    fun setTimer(c: Contact, seconds: Int) {
+        val m = me ?: return
+        synchronized(this) {
+            c.ttl = seconds
+            c.msgs.add(note(if (seconds == 0) "Disappearing messages turned off."
+            else "Disappearing messages: on, ${timerLabel(seconds)}. New messages delete on both phones."))
+        }
+        changed()
+        if (c.canChat) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "ttl").put("s", seconds)) }
+    }
+
+    /** Removes messages whose time is up, on this phone. Returns true if any were removed. */
+    fun purgeExpired(): Boolean {
+        val now = System.currentTimeMillis()
+        var changed = false
+        synchronized(this) {
+            for (c in contacts) if (c.msgs.removeAll { it.expires in 1..now }) changed = true
+        }
+        if (changed) onChange()
+        return changed
+    }
+
+    private fun timerLabel(s: Int) = when {
+        s >= 86400 -> "${s / 86400} day" + if (s / 86400 > 1) "s" else ""
+        s >= 3600 -> "${s / 3600} hour" + if (s / 3600 > 1) "s" else ""
+        s >= 60 -> "${s / 60} minute" + if (s / 60 > 1) "s" else ""
+        else -> "$s seconds"
+    }
+
+    // ---------- profile photo ----------
+
+    /** Sets (or with null, removes) my photo and sends it, sealed, to every friend. */
+    fun setAvatar(jpeg: ByteArray?) {
+        require(jpeg == null || jpeg.size <= MAX_AVATAR) { "photo too big" }
+        me?.avatar = jpeg
+        changed()
+        for (c in synchronized(this) { contacts.filter { it.status == Contact.FRIENDS } }) runCatching { sendAvatar(c, ask = false) }
+    }
+
+    private fun sendAvatar(c: Contact, ask: Boolean) {
+        val m = me ?: return
+        sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "avatar").put("d", m.avatar?.let { b64(padAvatar(it)) } ?: "").put("ask", ask))
+    }
+
+    fun remove(c: Contact) {
+        synchronized(this) { contacts.remove(c) }
+        changed()
+    }
+
+    // ---------- messages ----------
+
+    fun queue(c: Contact, text: String): Msg {
+        val msg = Msg(Crypto.randomHex(16), true, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.SENDING)
+        if (c.ttl > 0) msg.expires = System.currentTimeMillis() + c.ttl * 1000L
+        synchronized(this) { c.msgs.add(msg) }
+        onChange()
+        return msg
+    }
+
+    /**
+     * Queues an attachment. It's locked here with its own random key; the server only
+     * ever stores the locked copy, and the key travels inside the sealed message.
+     */
+    fun queueFile(c: Contact, name: String, mime: String, data: ByteArray, thumb: ByteArray?): Msg {
+        if (data.size > MAX_FILE) throw UserError("Files can be up to ${MAX_FILE / 1024 / 1024} MB")
+        val key = Crypto.randomHex(32)
+        val local = Crypto.randomHex(16)
+        saveBlob(local, Crypto.gcmSeal(key.unhex(), FILE_LABEL, padFile(data)))
+        val f = JSONObject().put("k", key).put("n", cleanName(name)).put("m", cleanMime(mime)).put("s", data.size).put("local", local)
+        thumb?.let { f.put("th", b64(it)) }
+        val msg = Msg(Crypto.randomHex(16), true, "", System.currentTimeMillis(), Msg.SENDING).also { it.file = f }
+        if (c.ttl > 0) msg.expires = System.currentTimeMillis() + c.ttl * 1000L
+        synchronized(this) { c.msgs.add(msg) }
+        onChange()
+        return msg
+    }
+
+    /** The attachment's bytes, unlocked, or null if it isn't here yet. */
+    fun openFile(msg: Msg): ByteArray? {
+        val f = msg.file ?: return null
+        val blob = loadBlob(f.optString("local").ifEmpty { return null }) ?: return null
+        return Crypto.gcmOpen(f.getString("k").unhex(), FILE_LABEL, blob)?.let { unpadFile(it) }
+    }
+
+    /** Sends one message (or attachment). Before they accept, it goes as a message request. */
+    fun deliver(c: Contact, msg: Msg) {
+        val m = me ?: return
+        if (c.status == Contact.ASKING) return
+        msg.state = Msg.SENDING
+        msg.state = try {
+            val body = JSONObject().put("id", msg.id).put("x", msg.text)
+            msg.file?.let { f ->
+                if (!f.has("id")) {
+                    val blob = loadBlob(f.getString("local")) ?: throw IOException("attachment missing")
+                    f.put("id", relay.upload(blob))
+                }
+                body.put("f", JSONObject().put("id", f.getString("id")).put("k", f.getString("k")).put("n", f.getString("n"))
+                    .put("m", f.getString("m")).put("s", f.getInt("s")).put("th", f.optString("th")))
+            }
+            if (c.canChat) {
+                sealSignal(m, c, c.theirAddr!!, body.put("t", "msg"))
+            } else {
+                // not accepted yet: goes to their request inbox as a message request
+                val inbox = c.theirInbox ?: relay.lookup(c.user)?.inbox?.also { c.theirInbox = it } ?: throw IOException("no inbox")
+                sealSignal(m, c, inbox, body.put("t", "rmsg").put("u", m.user))
+            }
+            Msg.SENT
+        } catch (e: Exception) {
+            Msg.FAILED
+        }
+        onChange()
+    }
+
+    private fun flush(c: Contact) {
+        for (msg in synchronized(this) { c.msgs.filter { it.mine && it.state == Msg.SENDING } }) deliver(c, msg)
+    }
+
+    private fun seal(m: Me, address: String, theirEnc: String, inner: JSONObject) {
+        val key = Crypto.parsePublic(unb64(theirEnc), Crypto.ENC_TEMPLATE) ?: throw IOException("bad key")
+        relay.send(address, Crypto.seal(m.sig, key, address, inner.toString().toByteArray()))
+    }
+
+    // ---------- Signal ----------
+    // Every message is encrypted with Signal's Double Ratchet (libsignal), then sealed again for the
+    // mailbox, so the server sees neither the content nor who it's from.
+
+    /** Encrypts [inner] in the Signal session with [c] (starting one if needed) and sends it to [address]. */
+    private fun sealSignal(m: Me, c: Contact, address: String, inner: JSONObject) {
+        val remote = SignalProtocolAddress(c.user, 1)
+        val ct = synchronized(m.signal) {
+            if (!m.signal.containsSession(remote)) startSession(m, c)
+            SessionCipher(m.signal, m.address, remote).encrypt(inner.toString().toByteArray())
+        }
+        seal(m, address, c.theirEnc, JSONObject().put("t", "s").put("u", m.user).put("ty", ct.type).put("c", b64(ct.serialize())))
+    }
+
+    private fun startSession(m: Me, c: Contact) {
+        val b = relay.bundle(c.user) ?: throw UserError("@${c.user} needs to update msgr01 first")
+        val ident = b.getString("ident")
+        // the identity must match what the directory listed when we added them
+        if (c.theirIdent != null && c.theirIdent != ident) throw IOException("@${c.user}'s key changed")
+        c.theirIdent = ident
+        val spk = b.getJSONObject("spk")
+        val kpk = b.getJSONObject("kpk")
+        val one = b.optJSONObject("otpk")
+        val bundle = PreKeyBundle(
+            b.getInt("reg"), 1,
+            one?.getInt("id") ?: PreKeyBundle.NULL_PRE_KEY_ID, one?.let { ECPublicKey(unb64(it.getString("pub"))) },
+            spk.getInt("id"), ECPublicKey(unb64(spk.getString("pub"))), unb64(spk.getString("sig")),
+            IdentityKey(unb64(ident)),
+            kpk.getInt("id"), KEMPublicKey(unb64(kpk.getString("pub"))), unb64(kpk.getString("sig")),
+        )
+        SessionBuilder(m.signal, SignalProtocolAddress(c.user, 1), m.address).process(bundle)
+    }
+
+    /**
+     * Opens a Signal envelope from @[user]. [ident] is their identity from the directory; a first
+     * message signed by any other identity is refused. Returns null for anything that doesn't open
+     * (duplicates, replays, broken messages) so it gets dropped instead of jamming the mailbox.
+     */
+    private fun openSignal(m: Me, user: String, ident: String?, env: JSONObject): JSONObject? {
+        if (env.optString("t") != "s" || env.optString("u") != user) return null
+        val bytes = unb64(env.optString("c"))
+        val remote = SignalProtocolAddress(user, 1)
+        val plain = try {
+            synchronized(m.signal) {
+                val cipher = SessionCipher(m.signal, m.address, remote)
+                when (env.optInt("ty")) {
+                    CiphertextMessage.PREKEY_TYPE -> {
+                        val pm = PreKeySignalMessage(bytes)
+                        if (ident.isNullOrEmpty() || !pm.identityKey.serialize().contentEquals(unb64(ident))) return null
+                        cipher.decrypt(pm)
+                    }
+                    CiphertextMessage.WHISPER_TYPE -> cipher.decrypt(SignalMessage(bytes))
+                    else -> return null
+                }
+            }
+        } catch (e: Exception) {
+            return null
+        }
+        return try { JSONObject(String(plain)) } catch (e: Exception) { null }
+    }
+
+    /** One round of picking up mail. Waits up to [wait] seconds for something to arrive. */
+    fun poll(wait: Int) {
+        val m = me ?: return
+        val byToken = synchronized(this) { contacts.associateBy { it.myToken } }
+        // The friend-request inbox is listed under my @username, so it's checked in its own request:
+        // the server never sees it fetched together with my chat mailboxes.
+        val got = fetchFrom(listOf(m.inboxToken), inboxAcks, if (byToken.isEmpty()) wait else 0) +
+            if (byToken.isEmpty()) emptyList() else fetchFrom(byToken.keys.toList(), acks, wait)
+        for (inc in got) {
+            if (me !== m) return
+            try {
+                if (inc.token == m.inboxToken) onRequest(m, inc.blob) else byToken[inc.token]?.let { onChat(m, it, inc.blob) }
+            } catch (e: IOException) {
+                continue // e.g. lookup failed; message stays unacked and comes back next round
+            }
+            synchronized(this) { (if (inc.token == m.inboxToken) inboxAcks else acks).add(inc.id) }
+        }
+        if (got.isNotEmpty()) onChange()
+        purgeExpired()
+        for (msg in synchronized(this) { toFetch.toList() }) {
+            val ok = runCatching { fetchFile(msg) }.getOrDefault(false)
+            synchronized(this) { if (ok || msg.file?.has("local") == true) toFetch.remove(msg) }
+        }
+    }
+
+    private val inboxAcks = mutableSetOf<String>()
+
+    private fun fetchFrom(tokens: List<String>, ackSet: MutableSet<String>, wait: Int): List<Relay.Incoming> {
+        val sent = synchronized(this) { ackSet.toList() }
+        val got = relay.fetch(tokens, sent, wait)
+        synchronized(this) { ackSet.removeAll(sent.toSet()) }
+        return got
+    }
+
+    private fun onRequest(m: Me, blob: ByteArray) {
+        val o = Crypto.open(m.enc, m.inboxAddr, blob) ?: return
+        val env = parse(o) ?: return
+        val user = env.optString("u")
+        if (!USERNAME.matches(user) || user == m.user) return
+        // The sender's keys come from the directory, so nobody can pretend to be @user.
+        val p = relay.lookup(user) ?: return
+        val sigKey = Crypto.parsePublic(unb64(p.sig), Crypto.SIG_TEMPLATE) ?: return
+        if (!Crypto.verify(sigKey, o)) return
+        val inner = openSignal(m, user, p.ident, env) ?: return
+        val kind = inner.optString("t")
+        if (kind != "request" && kind != "rmsg") return
+        val addr = inner.optString("a")
+        if (inner.optString("u") != user || (kind == "request" && !isAddr(addr))) return
+        if (kind == "rmsg") {
+            val c = contact(user) ?: return
+            if (c.theirSig != p.sig || c.status == Contact.ASKED) return
+            val id = inner.optString("id")
+            synchronized(this) {
+                if (id.isEmpty() || c.msgs.any { it.id == id }) return
+                c.msgs.add(incoming(id, inner, c.ttl))
+                if (openChat != c.user) c.unread++
+            }
+            if (openChat != c.user) onNew(c)
+            return
+        }
+        val name = inner.optString("n").take(60).ifBlank { "@$user" }
+        val existing = contact(user)
+        when {
+            existing == null -> {
+                val c = Contact(user, name, Contact.ASKING, Crypto.randomHex(), addr, p.enc, p.sig, theirIdent = p.ident)
+                synchronized(this) { contacts.add(c) }
+                changed()
+                if (openChat != user) onNew(c)
+            }
+            existing.theirSig != p.sig -> return
+            existing.status == Contact.ASKED -> { // we both asked: that's a yes
+                existing.theirAddr = addr
+                existing.name = name
+                accept(existing)
+            }
+            existing.status == Contact.ASKING -> { existing.theirAddr = addr; changed() }
+            else -> { existing.theirAddr = addr; accept(existing, friend = existing.status == Contact.FRIENDS) } // they re-added us
+        }
+    }
+
+    private fun onChat(m: Me, c: Contact, blob: ByteArray) {
+        val o = Crypto.open(m.enc, c.myAddr, blob) ?: return
+        val sigKey = Crypto.parsePublic(unb64(c.theirSig), Crypto.SIG_TEMPLATE) ?: return
+        if (!Crypto.verify(sigKey, o)) return
+        val env = parse(o) ?: return
+        if (c.theirIdent == null) c.theirIdent = relay.lookup(c.user)?.ident?.ifEmpty { null }
+        val inner = openSignal(m, c.user, c.theirIdent, env) ?: return
+        when (inner.optString("t")) {
+            "accept" -> {
+                val addr = inner.optString("a")
+                if (!isAddr(addr) || c.status == Contact.ASKING) return
+                val friend = inner.optBoolean("f", true)
+                val before = c.status
+                synchronized(this) {
+                    c.theirAddr = addr
+                    c.name = inner.optString("n").take(60).ifBlank { c.name }
+                    c.status = if (friend) Contact.FRIENDS else Contact.CHATTING
+                    c.waitingForAdd = !friend
+                    if (before != c.status) c.msgs.add(note(
+                        if (friend) "@${c.user} added you. Check the safety code to be sure it's really them."
+                        else "@${c.user} accepted your messages but hasn't added you as a friend yet."))
+                }
+                changed()
+                flush(c)
+                if (friend) runCatching { sendAvatar(c, ask = false) }
+            }
+            "avatar" -> {
+                if (c.status != Contact.FRIENDS) return
+                val d = inner.optString("d")
+                val bytes = if (d.isEmpty()) null else unpadAvatar(unb64(d))
+                // only small JPEGs (FF D8 at the start)
+                if (d.isNotEmpty() && bytes == null) return
+                if (bytes != null && (bytes.size < 4 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte())) return
+                synchronized(this) { c.avatar = bytes }
+                onChange()
+                if (inner.optBoolean("ask")) runCatching { sendAvatar(c, ask = false) }
+            }
+            "ttl" -> {
+                val sec = inner.optInt("s", -1)
+                if (sec < 0 || sec > 30 * 86400 || !c.canChat) return
+                synchronized(this) {
+                    c.ttl = sec
+                    c.msgs.add(note(if (sec == 0) "@${c.user} turned off disappearing messages."
+                    else "@${c.user} set disappearing messages: ${timerLabel(sec)}."))
+                }
+                onChange()
+            }
+            "msg" -> {
+                if (!c.canChat) return
+                val id = inner.optString("id")
+                synchronized(this) {
+                    if (id.isEmpty() || c.msgs.any { it.id == id }) return // replayed
+                    c.msgs.add(incoming(id, inner, c.ttl))
+                    if (openChat != c.user) c.unread++
+                }
+                if (openChat != c.user) onNew(c)
+            }
+        }
+    }
+
+    private fun incoming(id: String, inner: JSONObject, ttl: Int): Msg {
+        val msg = Msg(id, false, inner.optString("x").take(MAX_TEXT), System.currentTimeMillis(), Msg.RECEIVED)
+        msg.file = inner.optJSONObject("f")?.let { checkFile(it) }
+        if (ttl > 0) msg.expires = System.currentTimeMillis() + ttl * 1000L
+        if (msg.file != null) toFetch.add(msg)
+        return msg
+    }
+
+    /** Only accept attachment details that look right. */
+    private fun checkFile(f: JSONObject): JSONObject? {
+        val id = f.optString("id")
+        val k = f.optString("k")
+        val size = f.optInt("s", -1)
+        if (id.length != 32 || !id.all { it in "0123456789abcdef" } || k.length != 64 || !k.all { it in "0123456789abcdef" }) return null
+        if (size !in 0..MAX_FILE) return null
+        val out = JSONObject().put("id", id).put("k", k).put("n", cleanName(f.optString("n"))).put("m", cleanMime(f.optString("m"))).put("s", size)
+        f.optString("th").takeIf { it.isNotEmpty() && it.length <= 8000 }?.let { out.put("th", it) }
+        return out
+    }
+
+    /** Downloads one received attachment, checks it opens, keeps the locked copy, tells the server to forget it. */
+    fun fetchFile(msg: Msg): Boolean {
+        val f = msg.file ?: return false
+        if (f.has("local")) return true
+        val id = f.getString("id")
+        val blob = relay.download(id)
+        if (Crypto.gcmOpen(f.getString("k").unhex(), FILE_LABEL, blob) == null) return false
+        saveBlob(id, blob)
+        synchronized(this) { f.put("local", id) }
+        runCatching { relay.doneWith(id) }
+        onChange()
+        return true
+    }
+
+    /** Signal's safety number: 60 digits from both identity keys, the same on both phones. */
+    fun safetyCode(c: Contact): String? {
+        val m = me ?: return null
+        val theirs = c.theirIdent ?: return null
+        val f = NumericFingerprintGenerator(5200).createFor(2, m.user.toByteArray(), m.signal.identity.publicKey,
+            c.user.toByteArray(), IdentityKey(unb64(theirs)))
+        return f.displayableFingerprint.displayText.chunked(5).joinToString(" ")
+    }
+
+    private fun changed() {
+        backupDirty = true
+        onChange()
+    }
+
+    private fun note(text: String) = Msg(Crypto.randomHex(16), false, text, System.currentTimeMillis(), Msg.NOTE)
+    private fun parse(o: Crypto.Opened): JSONObject? {
+        val inner = o.inner ?: return null
+        return try { JSONObject(String(inner)) } catch (e: Exception) { null }
+    }
+
+    // ---------- saving on this phone ----------
+
+    @Synchronized
+    fun toJson(): JSONObject {
+        val o = JSONObject().put("server", relay.server)
+        me?.let { m ->
+            o.put("me", JSONObject().put("user", m.user).put("name", m.name).put("device", m.device)
+                .put("enc", b64(Crypto.privateBytes(m.enc))).put("sig", b64(Crypto.privateBytes(m.sig)))
+                .put("inbox", m.inboxToken).put("backupKey", m.backupKey.hex())
+                .put("avatar", m.avatar?.let { b64(it) })
+                .put("signal", m.signal.toJson()).put("keysPublished", m.keysPublished)
+                .put("cloudBackup", m.cloudBackup))
+        }
+        return o.put("contacts", JSONArray(contacts.map { it.json(withMsgs = true) })).put("backupDirty", backupDirty)
+    }
+
+    @Synchronized
+    fun loadJson(o: JSONObject) {
+        o.optString("server").takeIf { it.isNotEmpty() }?.let { relay = Relay(it) }
+        val mo = o.optJSONObject("me") ?: return
+        val enc = Crypto.parsePrivate(unb64(mo.getString("enc")), Crypto.ENC_TEMPLATE) ?: return
+        val sig = Crypto.parsePrivate(unb64(mo.getString("sig")), Crypto.SIG_TEMPLATE) ?: return
+        me = Me(mo.getString("user"), mo.getString("name"), mo.getString("device"), enc, sig,
+            mo.getString("inbox"), mo.getString("backupKey").unhex(),
+            mo.optString("avatar").takeIf { it.isNotEmpty() }?.let { unb64(it) })
+        val signal = mo.optJSONObject("signal")
+        signal?.let { me!!.signal = SignalStore.fromJson(it); me!!.keysPublished = mo.optBoolean("keysPublished") }
+        me!!.cloudBackup = mo.optBoolean("cloudBackup", true)
+        val a = o.optJSONArray("contacts") ?: JSONArray()
+        contacts.clear()
+        for (i in 0 until a.length()) contacts.add(Contact.from(a.getJSONObject(i)))
+        if (signal == null) for (c in contacts) {
+            // upgrading from 2.x: new encryption, so new safety codes
+            c.verified = false
+            c.msgs.add(note("msgr01 now uses Signal's encryption. Your safety code with ${c.name} changed; check it again."))
+        }
+        backupDirty = o.optBoolean("backupDirty")
+        // attachments that arrived but weren't downloaded yet
+        for (c in contacts) for (msg in c.msgs) if (!msg.mine && msg.file?.has("local") == false) toFetch.add(msg)
+    }
+
+    companion object {
+        const val MAX_TEXT = 4000
+        const val MAX_AVATAR = 8000 // bytes of JPEG; fits in one sealed message
+        const val MAX_FILE = 25 * 1024 * 1024
+        private const val FILE_LABEL = "telegramnt-file"
+
+        fun cleanName(n: String) = n.replace(Regex("[/\\\\\\u0000-\\u001f]"), "_").take(120).ifBlank { "file" }
+        fun cleanMime(m: String) = m.lowercase().takeIf { Regex("^[a-z0-9.+-]+/[a-z0-9.+-]+$").matches(it) } ?: "application/octet-stream"
+        val USERNAME = Regex("^[a-z0-9_]{5,32}$")
+
+        fun checkUsername(u: String) {
+            if (!USERNAME.matches(u)) throw UserError("Usernames are 5-32 characters: a-z, 0-9 and _")
+        }
+
+        const val AVATAR_PAD = 8192 // every avatar is sent at this exact size, so size reveals nothing
+
+        fun padAvatar(jpeg: ByteArray): ByteArray {
+            require(jpeg.size <= AVATAR_PAD - 4)
+            return ByteBuffer.allocate(AVATAR_PAD).putInt(jpeg.size).put(jpeg).array()
+        }
+
+        fun unpadAvatar(p: ByteArray): ByteArray? {
+            if (p.size != AVATAR_PAD) return null
+            val n = ByteBuffer.wrap(p).int
+            return if (n in 1..(AVATAR_PAD - 4)) p.copyOfRange(4, 4 + n) else null
+        }
+
+        /** Attachments are padded up to size steps so their exact size doesn't give them away. */
+        fun padFile(data: ByteArray): ByteArray {
+            val need = data.size + 4
+            var step = 16 * 1024
+            while (step < need && step < 1024 * 1024) step *= 2
+            val total = if (need <= step) step else ((need + 1048575) / 1048576) * 1048576
+            return ByteBuffer.allocate(total).putInt(data.size).put(data).array()
+        }
+
+        fun unpadFile(p: ByteArray): ByteArray? {
+            if (p.size < 4) return null
+            val n = ByteBuffer.wrap(p).int
+            return if (n < 0 || n > p.size - 4) null else p.copyOfRange(4, 4 + n)
+        }
+
+        private fun isAddr(s: String) = s.length == 64 && s.all { it in "0123456789abcdef" }
+        private fun b64(b: ByteArray) = Base64.getEncoder().encodeToString(b)
+        private fun unb64(s: String) = try { Base64.getDecoder().decode(s) } catch (e: IllegalArgumentException) { ByteArray(0) }
+    }
+}

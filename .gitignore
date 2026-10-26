@@ -1,0 +1,10 @@
+keystore/
+.gradle/
+.kotlin/
+build/
+app/build/
+local.properties
+server/telegramnt.db*
+server/files/
+dist/
+SECURITY-AUDIT-*.md

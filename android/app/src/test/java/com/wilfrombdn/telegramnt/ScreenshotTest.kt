@@ -1,0 +1,103 @@
+package com.wilfrombdn.telegramnt
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import android.os.Looper
+import java.io.File
+import java.io.FileOutputStream
+
+// Renders the main screens to app/build/shots (the emulator will not run on this laptop).
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+class ScreenshotTest {
+    private fun fakeCore(signedIn: Boolean): Core {
+        val core = Core("https://chat.example")
+        if (!signedIn) return core
+        core.me = Me("wil_p", "Wil", "dev", Crypto.newKeyset(Crypto.ENC_TEMPLATE), Crypto.newKeyset(Crypto.SIG_TEMPLATE), Crypto.randomHex(), ByteArray(32))
+        fun friend(user: String, name: String, status: Int) = Contact(
+            user, name, status, Crypto.randomHex(), Crypto.addressOf(Crypto.randomHex()),
+            java.util.Base64.getEncoder().encodeToString(Crypto.publicBytes(Crypto.newKeyset(Crypto.ENC_TEMPLATE))),
+            java.util.Base64.getEncoder().encodeToString(Crypto.publicBytes(Crypto.newKeyset(Crypto.SIG_TEMPLATE))),
+        )
+        val now = System.currentTimeMillis()
+        val sam = friend("sam_r", "Sam Rivera", Contact.FRIENDS)
+        sam.msgs += Msg("1", false, "You are now friends. Check the safety code to be sure it's really them.", now - 600_000, Msg.NOTE)
+        sam.msgs += Msg("2", false, "hey! is this the new app?", now - 500_000, Msg.RECEIVED)
+        sam.msgs += Msg("3", true, "yep, everything's end-to-end encrypted now", now - 400_000, Msg.SENT)
+        sam.msgs += Msg("4", false, "nice, way better than the old one", now - 300_000, Msg.RECEIVED)
+        sam.msgs += Msg("5", true, "see you at 6", now - 60_000, Msg.SENDING)
+        val jo = friend("jordan_k", "Jordan", Contact.FRIENDS)
+        jo.msgs += Msg("6", false, "Did you get the truck fixed?", now - 3_600_000, Msg.RECEIVED)
+        jo.unread = 2
+        val req = friend("alex_m", "Alex M", Contact.ASKING)
+        req.msgs += Msg("8", false, "hey, Jordan gave me your username", now - 1_000_000, Msg.RECEIVED)
+        val asked = friend("taylor_b", "@taylor_b", Contact.ASKED)
+        asked.msgs += Msg("7", false, "Friend request sent. You can write now; messages go out when @taylor_b accepts.", now - 7_200_000, Msg.NOTE)
+        sam.msgs += Msg("p1", false, "", now - 50_000, Msg.RECEIVED).also {
+            it.file = org.json.JSONObject().put("id", "0".repeat(32)).put("k", "0".repeat(64)).put("n", "truck.jpg").put("m", "image/jpeg").put("s", 250_000)
+                .put("th", java.util.Base64.getEncoder().encodeToString(testJpeg(0xFF8D6E63.toInt(), 0xFF26A69A.toInt())))
+        }
+        sam.msgs += Msg("p2", true, "here's the invoice", now - 40_000, Msg.SENT).also {
+            it.file = org.json.JSONObject().put("id", "1".repeat(32)).put("k", "0".repeat(64)).put("n", "invoice-october.pdf").put("m", "application/pdf").put("s", 182_000).put("local", "x")
+        }
+        sam.avatar = testJpeg(0xFFE08A3C.toInt(), 0xFF3C6EE0.toInt())
+        core.me!!.avatar = testJpeg(0xFF2E7D32.toInt(), 0xFFB2DFDB.toInt())
+        core.contacts += listOf(sam, jo, req, asked)
+        return core
+    }
+
+    private fun testBitmap(a: Int, b: Int, w: Int = 120, h: Int = 120): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val p = android.graphics.Paint().apply { shader = android.graphics.LinearGradient(0f, 0f, w.toFloat(), h.toFloat(), a, b, android.graphics.Shader.TileMode.CLAMP) }
+        Canvas(bmp).drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+        Canvas(bmp).drawCircle(w / 2f, h / 2.4f, w / 5f, android.graphics.Paint().apply { color = android.graphics.Color.WHITE })
+        return bmp
+    }
+
+    private fun testJpeg(a: Int, b: Int): ByteArray =
+        java.io.ByteArrayOutputStream().also { testBitmap(a, b).compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+
+    private fun shoot(a: MainActivity, name: String) {
+        shadowOf(Looper.getMainLooper()).idle()
+        val v = a.window.decorView
+        val bmp = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
+        v.measure(android.view.View.MeasureSpec.makeMeasureSpec(1080, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec.makeMeasureSpec(2340, android.view.View.MeasureSpec.EXACTLY))
+        v.layout(0, 0, 1080, 2340)
+        v.draw(Canvas(bmp))
+        val dir = File("build/shots").apply { mkdirs() }
+        FileOutputStream(File(dir, "$name.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    private fun call(a: MainActivity, method: String, vararg args: Any) {
+        val m = MainActivity::class.java.declaredMethods.first { it.name == method && it.parameterCount == args.size }
+        m.isAccessible = true
+        m.invoke(a, *args)
+    }
+
+    @Test fun screens() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        shoot(a, "1-chats")
+        call(a, "showChat", "sam_r"); shoot(a, "2-chat")
+        call(a, "showChat", "alex_m"); shoot(a, "3-request")
+        call(a, "showNewChat"); shoot(a, "4-add-friend")
+        call(a, "showSettings"); shoot(a, "5-settings")
+        Messenger.look.out = Look.BUBBLES[3].second; Messenger.look.square = true; Messenger.look.msg = 18f
+        call(a, "showAppearance"); shoot(a, "7-appearance")
+        call(a, "showChat", "sam_r"); shoot(a, "8-chat-custom")
+        Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second
+        call(a, "showCrop", testBitmap(0xFF6A1B9A.toInt(), 0xFFFFB74D.toInt(), 1200, 800)); shoot(a, "6-crop")
+        Messenger.initForPreview(fakeCore(signedIn = false))
+        call(a, "showWelcome"); shoot(a, "0-welcome")
+        call(a, "showSignup"); shoot(a, "0b-signup")
+    }
+}
