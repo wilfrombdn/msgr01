@@ -264,6 +264,14 @@ object Messenger {
         io.execute { core.deliver(c, m) }
     }
 
+    fun sendGroupFile(g: Group, name: String, mime: String, data: ByteArray, thumb: ByteArray?) {
+        val m = core.queueGroupFile(g, name, mime, data, thumb)
+        io.execute { core.deliverGroupFile(g, m) }
+    }
+
+    fun react(c: Contact, msg: Msg, emoji: String) = io.execute { core.react(c, msg, emoji) }
+    fun reactGroup(g: Group, msg: Msg, emoji: String) = io.execute { core.reactGroup(g, msg, emoji) }
+
     fun sendFile(c: Contact, name: String, mime: String, data: ByteArray, thumb: ByteArray?) {
         val m = core.queueFile(c, name, mime, data, thumb)
         io.execute { core.deliver(c, m) }

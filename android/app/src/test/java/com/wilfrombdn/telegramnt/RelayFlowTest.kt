@@ -332,6 +332,47 @@ class RelayFlowTest {
         assertArrayEquals(big, bob.openFile(got))
     }
 
+    /** A group attachment must reach every member (no delete-on-first-pickup). */
+    @Test fun groupFileReachesAllMembers() {
+        assumeTrue(Relay(server).ping())
+        val al = withDisk(Core(server)); val bo = withDisk(Core(server)); val ci = withDisk(Core(server))
+        val au = "gfa_$tag"; val bu = "gfb_$tag"; val cu = "gfc_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo"); ci.signup(cu, "cis long password", "Ci")
+        fun befriend(a: Core, aun: String, b: Core, bun: String) { a.addFriend(bun); b.poll(5); b.accept(b.contact(aun)!!); a.poll(5) }
+        befriend(al, au, bo, bu); befriend(al, au, ci, cu)
+        val g = al.createGroup("Crew", public = false, invite = listOf(bu, cu))
+        bo.poll(5); ci.poll(5); al.poll(5); bo.poll(5); ci.poll(5)
+
+        val data = ByteArray(200_000) { (it * 13 + 5).toByte() }
+        val msg = al.queueGroupFile(g, "clip.mp4", "video/mp4", data, null)
+        al.deliverGroupFile(g, msg)
+        assertEquals(Msg.SENT, msg.state)
+
+        bo.poll(8)
+        val mb = bo.groups.first { it.secret == g.secret }.msgs.last { it.file != null }
+        assertArrayEquals(data, bo.openFile(mb))
+        ci.poll(8)   // second member still gets it (the server didn't delete on bo's pickup)
+        val mc = ci.groups.first { it.secret == g.secret }.msgs.last { it.file != null }
+        assertArrayEquals(data, ci.openFile(mc))
+    }
+
+    /** A reaction reaches the other side and survives a save/load. */
+    @Test fun reactionsPropagateAndPersist() {
+        assumeTrue(Relay(server).ping())
+        val rex = Core(server); val sky = Core(server)
+        val ru = "rxa_$tag"; val su = "rxb_$tag"
+        rex.signup(ru, "rex long password", "Rex"); sky.signup(su, "sky long password", "Sky")
+        rex.addFriend(su); sky.poll(5); sky.accept(sky.contact(ru)!!); rex.poll(5)
+        val m = rex.queue(rex.contact(su)!!, "nice one"); rex.deliver(rex.contact(su)!!, m)
+        sky.poll(5)
+        val skyMsg = sky.contact(ru)!!.msgs.last { it.text == "nice one" }
+        sky.react(sky.contact(ru)!!, skyMsg, "👍")
+        rex.poll(5)
+        val rexMsg = rex.contact(su)!!.msgs.last { it.text == "nice one" }
+        assertEquals("👍", rexMsg.reactions[su])
+        assertEquals("👍", Msg.from(rexMsg.json()).reactions[su])   // persists
+    }
+
     @Test fun lockoutAfterFiveWrongPasswords() {
         assumeTrue(Relay(server).ping())
         val u = "carol_$tag"

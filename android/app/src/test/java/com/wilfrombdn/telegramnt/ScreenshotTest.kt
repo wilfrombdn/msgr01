@@ -48,6 +48,7 @@ class ScreenshotTest {
         sam.msgs += Msg("p2", true, "here's the invoice", now - 40_000, Msg.SENT).also {
             it.file = org.json.JSONObject().put("id", "1".repeat(32)).put("k", "0".repeat(64)).put("n", "invoice-october.pdf").put("m", "application/pdf").put("s", 182_000).put("local", "x")
         }
+        sam.msgs.first { it.id == "3" }.reactions["sam_r"] = "👍"   // 👍 on a 1:1 message
         sam.avatar = testJpeg(0xFFE08A3C.toInt(), 0xFF3C6EE0.toInt())
         core.me!!.avatar = testJpeg(0xFF2E7D32.toInt(), 0xFFB2DFDB.toInt())
         core.contacts += listOf(sam, jo, req, asked)
@@ -56,6 +57,7 @@ class ScreenshotTest {
         grp.msgs += Msg("gm1", false, "who's on the 6am?", now - 500_000, Msg.RECEIVED).also { it.sender = "sam_r" }
         grp.msgs += Msg("gm2", true, "i'll take it", now - 400_000, Msg.SENT)
         grp.msgs += Msg("gm3", false, "thanks, see you there", now - 300_000, Msg.RECEIVED).also { it.sender = "jordan_k" }
+        grp.msgs.first { it.id == "gm2" }.reactions.putAll(mapOf("sam_r" to "🔥", "jordan_k" to "❤️"))   // 🔥 ❤️
         core.groups += grp
         return core
     }

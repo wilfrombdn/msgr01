@@ -30,9 +30,12 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
     var expires: Long = 0
     /** In a group, the @username of whoever sent it (shown above the bubble). */
     var sender: String? = null
+    /** Emoji reactions: @username -> emoji (one per person). */
+    val reactions: MutableMap<String, String> = mutableMapOf()
 
     fun json(): JSONObject = JSONObject().put("id", id).put("mine", mine).put("text", text).put("ts", ts).put("state", state)
         .put("file", file).put("expires", expires).put("sender", sender)
+        .put("reactions", JSONObject(reactions as Map<*, *>))
 
     companion object {
         const val SENDING = 0
@@ -41,7 +44,10 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
         const val FAILED = 3
         const val NOTE = 4 // grey line in the middle, e.g. "You are now friends"
         fun from(o: JSONObject) = Msg(o.getString("id"), o.getBoolean("mine"), o.getString("text"), o.getLong("ts"), o.getInt("state"))
-            .also { it.file = o.optJSONObject("file"); it.expires = o.optLong("expires"); it.sender = o.optString("sender").ifEmpty { null } }
+            .also {
+                it.file = o.optJSONObject("file"); it.expires = o.optLong("expires"); it.sender = o.optString("sender").ifEmpty { null }
+                o.optJSONObject("reactions")?.let { r -> for (k in r.keys()) it.reactions[k] = r.getString(k) }
+            }
     }
 }
 
@@ -142,6 +148,7 @@ class Group(
 ) {
     @Volatile var distSent = false   // have I posted my sender key this session (not persisted)
     val pending = mutableListOf<Triple<String, String, ByteArray>>() // gmsgs waiting for a sender key
+    val pendingCtl = mutableListOf<Pair<String, ByteArray>>()        // gctl controls waiting for a sender key
     val lastTs get() = msgs.lastOrNull()?.ts ?: created
     val addr get() = Crypto.sha256(("msgr01-group|$secret").toByteArray()).hex()
     val key get() = Crypto.sha256(("msgr01-group-key|$secret").toByteArray())
@@ -435,6 +442,49 @@ class Core(server: String) {
 
     private fun gseal(g: Group, inner: JSONObject) = Crypto.gcmSeal(g.key, "msgr01-group", inner.toString().toByteArray())
 
+    /**
+     * Sends an authenticated group control (file, reaction, settings). The payload is encrypted
+     * with my sender key, so the receiver's successful decrypt under my address proves it's me —
+     * unlike the outer "u" field, which any member could forge.
+     */
+    private fun gctl(g: Group, m: Me, payload: JSONObject) {
+        if (!g.distSent) postMyDist(m, g)
+        val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, payload.toString().toByteArray()) }
+        relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gctl").put("u", m.user).put("c", b64(ct.serialize()))))
+    }
+
+    /** Queues a group attachment: locked with its own key, same as a 1:1 attachment. */
+    fun queueGroupFile(g: Group, name: String, mime: String, data: ByteArray, thumb: ByteArray?): Msg {
+        val m = me ?: throw UserError("Not signed in")
+        if (data.size > MAX_FILE) throw UserError("Files can be up to ${MAX_FILE / 1024 / 1024} MB")
+        val key = Crypto.randomHex(32)
+        val local = Crypto.randomHex(16)
+        saveBlob(local, Crypto.gcmSeal(key.unhex(), FILE_LABEL, padFile(data)))
+        val f = JSONObject().put("k", key).put("n", cleanName(name)).put("m", cleanMime(mime)).put("s", data.size).put("local", local).put("grp", true)
+        thumb?.let { f.put("th", b64(it)) }
+        val msg = Msg(Crypto.randomHex(16), true, "", System.currentTimeMillis(), Msg.SENDING).also { it.file = f; it.sender = m.user }
+        synchronized(this) { g.msgs.add(msg) }
+        onChange()
+        return msg
+    }
+
+    fun deliverGroupFile(g: Group, msg: Msg) {
+        val m = me ?: return
+        val f = msg.file ?: return
+        msg.state = try {
+            if (!f.has("id")) f.put("id", relay.upload(loadBlob(f.getString("local")) ?: throw IOException("attachment missing")))
+            // what others receive: no "local" (that's my private blob key), but the server id + file key
+            val out = JSONObject().put("id", f.getString("id")).put("k", f.getString("k")).put("n", f.optString("n"))
+                .put("m", f.optString("m")).put("s", f.optInt("s")).put("grp", true)
+            if (f.has("th")) out.put("th", f.getString("th"))
+            gctl(g, m, JSONObject().put("t", "file").put("id", msg.id).put("f", out))
+            Msg.SENT
+        } catch (e: Exception) {
+            Msg.FAILED
+        }
+        onChange()
+    }
+
     // test hooks (used only by unit tests to simulate a malicious member)
     fun signalFor() = me!!.signal
     fun postRaw(g: Group, inner: JSONObject) = relay.gsend(g.addr, gseal(g, inner))
@@ -452,7 +502,8 @@ class Core(server: String) {
             val u = inner.optString("u")
             if (!USERNAME.matches(u) || u == m.user) null else Decoded(gm.seq, u, inner)
         }
-        for (d in decoded.sortedBy { if (it.inner.optString("t") == "gmsg") 1 else 0 }) {
+        // sender-key announcements first, so a message/control and its sender's key in the same batch still decrypt
+        for (d in decoded.sortedBy { if (it.inner.optString("t") == "skdm") 0 else 1 }) {
             try { onGroupInner(m, g, d.u, d.inner) } catch (e: IOException) { continue }
         }
         g.cursor = maxOf(g.cursor, got.maxOf { it.seq })
@@ -493,6 +544,36 @@ class Core(server: String) {
                 onChange()
             }
             "leave" -> synchronized(this) { g.members.remove(u) }
+            "gctl" -> {
+                val ct = unb64(inner.optString("c"))
+                val plain = try {
+                    synchronized(m.signal) { GroupCipher(m.signal, SignalProtocolAddress(u, 1)).decrypt(ct) }
+                } catch (e: org.signal.libsignal.protocol.NoSessionException) {
+                    synchronized(g.pendingCtl) { if (g.pendingCtl.none { it.second.contentEquals(ct) }) g.pendingCtl.add(u to ct) }
+                    return
+                } catch (e: Exception) { return }
+                handleCtl(m, g, u, try { JSONObject(String(plain)) } catch (e: Exception) { return })
+            }
+        }
+    }
+
+    /** An authenticated group control (sender proven by the gctl decrypt): file, reaction, settings. */
+    private fun handleCtl(m: Me, g: Group, u: String, p: JSONObject) {
+        synchronized(this) { g.members.add(u) }
+        when (p.optString("t")) {
+            "file" -> {
+                val id = p.optString("id")
+                val f = p.optJSONObject("f")?.let { checkFile(it) } ?: return
+                if (id.isEmpty() || synchronized(this) { g.msgs.any { it.id == id } }) return
+                val msg = Msg(id, false, "", System.currentTimeMillis(), Msg.RECEIVED).also { it.sender = u; it.file = f }
+                synchronized(this) { g.msgs.add(msg); if (openChat != "g:${g.id}") g.unread++ }
+                toFetch.add(msg)   // poll() downloads it; fetchFile skips doneWith for group files
+            }
+            "react" -> {
+                val id = p.optString("id"); val e = p.optString("e").take(16)
+                synchronized(this) { g.msgs.firstOrNull { it.id == id }?.let { if (e.isEmpty()) it.reactions.remove(u) else it.reactions[u] = e } }
+                onChange()
+            }
         }
     }
 
@@ -502,6 +583,12 @@ class Core(server: String) {
             val text = try { synchronized(m.signal) { GroupCipher(m.signal, SignalProtocolAddress(u, 1)).decrypt(ct) } } catch (e: Exception) { continue }
             synchronized(g.pending) { g.pending.removeAll { it.second == id } }
             if (synchronized(this) { g.msgs.none { it.id == id } }) addGroupMsg(g, u, id, String(text))
+        }
+        val waitingCtl = synchronized(g.pendingCtl) { g.pendingCtl.toList() }
+        for ((u, ct) in waitingCtl) {
+            val plain = try { synchronized(m.signal) { GroupCipher(m.signal, SignalProtocolAddress(u, 1)).decrypt(ct) } } catch (e: Exception) { continue }
+            synchronized(g.pendingCtl) { g.pendingCtl.removeAll { it.second.contentEquals(ct) } }
+            handleCtl(m, g, u, try { JSONObject(String(plain)) } catch (e: Exception) { continue })
         }
     }
 
@@ -660,6 +747,22 @@ class Core(server: String) {
             if (m != null) runCatching { relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gdel").put("u", m.user).put("id", msg.id))) }
         }
         changed()
+    }
+
+    /** Add/replace/remove my emoji reaction on a 1:1 message. An empty emoji removes it. */
+    fun react(c: Contact, msg: Msg, emoji: String) {
+        val m = me ?: return
+        synchronized(this) { if (emoji.isEmpty()) msg.reactions.remove(m.user) else msg.reactions[m.user] = emoji }
+        changed()
+        if (c.canChat) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "react").put("id", msg.id).put("e", emoji)) }
+    }
+
+    /** Add/replace/remove my emoji reaction on a group message (authenticated via gctl). */
+    fun reactGroup(g: Group, msg: Msg, emoji: String) {
+        val m = me ?: return
+        synchronized(this) { if (emoji.isEmpty()) msg.reactions.remove(m.user) else msg.reactions[m.user] = emoji }
+        changed()
+        runCatching { gctl(g, m, JSONObject().put("t", "react").put("id", msg.id).put("e", emoji)) }
     }
 
     private fun flush(c: Contact) {
@@ -866,6 +969,14 @@ class Core(server: String) {
                 val ts = inner.optLong("ts", 0)
                 if (ts > c.theirReadUpto) { c.theirReadUpto = ts; onChange() }
             }
+            "react" -> {
+                val id = inner.optString("id")
+                val e = inner.optString("e").take(16)
+                synchronized(this) {
+                    c.msgs.firstOrNull { it.id == id }?.let { if (e.isEmpty()) it.reactions.remove(c.user) else it.reactions[c.user] = e }
+                }
+                onChange()
+            }
             "ttl" -> {
                 val sec = inner.optInt("s", -1)
                 if (sec < 0 || sec > 30 * 86400 || !c.canChat) return
@@ -906,6 +1017,7 @@ class Core(server: String) {
         if (size !in 0..MAX_FILE) return null
         val out = JSONObject().put("id", id).put("k", k).put("n", cleanName(f.optString("n"))).put("m", cleanMime(f.optString("m"))).put("s", size)
         f.optString("th").takeIf { it.isNotEmpty() && it.length <= 8000 }?.let { out.put("th", it) }
+        if (f.optBoolean("grp")) out.put("grp", true)   // keep: tells fetchFile not to delete-on-pickup (group fan-out)
         return out
     }
 
@@ -918,7 +1030,9 @@ class Core(server: String) {
         if (Crypto.gcmOpen(f.getString("k").unhex(), FILE_LABEL, blob) == null) return false
         saveBlob(id, blob)
         synchronized(this) { f.put("local", id) }
-        runCatching { relay.doneWith(id) }
+        // group files fan out to many members, so leave the server copy for its TTL instead of
+        // deleting on first pickup (which would deny it to everyone else)
+        if (!f.optBoolean("grp")) runCatching { relay.doneWith(id) }
         onChange()
         return true
     }

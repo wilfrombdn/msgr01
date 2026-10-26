@@ -108,7 +108,7 @@ class MainActivity : Activity() {
             emojiPopup != null -> { emojiPopup?.dismiss(); emojiPopup = null }
             drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
             !Messenger.signedIn && screen != "welcome" -> showWelcome()
-            screen == "viewer" -> chatUser?.let { showChat(it) } ?: showChats()
+            screen == "viewer" -> leaveViewer()
             Messenger.signedIn && screen != "chats" -> showChats()
             search.isNotEmpty() -> { search = ""; showChats() }
             else -> super.onBackPressed()
@@ -655,6 +655,7 @@ class MainActivity : Activity() {
         box.setOnEditorActionListener { _, aid, _ -> if (aid == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         bar2.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         bar2.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box) } })
+        bar2.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachGroupId = id; attachTo = null; attachMenu(v) } })
         bar2.addView(icon(R.drawable.ic_send, white) { doSend() })
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(wall); fitsSystemWindows = true
@@ -692,7 +693,8 @@ class MainActivity : Activity() {
         if (!m.mine) m.sender?.let { su ->
             b.addView(tv("@$su", 13f, avatarColors[Math.floorMod(su.hashCode(), avatarColors.size)], true))
         }
-        b.addView(tv(m.text, 16f, tcol).apply { textSize = look.msg; setTextIsSelectable(true) })
+        m.file?.let { b.addView(attachmentView(m, tcol)) }
+        if (m.text.isNotEmpty()) b.addView(tv(m.text, 16f, tcol).apply { textSize = look.msg; setTextIsSelectable(true) })
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val mc = (tcol and 0x00FFFFFF) or (0x99 shl 24)
         meta.addView(tv(time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
@@ -702,12 +704,14 @@ class MainActivity : Activity() {
             Msg.FAILED -> meta.addView(tv("  not sent · tap", 12f, red).apply { setOnClickListener { Messenger.io.execute { Messenger.core.deliverGroup(g, m) } } })
         }
         b.addView(meta, LinearLayout.LayoutParams(-1, -2))
+        addReactions(b, m) { e -> val me = Messenger.core.me?.user; Messenger.reactGroup(g, m, if (m.reactions[me] == e) "" else e); fillGroup() }
         b.setOnLongClickListener { groupMessageMenu(g, m); true }
         wrap.addView(b, LinearLayout.LayoutParams(-2, -2).apply { if (m.mine) leftMargin = dp(56) else rightMargin = dp(56) })
         return wrap
     }
 
     private fun groupMessageMenu(g: Group, m: Msg) {
+        val me = Messenger.core.me?.user
         val opts = mutableListOf<Pair<String, () -> Unit>>()
         if (m.text.isNotEmpty()) opts.add("Copy" to {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
@@ -716,7 +720,7 @@ class MainActivity : Activity() {
             Messenger.io.execute { Messenger.core.deleteGroupMessage(g, m, forEveryone = true) }
         })
         opts.add("Delete for me" to { Messenger.core.deleteGroupMessage(g, m, forEveryone = false); fillGroup() })
-        pickList("Message", null, opts.map { it.first }.toTypedArray()) { i -> opts[i].second() }
+        longPressMenu(m.reactions[me], { e -> Messenger.reactGroup(g, m, e); fillGroup() }, opts)
     }
 
     private fun groupMenu(g: Group) {
@@ -848,7 +852,7 @@ class MainActivity : Activity() {
         box.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         input.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box) } })
-        input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachMenu(c, v) } })
+        input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachTo = c.user; attachGroupId = null; attachMenu(v) } })
         input.addView(icon(R.drawable.ic_send, white) { doSend() })
 
         val root = LinearLayout(this).apply {
@@ -941,7 +945,7 @@ class MainActivity : Activity() {
             background = round(fill, if (look.square) 0 else 14)
             setPadding(dp(10), dp(6), dp(10), dp(5))
         }
-        m.file?.let { b.addView(attachmentView(c, m, ink)) }
+        m.file?.let { b.addView(attachmentView(m, ink)) }
         if (m.text.isNotEmpty()) b.addView(tv(m.text, 16f, ink).apply { textSize = look.msg; setTextIsSelectable(true) })
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val metaColor = (ink and 0x00FFFFFF) or (0x99 shl 24)
@@ -959,12 +963,87 @@ class MainActivity : Activity() {
             Msg.FAILED -> meta.addView(tv("  not sent · tap to retry", 12f, red).apply { setOnClickListener { Messenger.retry(c, m) } })
         }
         b.addView(meta, LinearLayout.LayoutParams(-1, -2))
+        addReactions(b, m) { e -> val me = Messenger.core.me?.user; Messenger.react(c, m, if (m.reactions[me] == e) "" else e); fillChat() }
         b.setOnLongClickListener { messageMenu(c, m); true }
         wrap.addView(b, LinearLayout.LayoutParams(-2, -2).apply { if (m.mine) leftMargin = dp(56) else rightMargin = dp(56) })
         return wrap
     }
 
+    private val quickReactions = listOf("👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "👏")
+
+    /** Long-press menu with a reaction bar on top and the actions below (the app's own styling). */
+    private fun longPressMenu(mine: String?, onReact: (String) -> Unit, actions: List<Pair<String, () -> Unit>>) {
+        val d = android.app.Dialog(this)
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = round(bar, 10); setPadding(dp(6), dp(8), dp(6), dp(8)) }
+        val reactRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        quickReactions.forEach { e ->
+            reactRow.addView(tv(e, 24f).apply {
+                gravity = Gravity.CENTER; setPadding(dp(8), dp(6), dp(8), dp(6))
+                if (e == mine) background = round(Color.parseColor("#3A3A3A"), 20)
+                setOnClickListener { d.dismiss(); onReact(if (e == mine) "" else e) }   // tap your own to remove it
+            })
+        }
+        reactRow.addView(tv("＋", 22f, dim).apply {
+            gravity = Gravity.CENTER; setPadding(dp(10), dp(6), dp(10), dp(6))
+            setOnClickListener { d.dismiss(); pickEmoji { onReact(it) } }
+        })
+        col.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(reactRow) })
+        col.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(4) })
+        actions.forEach { (label, act) ->
+            col.addView(tv(label, 16f, if (label.startsWith("Delete")) red else white).apply {
+                background = pressable(); isClickable = true; setPadding(dp(18), dp(13), dp(28), dp(13))
+                setOnClickListener { d.dismiss(); act() }
+            })
+        }
+        d.setContentView(col)
+        d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        d.window?.setLayout((resources.displayMetrics.widthPixels * 0.82).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+        d.show()
+    }
+
+    /** Full emoji list for choosing any reaction. */
+    private fun pickEmoji(onPick: (String) -> Unit) {
+        val data = loadEmoji(); if (data.isEmpty()) return
+        val cols = 8
+        val d = android.app.Dialog(this)
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(12)) }
+        data.forEach { (header, emojis) ->
+            grid.addView(tv(header.substringAfter(' '), 13f, dim).apply { setPadding(dp(6), dp(10), 0, dp(4)) })
+            var row: LinearLayout? = null
+            emojis.forEachIndexed { i, e ->
+                if (i % cols == 0) row = LinearLayout(this).also { grid.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+                row!!.addView(tv(e, 22f).apply {
+                    gravity = Gravity.CENTER; setPadding(0, dp(7), 0, dp(7)); background = pressable(); isClickable = true
+                    setOnClickListener { d.dismiss(); onPick(e) }
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+            }
+        }
+        d.setContentView(ScrollView(this).apply { addView(grid); setBackgroundColor(bar) })
+        d.window?.setBackgroundDrawable(round(bar, 10))
+        d.window?.setLayout((resources.displayMetrics.widthPixels * 0.92).toInt(), (resources.displayMetrics.heightPixels * 0.68).toInt())
+        d.show()
+    }
+
+    /** Chips under a bubble showing each emoji and how many people reacted; tap to toggle yours. */
+    private fun addReactions(b: LinearLayout, m: Msg, toggle: (String) -> Unit) {
+        if (m.reactions.isEmpty()) return
+        val me = Messenger.core.me?.user
+        val row = LinearLayout(this).apply { setPadding(0, dp(3), 0, dp(1)) }
+        m.reactions.entries.groupBy({ it.value }, { it.key }).toList().sortedByDescending { it.second.size }.forEach { (emoji, who) ->
+            val mineHere = me != null && me in who
+            row.addView(tv("$emoji ${who.size}", 13f, if (mineHere) white else dim).apply {
+                setPadding(dp(8), dp(3), dp(8), dp(3))
+                background = round(Color.parseColor(if (mineHere) "#3A4654" else "#2A2A2A"), 12)
+                setOnClickListener { toggle(emoji) }
+            }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(4) })
+        }
+        b.addView(row)
+    }
+
     private fun messageMenu(c: Contact, m: Msg) {
+        val me = Messenger.core.me?.user
         val opts = mutableListOf<Pair<String, () -> Unit>>()
         if (m.text.isNotEmpty()) opts.add("Copy" to {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
@@ -973,7 +1052,7 @@ class MainActivity : Activity() {
             Messenger.run({ Messenger.core.deleteMessage(c, m, forEveryone = true) }, { fillChat() })
         })
         opts.add("Delete for me" to { Messenger.core.deleteMessage(c, m, forEveryone = false); fillChat() })
-        pickList("Message", null, opts.map { it.first }.toTypedArray()) { i -> opts[i].second() }
+        longPressMenu(m.reactions[me], { e -> Messenger.react(c, m, e); fillChat() }, opts)
     }
 
     private fun chatMenu(c: Contact, anchor: View) {
@@ -1147,6 +1226,7 @@ class MainActivity : Activity() {
     // ---------- attachments ----------
 
     private var attachTo: String? = null
+    private var attachGroupId: String? = null
     private var emojiPopup: android.widget.PopupWindow? = null
     private var emojiData: List<Pair<String, List<String>>>? = null
     private val pictures = HashMap<String, android.graphics.Bitmap?>()
@@ -1156,8 +1236,7 @@ class MainActivity : Activity() {
         return if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
     }
 
-    private fun attachMenu(c: Contact, anchor: View) {
-        attachTo = c.user
+    private fun attachMenu(anchor: View) {   // target already set in attachTo / attachGroupId
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = round(menuBg, 10)
@@ -1286,7 +1365,13 @@ class MainActivity : Activity() {
     }
 
     private fun attachPicked(uri: android.net.Uri, asPhoto: Boolean) {
-        val c = attachTo?.let { Messenger.core.contact(it) } ?: return
+        val c = attachTo?.let { Messenger.core.contact(it) }
+        val g = attachGroupId?.let { Messenger.core.group(it) }
+        if (c == null && g == null) return
+        // send to whichever target the attach menu was opened from
+        fun out(name: String, mime: String, data: ByteArray, thumb: ByteArray?) {
+            if (g != null) Messenger.sendGroupFile(g, name, mime, data, thumb) else Messenger.sendFile(c!!, name, mime, data, thumb)
+        }
         toast("Locking and sending…")
         Messenger.run({
             var name = "file"
@@ -1301,12 +1386,14 @@ class MainActivity : Activity() {
             if (asPhoto || (mime.startsWith("image/") && mime != "image/gif")) {
                 // re-saved as JPEG: smaller, and hidden details like GPS location are dropped
                 val bmp = loadPhoto(uri) ?: throw UserError("Couldn't open that photo")
-                Messenger.sendFile(c, name.substringBeforeLast('.') + ".jpg", "image/jpeg", jpeg(bmp, 1600, 85), thumbOf(bmp))
+                out(name.substringBeforeLast('.') + ".jpg", "image/jpeg", jpeg(bmp, 1600, 85), thumbOf(bmp))
             } else {
                 if (size > Core.MAX_FILE) throw UserError("Files can be up to ${Core.MAX_FILE / 1024 / 1024} MB")
                 val data = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError("Couldn't read that file")
-                Messenger.sendFile(c, name, mime, data, null)
+                out(name, mime, data, null)
             }
+            // the camera's unencrypted temp file has now been read into memory; don't leave it on disk
+            if (uri.authority == "$packageName.files") runCatching { contentResolver.delete(uri, null, null) }
         }, {}) { e -> toast(errorText(e)) }
     }
 
@@ -1316,7 +1403,7 @@ class MainActivity : Activity() {
         else -> "$n B"
     }
 
-    private fun attachmentView(c: Contact, m: Msg, ink: Int): View {
+    private fun attachmentView(m: Msg, ink: Int): View {
         val f = m.file!!
         val here = f.has("local")
         if (f.optString("m").startsWith("image/")) {
@@ -1369,6 +1456,8 @@ class MainActivity : Activity() {
         Messenger.run({ Messenger.core.fetchFile(m) }, {}) { e -> toast(errorText(e)) }
     }
 
+    private fun leaveViewer() = chatUser?.let { showChat(it) } ?: groupId?.let { showGroup(it) } ?: showChats()
+
     /** Full-screen photo, unlocked only in memory. */
     private fun showImage(m: Msg) {
         var bmp: android.graphics.Bitmap? = null
@@ -1378,7 +1467,7 @@ class MainActivity : Activity() {
             setContentView(FrameLayout(this).apply {
                 setBackgroundColor(Color.BLACK)
                 addView(ImageView(context).apply { setImageBitmap(b); scaleType = ImageView.ScaleType.FIT_CENTER })
-                addView(icon(R.drawable.ic_back) { chatUser?.let { showChat(it) } }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START))
+                addView(icon(R.drawable.ic_back) { leaveViewer() }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START))
                 fitsSystemWindows = true
             })
         })
