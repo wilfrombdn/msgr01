@@ -437,6 +437,7 @@ class MainActivity : Activity() {
         private const val PICK_PHOTO = 7
         private const val PICK_ATTACH_PHOTO = 8
         private const val PICK_ATTACH_FILE = 9
+        private const val TAKE_MEDIA = 12
         private const val CREATE_RECOVERY = 10
         private const val OPEN_RECOVERY = 11
     }
@@ -1173,6 +1174,9 @@ class MainActivity : Activity() {
             addView(tv(label, 16f, white).apply { setPadding(dp(16), 0, 0, 0) })
             setOnClickListener { pw.dismiss(); go() }
         })
+        row(R.drawable.ic_camera, "Camera") {
+            @Suppress("DEPRECATION") startActivityForResult(Intent(this, CameraActivity::class.java), TAKE_MEDIA)
+        }
         row(R.drawable.ic_attach, "Media") {
             val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
             else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
@@ -1461,6 +1465,7 @@ class MainActivity : Activity() {
         if (requestCode == CREATE_RECOVERY) return setupRecovery(uri)
         if (requestCode == OPEN_RECOVERY) return restoreFromFile(uri)
         if (requestCode == PICK_ATTACH_PHOTO || requestCode == PICK_ATTACH_FILE) return attachPicked(uri, requestCode == PICK_ATTACH_PHOTO)
+        if (requestCode == TAKE_MEDIA) return attachPicked(uri, data?.getBooleanExtra("photo", true) ?: true)
         if (requestCode != PICK_PHOTO) return
         var bmp: android.graphics.Bitmap? = null
         Messenger.run({ bmp = loadPhoto(uri) }, { bmp?.let { showCrop(it) } ?: toast("Couldn't open that photo") }) {

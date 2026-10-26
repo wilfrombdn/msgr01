@@ -306,6 +306,32 @@ class RelayFlowTest {
         assertFalse(Core(server).restoreFull(file, "not the password"))
     }
 
+    /** A large attachment (like a video) must survive pad -> seal -> upload -> download -> open. */
+    @Test fun largeAttachmentRoundTrip() {
+        assumeTrue(Relay(server).ping())
+        val aStore = HashMap<String, ByteArray>()
+        val bStore = HashMap<String, ByteArray>()
+        val alice = Core(server).apply { saveBlob = { k, v -> aStore[k] = v }; loadBlob = { aStore[it] } }
+        val bob = Core(server).apply { saveBlob = { k, v -> bStore[k] = v }; loadBlob = { bStore[it] } }
+        val a = "vida_$tag"; val b = "vidb_$tag"
+        alice.signup(a, "correct horse battery", "Al")
+        bob.signup(b, "another long password", "Bo")
+        val toBob = alice.addFriend("@$b")
+        bob.poll(5); val fromAlice = bob.contact(a)!!; bob.accept(fromAlice)
+        alice.poll(5)
+        assertEquals(Contact.FRIENDS, toBob.status)
+
+        val big = ByteArray(18 * 1024 * 1024) { (it * 31 + 7).toByte() }   // ~18 MB "video"
+        val msg = alice.queueFile(toBob, "clip.mp4", "video/mp4", big, null)
+        alice.deliver(toBob, msg)
+        assertEquals(Msg.SENT, msg.state)
+
+        bob.poll(15)   // poll auto-downloads attachments
+        val got = bob.contact(a)!!.msgs.last { it.file != null }
+        assertEquals("video/mp4", got.file!!.optString("m"))
+        assertArrayEquals(big, bob.openFile(got))
+    }
+
     @Test fun lockoutAfterFiveWrongPasswords() {
         assumeTrue(Relay(server).ping())
         val u = "carol_$tag"

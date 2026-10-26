@@ -2,4 +2,6 @@
 <paths>
     <!-- only the temporary unlocked copy of an attachment being opened -->
     <cache-path name="open" path="open/" />
+    <!-- photo/video just captured by the in-app camera, before it's locked and sent -->
+    <cache-path name="camera" path="camera/" />
 </paths>

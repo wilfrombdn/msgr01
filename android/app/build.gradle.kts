@@ -19,8 +19,8 @@ android {
         applicationId = "com.wilfrombdn.telegramnt"
         minSdk = 26
         targetSdk = 34
-        versionCode = 17
-        versionName = "3.7"
+        versionCode = 18
+        versionName = "3.8"
     }
     signingConfigs {
         create("release") {
@@ -67,6 +67,12 @@ dependencies {
     implementation("com.google.crypto.tink:tink-android:1.24.0")
     implementation("androidx.core:core:1.15.0")
     implementation("androidx.drawerlayout:drawerlayout:1.2.0") // Telegram-style slide-out side menu
+    implementation("androidx.activity:activity:1.9.3") // ComponentActivity (LifecycleOwner) for the camera
+    // CameraX: in-app camera (photo, video, pinch/slide zoom)
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
+    implementation("androidx.camera:camera-video:1.4.1")
     implementation("org.signal:libsignal-android:0.105.0") // Signal's encryption (Double Ratchet, sender keys) // FileProvider, to open attachments in other apps
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.signal:libsignal-client:0.105.0") // same library with desktop native code, for tests
