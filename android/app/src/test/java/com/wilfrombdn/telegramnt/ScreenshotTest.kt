@@ -95,6 +95,12 @@ class ScreenshotTest {
         call(a, "showAppearance"); shoot(a, "7-appearance")
         call(a, "showChat", "sam_r"); shoot(a, "8-chat-custom")
         Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second
+        call(a, "showChats")
+        a.javaClass.getDeclaredField("drawer").apply { isAccessible = true }.get(a)?.let { dl ->
+            (dl as androidx.drawerlayout.widget.DrawerLayout).openDrawer(androidx.core.view.GravityCompat.START)
+        }
+        shoot(a, "9-drawer")
+        Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second
         call(a, "showCrop", testBitmap(0xFF6A1B9A.toInt(), 0xFFFFB74D.toInt(), 1200, 800)); shoot(a, "6-crop")
         Messenger.initForPreview(fakeCore(signedIn = false))
         call(a, "showWelcome"); shoot(a, "0-welcome")

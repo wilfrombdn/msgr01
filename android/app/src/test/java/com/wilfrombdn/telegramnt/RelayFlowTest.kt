@@ -195,6 +195,27 @@ class RelayFlowTest {
         assertTrue(quin.contact(pu)!!.msgs.none { it.text == "this vanishes" })
     }
 
+    @Test fun readReceiptsMarkMessagesRead() {
+        assumeTrue(Relay(server).ping())
+        val rex = Core(server); val sky = Core(server)
+        val ru = "rex_$tag"; val su = "sky_$tag"
+        rex.signup(ru, "rexs long password", "Rex"); sky.signup(su, "skys long password", "Sky")
+        rex.addFriend(su); sky.poll(5); sky.accept(sky.contact(ru)!!); rex.poll(5)
+        val toSky = rex.contact(su)!!
+        val m = rex.queue(toSky, "did you see this?"); rex.deliver(toSky, m)
+        sky.poll(5)                       // Sky receives
+        sky.markRead(sky.contact(ru)!!)   // Sky reads -> sends a receipt
+        rex.poll(5)                       // Rex gets the receipt
+        assertTrue(toSky.theirReadUpto >= m.ts)
+
+        // with read receipts off, Sky sends none
+        val toSky2 = "sky off"
+        sky.readReceipts = false
+        val m2 = rex.queue(toSky, "and this one?"); rex.deliver(toSky, m2)
+        sky.poll(5); sky.markRead(sky.contact(ru)!!); rex.poll(5)
+        assertTrue("no receipt when off", toSky.theirReadUpto < m2.ts)
+    }
+
     @Test fun lockoutAfterFiveWrongPasswords() {
         assumeTrue(Relay(server).ping())
         val u = "carol_$tag"

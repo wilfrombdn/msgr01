@@ -27,6 +27,9 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import android.view.inputmethod.InputMethodManager
+import androidx.core.view.GravityCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
@@ -99,6 +102,7 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         when {
+            drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
             !Messenger.signedIn && screen != "welcome" -> showWelcome()
             screen == "viewer" -> chatUser?.let { showChat(it) } ?: showChats()
             Messenger.signedIn && screen != "chats" -> showChats()
@@ -377,10 +381,18 @@ class MainActivity : Activity() {
 
         val top = if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
             if (Messenger.connected) "msgr01" else "Connecting…", null,
-            icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { mainMenu(v) } },
+            icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
         )
-        setContentView(page(top, frame))
+        // Content + a left slide-out drawer (opens by tapping the lines or swiping from the edge).
+        val d = DrawerLayout(this)
+        d.addView(page(top, frame), DrawerLayout.LayoutParams(-1, -1))
+        d.addView(drawerPanel(d), DrawerLayout.LayoutParams(
+            minOf(dp(300), (resources.displayMetrics.widthPixels * 0.82).toInt()), -1
+        ).apply { gravity = GravityCompat.START })
+        d.setScrimColor(0x99000000.toInt())
+        drawer = d
+        setContentView(d)
     }
 
     private var screenSearch = false
@@ -541,7 +553,7 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
-        input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachMenu(c, v) } })
+        input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachMenu(c) } })
         input.addView(icon(R.drawable.ic_send, white) {
             val t = box.text.toString().trim()
             if (t.isEmpty()) return@icon
@@ -566,7 +578,7 @@ class MainActivity : Activity() {
     private fun fillChat() {
         val c = chatUser?.let { Messenger.core.contact(it) } ?: return
         val list = bubbles ?: return
-        if (c.unread != 0) { c.unread = 0; Messenger.save() }
+        Messenger.run({ Messenger.core.markRead(c) }, { Messenger.save() })
 
         val sub = when (c.status) {
             Contact.ASKED -> "friend request sent"
@@ -643,10 +655,17 @@ class MainActivity : Activity() {
         if (m.text.isNotEmpty()) b.addView(tv(m.text, 16f, ink).apply { textSize = look.msg; setTextIsSelectable(true) })
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val metaColor = (ink and 0x00FFFFFF) or (0x99 shl 24)
-        meta.addView(tv(time(m.ts), 12f, metaColor))
+        meta.addView(tv(time(m.ts), 12f, metaColor).apply { setPadding(0, 0, dp(6), 0) }) // gap before the tick
         if (m.mine) when (m.state) {
-            Msg.SENT -> meta.addView(icon(R.drawable.ic_check, metaColor, 14, 1))
-            Msg.SENDING -> meta.addView(tv(" 🕓", 11f, metaColor))
+            Msg.SENT -> {
+                val read = m.ts <= c.theirReadUpto
+                // one grey tick = sent; two accent ticks = read (like Telegram)
+                meta.addView(icon(R.drawable.ic_check, if (read) blue else metaColor, 14, 1))
+                if (read) meta.addView(icon(R.drawable.ic_check, blue, 14, 1).apply {
+                    (layoutParams as LinearLayout.LayoutParams).leftMargin = -dp(9)
+                })
+            }
+            Msg.SENDING -> meta.addView(tv("🕓", 11f, metaColor))
             Msg.FAILED -> meta.addView(tv("  not sent · tap to retry", 12f, red).apply { setOnClickListener { Messenger.retry(c, m) } })
         }
         b.addView(meta, LinearLayout.LayoutParams(-1, -2))
@@ -705,12 +724,36 @@ class MainActivity : Activity() {
 
     private var listDialog: android.app.Dialog? = null
 
-    private fun mainMenu(anchor: View) {
-        dropdown(anchor, Gravity.START,
-            "Add Friend" to { showNewChat() },
-            "Appearance" to { showAppearance() },
-            "Settings" to { showSettings() },
-        )
+    private var drawer: DrawerLayout? = null
+
+    private fun drawerPanel(d: DrawerLayout): View {
+        val me = Messenger.core.me
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(listBg)
+            fitsSystemWindows = true
+        }
+        // header: avatar + name + @username (tap -> settings)
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(bar)
+            setPadding(dp(18), dp(22), dp(18), dp(16))
+            addView(avatar(me?.name ?: "", 60, me?.avatar))
+            addView(tv(me?.name ?: "", 18f, white, true).apply { setPadding(0, dp(10), 0, 0) })
+            addView(tv("@${me?.user ?: ""}", 14f, dim))
+            setOnClickListener { d.closeDrawer(GravityCompat.START); showSettings() }
+        })
+        fun item(res: Int, label: String, go: () -> Unit) = col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            addView(icon(res, dim, 22, 0))
+            addView(tv(label, 16f, white).apply { setPadding(dp(22), 0, 0, 0) })
+            setOnClickListener { d.closeDrawer(GravityCompat.START); go() }
+        })
+        item(R.drawable.ic_edit, "New Message") { showNewChat() }
+        item(R.drawable.ic_lock, "Appearance") { showAppearance() }
+        item(R.drawable.ic_more, "Settings") { showSettings() }
+        return ScrollView(this).apply { setBackgroundColor(listBg); addView(col) }
     }
 
     /** A plain dark rectangle that drops down right under [anchor]. */
@@ -785,19 +828,41 @@ class MainActivity : Activity() {
         return if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
     }
 
-    private fun attachMenu(c: Contact, anchor: View) {
+    private fun attachMenu(c: Contact) {
         attachTo = c.user
-        dropdown(anchor, Gravity.END,
-            "Photo" to {
+        // drop the keyboard so the sheet isn't hidden behind it, then slide up from the bottom
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(window.decorView.windowToken, 0)
+        val sheet = android.app.Dialog(this)
+        sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        fun row(res: Int, label: String, go: () -> Unit) = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(24), dp(16), dp(24), dp(16))
+            addView(icon(res, white, 24, 0))
+            addView(tv(label, 17f, white).apply { setPadding(dp(20), 0, 0, 0) })
+            setOnClickListener { sheet.dismiss(); go() }
+        }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = round(bar, 14)
+            setPadding(0, dp(10), 0, dp(14))
+            addView(tv("Send", 14f, dim, true).apply { setPadding(dp(24), dp(6), dp(24), dp(6)) })
+            addView(row(R.drawable.ic_attach, "Photo") {
                 val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
                 else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
                 @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_PHOTO)
-            },
-            "File" to {
+            })
+            addView(row(R.drawable.ic_file, "File") {
                 val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
                 @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_FILE)
-            },
-        )
+            })
+        }
+        sheet.setContentView(LinearLayout(this).apply { setPadding(dp(8), 0, dp(8), dp(8)); addView(col, LinearLayout.LayoutParams(-1, -2)) })
+        sheet.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            setGravity(Gravity.BOTTOM)
+            setLayout(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        sheet.show()
     }
 
     private fun jpeg(b: android.graphics.Bitmap, maxSide: Int, quality: Int): ByteArray {
@@ -1045,6 +1110,20 @@ class MainActivity : Activity() {
             setOnCheckedChangeListener { _, on -> Messenger.background = on; Messenger.settingsChanged() }
         })
         col.addView(tv("Keeps a small \"connected\" notification. No Google push service is used.", 13.5f, dim).apply {
+            setPadding(dp(20), 0, dp(20), dp(10))
+        })
+        col.addView(Switch(this).apply {
+            text = "Read receipts"
+            setTextColor(white)
+            textSize = 16f * look.ui
+            isChecked = Messenger.core.readReceipts
+            val st = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            thumbTintList = android.content.res.ColorStateList(st, intArrayOf(white, Color.parseColor("#9AA4AE")))
+            trackTintList = android.content.res.ColorStateList(st, intArrayOf(Color.parseColor("#80FFFFFF"), Color.parseColor("#3A4654")))
+            setPadding(dp(20), dp(14), dp(20), dp(14))
+            setOnCheckedChangeListener { _, on -> Messenger.core.readReceipts = on; Messenger.settingsChanged() }
+        })
+        col.addView(tv("When on, friends see when you've read their messages, and you see when they've read yours.", 13.5f, dim).apply {
             setPadding(dp(20), 0, dp(20), dp(10))
         })
         col.addView(row("Cloud backup", if (me.cloudBackup) "On: you can log in on a new phone. The backup is locked with your password; the server can't read it." else "Off: this account only works on this phone, and the server keeps nothing to restore.") {

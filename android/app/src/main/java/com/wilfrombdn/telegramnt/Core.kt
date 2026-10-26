@@ -60,6 +60,7 @@ class Contact(
     var waitingForAdd: Boolean = false, // they accepted my messages but didn't add me as a friend
     var theirIdent: String? = null,     // their Signal identity key, from the directory
     var ttl: Int = 0,                   // disappearing-messages timer in seconds (0 = off), shared by both sides
+    var theirReadUpto: Long = 0,        // my sent messages up to this time have been read by them
 ) {
     val myAddr get() = Crypto.addressOf(myToken)
     val lastTs get() = msgs.lastOrNull()?.ts ?: created
@@ -131,6 +132,7 @@ class Core(server: String) {
     /** Friend whose chat is on screen (no unread count for it). */
     @Volatile var openChat: String? = null
     @Volatile var backupDirty = false
+    var readReceipts = true   // tell friends when I've read their messages (and so see theirs)
     var onChange: () -> Unit = {}
     var onNew: (Contact) -> Unit = {}
     /** Where encrypted attachments are kept on this device (Android: files folder; tests: memory). */
@@ -293,6 +295,18 @@ class Core(server: String) {
 
     /** From a message-request chat I accepted: add them as a friend after all. */
     fun makeFriend(c: Contact) = accept(c, friend = true)
+
+    /** Marks a chat read and, if read receipts are on, tells the other side. */
+    fun markRead(c: Contact) {
+        val had = c.unread != 0
+        c.unread = 0
+        val lastTheirs = synchronized(this) { c.msgs.lastOrNull { !it.mine && it.state == Msg.RECEIVED }?.ts ?: 0 }
+        if (had) onChange()
+        val m = me ?: return
+        if (readReceipts && c.canChat && lastTheirs > 0) {
+            runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "read").put("ts", lastTheirs)) }
+        }
+    }
 
     // ---------- disappearing messages ----------
 
@@ -597,6 +611,10 @@ class Core(server: String) {
                 onChange()
                 if (inner.optBoolean("ask")) runCatching { sendAvatar(c, ask = false) }
             }
+            "read" -> {
+                val ts = inner.optLong("ts", 0)
+                if (ts > c.theirReadUpto) { c.theirReadUpto = ts; onChange() }
+            }
             "ttl" -> {
                 val sec = inner.optInt("s", -1)
                 if (sec < 0 || sec > 30 * 86400 || !c.canChat) return
@@ -688,6 +706,7 @@ class Core(server: String) {
                 .put("cloudBackup", m.cloudBackup))
         }
         return o.put("contacts", JSONArray(contacts.map { it.json(withMsgs = true) })).put("backupDirty", backupDirty)
+            .put("readReceipts", readReceipts)
     }
 
     @Synchronized
@@ -711,6 +730,7 @@ class Core(server: String) {
             c.msgs.add(note("msgr01 now uses Signal's encryption. Your safety code with ${c.name} changed; check it again."))
         }
         backupDirty = o.optBoolean("backupDirty")
+        readReceipts = o.optBoolean("readReceipts", true)
         // attachments that arrived but weren't downloaded yet
         for (c in contacts) for (msg in c.msgs) if (!msg.mine && msg.file?.has("local") == false) toFetch.add(msg)
     }

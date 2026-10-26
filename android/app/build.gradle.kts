@@ -19,8 +19,8 @@ android {
         applicationId = "com.wilfrombdn.telegramnt"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "3.1"
+        versionCode = 12
+        versionName = "3.2"
     }
     signingConfigs {
         create("release") {
@@ -66,6 +66,7 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("com.google.crypto.tink:tink-android:1.24.0")
     implementation("androidx.core:core:1.15.0")
+    implementation("androidx.drawerlayout:drawerlayout:1.2.0") // Telegram-style slide-out side menu
     implementation("org.signal:libsignal-android:0.105.0") // Signal's encryption (Double Ratchet, sender keys) // FileProvider, to open attachments in other apps
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.signal:libsignal-client:0.105.0") // same library with desktop native code, for tests
