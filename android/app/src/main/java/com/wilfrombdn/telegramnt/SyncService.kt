@@ -24,7 +24,7 @@ class SyncService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, CH_CONN)
             .setSmallIcon(R.drawable.ic_notify)
-            .setContentTitle("msgr01 is connected")
+            .setContentTitle("MSNGR is connected")
             .setContentText("Messages arrive even when the app is closed")
             .setContentIntent(open)
             .setOngoing(true)

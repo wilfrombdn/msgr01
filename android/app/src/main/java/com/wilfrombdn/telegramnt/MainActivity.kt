@@ -104,6 +104,7 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         when {
+            emojiPopup != null -> { emojiPopup?.dismiss(); emojiPopup = null }
             drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
             !Messenger.signedIn && screen != "welcome" -> showWelcome()
             screen == "viewer" -> chatUser?.let { showChat(it) } ?: showChats()
@@ -111,6 +112,11 @@ class MainActivity : Activity() {
             search.isNotEmpty() -> { search = ""; showChats() }
             else -> super.onBackPressed()
         }
+    }
+
+    override fun onPause() {
+        emojiPopup?.dismiss(); emojiPopup = null
+        super.onPause()
     }
 
     private fun redraw() {
@@ -257,7 +263,7 @@ class MainActivity : Activity() {
             clipToOutline = true
         }, LinearLayout.LayoutParams(dp(150), dp(150)))
         col.addView(gap(24))
-        col.addView(tv("msgr01", 26f, white, true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, -2))
+        col.addView(tv("MSNGR", 26f, white, true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, -2))
         col.addView(gap(12))
         col.addView(tv("The world's most private messaging app.\nEvery chat is end-to-end encrypted.\nNo phone number or email needed.", 16f, dim).apply {
             gravity = Gravity.CENTER
@@ -365,6 +371,7 @@ class MainActivity : Activity() {
     // ---------- chat list ----------
 
     private fun showChats() {
+        emojiPopup?.dismiss(); emojiPopup = null
         screen = "chats"
         chatUser = null
         Messenger.core.openChat = null
@@ -397,7 +404,7 @@ class MainActivity : Activity() {
         }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
 
         val top = if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
-            if (Messenger.connected) "msgr01" else "Connecting…", null,
+            if (Messenger.connected) "MSNGR" else "Connecting…", null,
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
         )
@@ -621,6 +628,7 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
         bar2.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
+        bar2.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box) } })
         bar2.addView(icon(R.drawable.ic_send, white) {
             val t = box.text.toString().trim(); if (t.isEmpty()) return@icon
             if (t.length > Core.MAX_TEXT) { toast("Too long"); return@icon }
@@ -760,7 +768,7 @@ class MainActivity : Activity() {
                 setPadding(0, dp(8), dp(8), dp(8))
                 setOnClickListener {
                     startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
-                        "Add me on msgr01: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
+                        "Add me on MSNGR: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
                 }
             })
         })
@@ -802,6 +810,7 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
+        input.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box) } })
         input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachMenu(c, v) } })
         input.addView(icon(R.drawable.ic_send, white) {
             val t = box.text.toString().trim()
@@ -1035,7 +1044,7 @@ class MainActivity : Activity() {
         item(R.drawable.ic_lock, "Appearance", "colours, text size, bubbles") { showAppearance() }
         item(R.drawable.ic_menu, "Settings") { showSettings() }
         col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
-        col.addView(tv("msgr01 ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
+        col.addView(tv("MSNGR ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
             setPadding(dp(22), dp(14), dp(22), dp(16))
         })
         return LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(listBg); addView(col, LinearLayout.LayoutParams(-1, -1)) }
@@ -1106,6 +1115,8 @@ class MainActivity : Activity() {
     // ---------- attachments ----------
 
     private var attachTo: String? = null
+    private var emojiPopup: android.widget.PopupWindow? = null
+    private var emojiData: List<Pair<String, List<String>>>? = null
     private val pictures = HashMap<String, android.graphics.Bitmap?>()
 
     private fun preview(m: Msg): String {
@@ -1145,6 +1156,82 @@ class MainActivity : Activity() {
         // expand upward, just above the clip
         panel.measure(View.MeasureSpec.makeMeasureSpec(dp(190), View.MeasureSpec.EXACTLY), View.MeasureSpec.UNSPECIFIED)
         pw.showAsDropDown(anchor, -dp(130), -(anchor.height + panel.measuredHeight + dp(6)))
+    }
+
+    /** Reads the bundled emoji list once, keeping only ones this phone's font can actually draw. */
+    private fun loadEmoji(): List<Pair<String, List<String>>> {
+        emojiData?.let { return it }
+        val paint = android.graphics.Paint()
+        val out = ArrayList<Pair<String, List<String>>>()
+        runCatching {
+            resources.openRawResource(R.raw.emoji).bufferedReader().useLines { lines ->
+                for (line in lines) {
+                    val bar = line.indexOf('|'); if (bar < 0) continue
+                    val header = line.substring(0, bar)                       // e.g. "😀 Smileys"
+                    val list = line.substring(bar + 1).split(" ").filter { it.isNotEmpty() && paint.hasGlyph(it) }
+                    if (list.isNotEmpty()) out.add(header to list)
+                }
+            }
+        }
+        emojiData = out
+        return out
+    }
+
+    /** Telegram-style emoji panel that pops up above the clip and inserts into [box] at the cursor. */
+    private fun emojiPicker(anchor: View, box: EditText) {
+        emojiPopup?.let { it.dismiss(); emojiPopup = null; return }   // tapping the face again closes it
+        val data = loadEmoji()
+        if (data.isEmpty()) return
+        val wPx = resources.displayMetrics.widthPixels
+        val cols = (wPx / dp(42)).coerceIn(6, 10)
+
+        val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), dp(4), dp(6), dp(6)) }
+        val scroll = ScrollView(this).apply { addView(grid); isFillViewport = true }
+        fun insert(e: String) {
+            val s = box.selectionStart.coerceAtLeast(0); val en = box.selectionEnd.coerceAtLeast(0)
+            box.text.replace(minOf(s, en), maxOf(s, en), e)
+        }
+        fun showTab(emojis: List<String>) {
+            grid.removeAllViews()
+            var row: LinearLayout? = null
+            emojis.forEachIndexed { i, e ->
+                if (i % cols == 0) row = LinearLayout(this).also { grid.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+                row!!.addView(tv(e, 23f).apply {
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(7), 0, dp(7))
+                    background = pressable()
+                    isClickable = true
+                    setOnClickListener { insert(e) }
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+            }
+            scroll.scrollTo(0, 0)
+        }
+
+        val tabs = LinearLayout(this).apply { setBackgroundColor(bar); setPadding(dp(2), 0, dp(2), 0) }
+        data.forEach { (header, emojis) ->
+            tabs.addView(tv(header.substringBefore(' '), 19f).apply {
+                gravity = Gravity.CENTER; setPadding(0, dp(9), 0, dp(9))
+                background = pressable(); isClickable = true
+                setOnClickListener { showTab(emojis) }
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(menuBg)
+            addView(tabs, LinearLayout.LayoutParams(-1, -2))
+            addView(scroll, LinearLayout.LayoutParams(-1, dp(228)))
+        }
+        showTab(data[0].second)
+
+        val h = dp(228) + dp(42)
+        val pw = android.widget.PopupWindow(panel, wPx, h, false)
+        pw.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(menuBg))
+        pw.isClippingEnabled = false
+        pw.setOnDismissListener { emojiPopup = null }
+        emojiPopup = pw
+        val loc = IntArray(2); anchor.getLocationOnScreen(loc)
+        pw.showAsDropDown(anchor, -loc[0], -(anchor.height + h + dp(4)))
     }
 
     private fun jpeg(b: android.graphics.Bitmap, maxSide: Int, quality: Int): ByteArray {
@@ -1284,7 +1371,7 @@ class MainActivity : Activity() {
 
     private fun chooseRecoveryFile() {
         val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "msgr01-recovery-${Messenger.core.me?.user}.m01")
+            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "MSNGR-recovery-${Messenger.core.me?.user}.m01")
         @Suppress("DEPRECATION") startActivityForResult(i, CREATE_RECOVERY)
     }
 
@@ -1304,7 +1391,7 @@ class MainActivity : Activity() {
         Messenger.run({ bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } }, {
             val b = bytes
             val owner = b?.let { Messenger.core.backupOwner(it) }
-            if (b == null || owner == null) { toast("That isn't a msgr01 recovery file."); return@run }
+            if (b == null || owner == null) { toast("That isn't a MSNGR recovery file."); return@run }
             val pass = field("Password", password = true)
             popup("Restore @$owner", "Enter the account password to unlock this backup. Your chats will be restored on this phone.", pass,
                 "Cancel" to dim, "Restore" to white) { i ->
@@ -1494,7 +1581,7 @@ class MainActivity : Activity() {
             }
         })
         col.addView(gap(20))
-        col.addView(tv("msgr01 ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
+        col.addView(tv("MSNGR ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
             13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })
         setContentView(page(topBar("Settings", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
     }

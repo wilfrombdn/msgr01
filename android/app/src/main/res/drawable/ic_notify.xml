@@ -1,7 +1,6 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp" android:viewportWidth="108" android:viewportHeight="108" android:tint="#FFFFFF">
-    <path android:fillColor="#FFFFFF" android:pathData="M24,55 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0 z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M63,27 C70,19 79,18 83,20 C78,25 76,31 69,34 Z" />
-    <path android:fillColor="#000000" android:pathData="M39,50 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 z" />
-    <path android:fillColor="#000000" android:pathData="M57,50 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 z" />
+    <!-- single chat bubble silhouette; the three dots are cut out so they survive the status-bar tint -->
+    <path android:fillColor="#FFFFFF" android:fillType="evenOdd"
+        android:pathData="M36,30 L72,30 Q84,30 84,42 L84,60 Q84,72 72,72 L44,72 L30,86 L34,72 Q24,71 24,60 L24,42 Q24,30 36,30 Z M37,51 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z M49,51 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z M61,51 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z" />
 </vector>

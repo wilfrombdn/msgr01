@@ -318,7 +318,7 @@ class Core(server: String) {
         if (user == m.user) throw UserError("That's you!")
         contact(user)?.let { return it }
         val p = relay.lookup(user) ?: throw UserError("No one has the username @$user")
-        if (p.ident.isEmpty()) throw UserError("@$user needs to update msgr01 first")
+        if (p.ident.isEmpty()) throw UserError("@$user needs to update MSNGR first")
         val c = Contact(user, "@$user", Contact.ASKED, Crypto.randomHex(), null, p.enc, p.sig, theirInbox = p.inbox, theirIdent = p.ident)
         relay.fetch(listOf(c.myToken), emptyList(), 0) // my mailbox exists before they can answer
         sealSignal(m, c, p.inbox, JSONObject().put("t", "request").put("u", m.user).put("n", m.name).put("a", c.myAddr))
@@ -686,7 +686,7 @@ class Core(server: String) {
     }
 
     private fun startSession(m: Me, c: Contact) {
-        val b = relay.bundle(c.user) ?: throw UserError("@${c.user} needs to update msgr01 first")
+        val b = relay.bundle(c.user) ?: throw UserError("@${c.user} needs to update MSNGR first")
         val ident = b.getString("ident")
         // the identity must match what the directory listed when we added them
         if (c.theirIdent != null && c.theirIdent != ident) throw IOException("@${c.user}'s key changed")
@@ -1009,7 +1009,7 @@ class Core(server: String) {
         if (signal == null) for (c in contacts) {
             // upgrading from 2.x: new encryption, so new safety codes
             c.verified = false
-            c.msgs.add(note("msgr01 now uses Signal's encryption. Your safety code with ${c.name} changed; check it again."))
+            c.msgs.add(note("MSNGR now uses Signal's encryption. Your safety code with ${c.name} changed; check it again."))
         }
         backupDirty = o.optBoolean("backupDirty")
         readReceipts = o.optBoolean("readReceipts", true)

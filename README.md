@@ -1,7 +1,11 @@
-# Telegramn't
+# MSNGR
 
 Private messaging for Android. Messages are end-to-end encrypted on the phone,
 and the relay server only passes along sealed boxes it can't open.
+
+(The repo, package name, and download URLs keep the old `telegramnt`/`msgr01`
+identifiers so existing links and installs don't break; only the app's display
+name has changed.)
 
 - `android/`: the app (Kotlin, plain Views, Google Tink for crypto)
 - `server/relay.py`: the server (Python standard library + SQLite)

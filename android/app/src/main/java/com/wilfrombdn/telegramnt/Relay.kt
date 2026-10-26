@@ -7,7 +7,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Base64
 
-/** Talks to the msgr01 server. Messages only ever travel sealed. */
+/** Talks to the MSNGR server. Messages only ever travel sealed. */
 class Relay(val server: String) {
     class Incoming(val token: String, val id: String, val blob: ByteArray)
     class Profile(val user: String, val enc: String, val sig: String, val inbox: String, val ident: String)
