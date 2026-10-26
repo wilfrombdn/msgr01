@@ -212,7 +212,6 @@ class CameraActivity : ComponentActivity() {
         recordStart = SystemClock.uptimeMillis()
         shutter.background = ring(0xFFE53935.toInt(), 0x55E53935)
         timer.visibility = View.VISIBLE; hint.visibility = View.GONE
-        tick()
         recording = pending.start(ContextCompat.getMainExecutor(this)) { ev ->
             if (ev is VideoRecordEvent.Finalize) {
                 val hardError = ev.hasError() && ev.error != VideoRecordEvent.Finalize.ERROR_FILE_SIZE_LIMIT_REACHED
@@ -221,6 +220,7 @@ class CameraActivity : ComponentActivity() {
                 } else handBack(file, false)
             }
         }
+        tick()   // start the timer only once `recording` is set, or its null-guard bails out immediately
     }
 
     private fun tick() {
