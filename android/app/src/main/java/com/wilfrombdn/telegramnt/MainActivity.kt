@@ -657,11 +657,16 @@ class MainActivity : Activity() {
         bar2.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box) } })
         bar2.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachGroupId = id; attachTo = null; attachMenu(v) } })
         bar2.addView(icon(R.drawable.ic_send, white) { doSend() })
+        // read-only group: non-admins see a notice instead of the composer
+        val canPost = g.canPost(Messenger.core.me?.user ?: "")
+        val bottom: View = if (canPost) bar2 else tv("🔒  Only admins can post in this group", 14f, dim).apply {
+            gravity = Gravity.CENTER; setBackgroundColor(listBg); setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(wall); fitsSystemWindows = true
             addView(groupTop, LinearLayout.LayoutParams(-1, -2))
             addView(groupScroller, LinearLayout.LayoutParams(-1, 0, 1f))
-            addView(bar2, LinearLayout.LayoutParams(-1, -2))
+            addView(bottom, LinearLayout.LayoutParams(-1, -2))
         })
         fillGroup()
     }
@@ -670,7 +675,7 @@ class MainActivity : Activity() {
         val g = groupId?.let { Messenger.core.group(it) } ?: return
         if (g.unread != 0) { g.unread = 0; Messenger.save() }
         groupTop?.removeAllViews()
-        groupTop?.addView(topBar(g.name, "${g.members.size} member" + (if (g.members.size != 1) "s" else "") + if (g.public) " · public" else "",
+        groupTop?.addView(topBar(g.name, "${g.members.size} member" + (if (g.members.size != 1) "s" else "") + (if (g.public) " · public" else "") + if (g.readOnly) " · read-only" else "",
             LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; addView(icon(R.drawable.ic_back) { showChats() }); addView(avatar(g.name, 40)) },
             icon(R.drawable.ic_more) { groupMenu(g) }), LinearLayout.LayoutParams(-1, -2))
         val list = groupBubbles ?: return
@@ -729,6 +734,7 @@ class MainActivity : Activity() {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("group", Messenger.core.groupInviteLink(g)))
             toast("Invite link copied")
         }) else items.add("Add a friend" to { addToGroup(g) })
+        if (g.owner.isNotEmpty() && g.isLeader(Messenger.core.me?.user ?: "")) items.add("Group settings" to { showGroupSettings(g) })
         items.add("Leave group" to {
             popup("Leave \"${g.name}\"?", "You'll stop getting its messages. You can be re-invited later.", null, "Cancel" to dim, "Leave" to red) { i ->
                 if (i == 1) { Messenger.io.execute { Messenger.core.leaveGroup(g) }; showChats() }
@@ -743,6 +749,33 @@ class MainActivity : Activity() {
         pickList("Add to ${g.name}", null, friends.map { it.name }.toTypedArray()) { i ->
             Messenger.run({ Messenger.core.inviteToGroup(g, friends[i].user); Messenger.kick() }, { fillGroup() }) { e -> toast(errorText(e)) }
         }
+    }
+
+    /** Admin-only screen: rename, read-only, and who the admins are. */
+    private fun showGroupSettings(g: Group) {
+        screen = "groupsettings"
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(tv("Name", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
+        val nameBox = field("Group name", g.name)
+        col.addView(nameBox, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(20), 0, dp(20), 0) })
+        col.addView(gap(10))
+        var readOnly = g.readOnly
+        col.addView(settingSwitch("Read-only", g.readOnly) { readOnly = it })
+        col.addView(settingNote("When on, only admins can post. Anyone can still react. Note: this is enforced by the app, not the server — a modified app could still post, so don't treat it as a security guarantee."))
+        col.addView(tv("Admins", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
+        val chosen = g.leaders.toMutableSet()
+        synchronized(Messenger.core) { g.members.sorted() }.forEach { member ->
+            val isOwner = member == g.owner
+            col.addView(settingSwitch("@$member" + if (isOwner) "  (owner)" else "", isOwner || member in chosen) { on ->
+                if (on) chosen.add(member) else chosen.remove(member)
+            }.apply { if (isOwner) isEnabled = false })
+        }
+        col.addView(gap(20))
+        col.addView(cta("Save") {
+            Messenger.run({ Messenger.core.setGroup(g, nameBox.text.toString(), readOnly, chosen); Messenger.kick() }, { showGroup(g.id) }) { e -> toast(errorText(e)) }
+        }, ctaParams())
+        col.addView(gap(20))
+        setContentView(page(topBar("Group settings", left = icon(R.drawable.ic_back) { showGroup(g.id) }), ScrollView(this).apply { addView(col) }))
     }
 
     // ---------- add a friend ----------

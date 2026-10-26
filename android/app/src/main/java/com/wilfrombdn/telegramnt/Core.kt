@@ -145,25 +145,37 @@ class Group(
     val created: Long = System.currentTimeMillis(),
     val members: MutableSet<String> = mutableSetOf(),
     val msgs: MutableList<Msg> = mutableListOf(),
+    val owner: String = "",      // creator @username; anchored into the address so a tampered link can't claim it. "" = legacy group (no roles)
 ) {
     @Volatile var distSent = false   // have I posted my sender key this session (not persisted)
+    val leaders = mutableSetOf<String>()  // @usernames allowed to change settings (owner is always one)
+    var readOnly = false                  // true = only leaders can post (client-enforced)
+    var setVer = 0                        // version counter for settings changes (newer wins)
     val pending = mutableListOf<Triple<String, String, ByteArray>>() // gmsgs waiting for a sender key
     val pendingCtl = mutableListOf<Pair<String, ByteArray>>()        // gctl controls waiting for a sender key
     val lastTs get() = msgs.lastOrNull()?.ts ?: created
-    val addr get() = Crypto.sha256(("msgr01-group|$secret").toByteArray()).hex()
-    val key get() = Crypto.sha256(("msgr01-group-key|$secret").toByteArray())
+    // owner-anchored v2 derivation for new groups; legacy groups (no owner) keep the old one
+    val addr get() = Crypto.sha256((if (owner.isEmpty()) "msgr01-group|$secret" else "msgr01-group-v2|$owner|$secret").toByteArray()).hex()
+    val key get() = Crypto.sha256((if (owner.isEmpty()) "msgr01-group-key|$secret" else "msgr01-group-key-v2|$owner|$secret").toByteArray())
     val distId: UUID get() = UUID.nameUUIDFromBytes(secret.unhex())
+
+    /** Legacy groups have no roles (everyone equal); new groups: the owner and named leaders. */
+    fun isLeader(user: String) = owner.isEmpty() || user == owner || user in leaders
+    fun canPost(user: String) = !readOnly || isLeader(user)
 
     fun json(withMsgs: Boolean): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("secret", secret).put("public", public)
         .put("cursor", cursor).put("created", created).put("members", JSONArray(members.toList()))
+        .put("owner", owner).put("leaders", JSONArray(leaders.toList())).put("readOnly", readOnly).put("setVer", setVer)
         .apply { if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() })) }
 
     companion object {
         fun from(o: JSONObject): Group {
             val g = Group(o.getString("id"), o.getString("name"), o.getString("secret"), o.getBoolean("public"),
-                o.optLong("cursor"), o.optInt("unread"), o.optLong("created"))
+                o.optLong("cursor"), o.optInt("unread"), o.optLong("created"), owner = o.optString("owner"))
             o.optJSONArray("members")?.let { for (i in 0 until it.length()) g.members.add(it.getString(i)) }
+            o.optJSONArray("leaders")?.let { for (i in 0 until it.length()) g.leaders.add(it.getString(i)) }
+            g.readOnly = o.optBoolean("readOnly"); g.setVer = o.optInt("setVer")
             o.optJSONArray("msgs")?.let { for (i in 0 until it.length()) g.msgs.add(Msg.from(it.getJSONObject(i))) }
             return g
         }
@@ -358,8 +370,9 @@ class Core(server: String) {
 
     fun createGroup(name: String, public: Boolean, invite: List<String> = emptyList()): Group {
         val m = me ?: throw UserError("Not signed in")
-        val g = Group(Crypto.randomHex(8), name.trim().take(80).ifEmpty { "Group" }, Crypto.randomHex(), public)
+        val g = Group(Crypto.randomHex(8), name.trim().take(80).ifEmpty { "Group" }, Crypto.randomHex(), public, owner = m.user)
         g.members.add(m.user)
+        g.leaders.add(m.user)
         postMyDist(m, g)
         synchronized(this) { groups.add(g) }
         g.msgs.add(note(if (public) "Group created. Share the invite link to let people join." else "Group created. Add friends from the group menu."))
@@ -374,13 +387,13 @@ class Core(server: String) {
         val user = rawUser.trim().removePrefix("@").lowercase()
         val c = contact(user) ?: throw UserError("@$user isn't in your friends")
         if (!c.canChat) throw UserError("@$user hasn't accepted you yet")
-        sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "ginvite").put("secret", g.secret).put("n", g.name).put("public", g.public))
+        sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "ginvite").put("secret", g.secret).put("n", g.name).put("public", g.public).put("o", g.owner))
         synchronized(this) { g.members.add(user) }
         changed()
     }
 
     fun groupInviteLink(g: Group): String {
-        val o = JSONObject().put("s", g.secret).put("n", g.name)
+        val o = JSONObject().put("s", g.secret).put("n", g.name).put("o", g.owner)
         return "msgr01://group#" + Base64.getUrlEncoder().withoutPadding().encodeToString(o.toString().toByteArray())
     }
 
@@ -389,13 +402,14 @@ class Core(server: String) {
         val o = try { JSONObject(String(Base64.getUrlDecoder().decode(frag))) } catch (e: Exception) { throw UserError("That isn't a valid group link") }
         val secret = o.optString("s")
         if (secret.length != 64 || !secret.all { it in "0123456789abcdef" }) throw UserError("That isn't a valid group link")
-        return joinGroup(secret, o.optString("n").take(80).ifBlank { "Group" }, public = true)
+        return joinGroup(secret, o.optString("n").take(80).ifBlank { "Group" }, public = true, owner = o.optString("o"))
     }
 
-    private fun joinGroup(secret: String, name: String, public: Boolean): Group {
+    private fun joinGroup(secret: String, name: String, public: Boolean, owner: String = ""): Group {
         val m = me ?: throw UserError("Not signed in")
         synchronized(this) { groups.firstOrNull { it.secret == secret } }?.let { return it }
-        val g = Group(Crypto.randomHex(8), name, secret, public)
+        val g = Group(Crypto.randomHex(8), name, secret, public, owner = owner)
+        if (owner.isNotEmpty()) g.leaders.add(owner)   // seed the root of trust from the invite
         g.members.add(m.user)
         postMyDist(m, g)
         synchronized(this) { groups.add(g) }
@@ -419,8 +433,26 @@ class Core(server: String) {
         return msg
     }
 
+    /** A leader changes the group's name / read-only / leader list; broadcast as an authenticated set. */
+    fun setGroup(g: Group, name: String, readOnly: Boolean, leaders: Set<String>) {
+        val m = me ?: return
+        if (!g.isLeader(m.user)) throw UserError("Only an admin can change this group")
+        synchronized(this) {
+            g.name = name.trim().take(80).ifEmpty { g.name }
+            g.readOnly = readOnly
+            g.leaders.clear(); g.leaders.addAll(leaders); if (g.owner.isNotEmpty()) g.leaders.add(g.owner)
+            g.setVer++
+        }
+        changed()
+        runCatching {
+            gctl(g, m, JSONObject().put("t", "set").put("ver", g.setVer).put("n", g.name)
+                .put("ro", g.readOnly).put("ldr", JSONArray(g.leaders.toList())))
+        }
+    }
+
     fun deliverGroup(g: Group, msg: Msg) {
         val m = me ?: return
+        if (!g.canPost(m.user)) { msg.state = Msg.FAILED; onChange(); return }   // read-only: only leaders post
         msg.state = try {
             if (!g.distSent) postMyDist(m, g)
             val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, msg.text.toByteArray()) }
@@ -470,6 +502,7 @@ class Core(server: String) {
 
     fun deliverGroupFile(g: Group, msg: Msg) {
         val m = me ?: return
+        if (!g.canPost(m.user)) { msg.state = Msg.FAILED; onChange(); return }
         val f = msg.file ?: return
         msg.state = try {
             if (!f.has("id")) f.put("id", relay.upload(loadBlob(f.getString("local")) ?: throw IOException("attachment missing")))
@@ -535,6 +568,7 @@ class Core(server: String) {
                 } catch (e: Exception) {
                     return
                 }
+                if (!g.canPost(u)) return   // read-only: ignore posts from non-leaders
                 addGroupMsg(g, u, id, String(text))
             }
             "gdel" -> {
@@ -562,6 +596,7 @@ class Core(server: String) {
         synchronized(this) { g.members.add(u) }
         when (p.optString("t")) {
             "file" -> {
+                if (!g.canPost(u)) return   // read-only: ignore posts from non-leaders
                 val id = p.optString("id")
                 val f = p.optJSONObject("f")?.let { checkFile(it) } ?: return
                 if (id.isEmpty() || synchronized(this) { g.msgs.any { it.id == id } }) return
@@ -569,9 +604,23 @@ class Core(server: String) {
                 synchronized(this) { g.msgs.add(msg); if (openChat != "g:${g.id}") g.unread++ }
                 toFetch.add(msg)   // poll() downloads it; fetchFile skips doneWith for group files
             }
-            "react" -> {
+            "react" -> {   // reactions are allowed even in read-only groups
                 val id = p.optString("id"); val e = p.optString("e").take(16)
                 synchronized(this) { g.msgs.firstOrNull { it.id == id }?.let { if (e.isEmpty()) it.reactions.remove(u) else it.reactions[u] = e } }
+                onChange()
+            }
+            "set" -> {
+                val ver = p.optInt("ver", 0)
+                synchronized(this) {
+                    if (!g.isLeader(u) || ver <= g.setVer) return   // only a current leader, and only newer settings
+                    g.setVer = ver
+                    g.name = p.optString("n", g.name).take(80).ifEmpty { g.name }
+                    g.readOnly = p.optBoolean("ro", g.readOnly)
+                    p.optJSONArray("ldr")?.let { arr ->
+                        g.leaders.clear(); for (i in 0 until arr.length()) g.leaders.add(arr.getString(i))
+                        if (g.owner.isNotEmpty()) g.leaders.add(g.owner)
+                    }
+                }
                 onChange()
             }
         }
@@ -956,7 +1005,7 @@ class Core(server: String) {
             "ginvite" -> {
                 val secret = inner.optString("secret")
                 if (secret.length == 64 && secret.all { it in "0123456789abcdef" }) {
-                    val g = joinGroup(secret, inner.optString("n").take(80).ifBlank { "Group" }, inner.optBoolean("public"))
+                    val g = joinGroup(secret, inner.optString("n").take(80).ifBlank { "Group" }, inner.optBoolean("public"), inner.optString("o"))
                     synchronized(this) { g.members.add(c.user) }
                 }
             }

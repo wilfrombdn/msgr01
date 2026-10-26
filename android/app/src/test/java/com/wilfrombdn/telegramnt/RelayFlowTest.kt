@@ -373,6 +373,44 @@ class RelayFlowTest {
         assertEquals("👍", Msg.from(rexMsg.json()).reactions[su])   // persists
     }
 
+    /** Read-only groups, admin roles, forged-settings rejection, and role persistence. */
+    @Test fun readOnlyGroupAndRoles() {
+        assumeTrue(Relay(server).ping())
+        val al = Core(server); val bo = Core(server)
+        val au = "roa_$tag"; val bu = "rob_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo")
+        al.addFriend(bu); bo.poll(5); bo.accept(bo.contact(au)!!); al.poll(5)
+        val g = al.createGroup("Crew", public = false, invite = listOf(bu))
+        bo.poll(5); al.poll(5); bo.poll(5)
+        assertEquals(au, bo.groups.first { it.secret == g.secret }.owner)   // owner carried via the invite
+
+        // owner turns on read-only
+        al.setGroup(al.group(g.id)!!, "Crew", readOnly = true, leaders = setOf(au))
+        bo.poll(5)
+        assertTrue(bo.groups.first { it.secret == g.secret }.readOnly)
+
+        // a non-admin can't post: their own client marks it failed and the owner never accepts it
+        val before = gtexts(al.group(g.id)).size
+        val blocked = bo.sendGroup(bo.groups.first { it.secret == g.secret }, "can i talk?")
+        assertEquals(Msg.FAILED, blocked.state)
+        al.poll(5)
+        assertEquals(before, gtexts(al.group(g.id)).size)
+
+        // a forged 'set' from a non-admin is ignored by the owner
+        val gbo = bo.groups.first { it.secret == g.secret }
+        gbo.leaders.add(bu)   // bo lies locally so its own client will send the set
+        bo.setGroup(gbo, "Hacked", readOnly = false, leaders = setOf(bu))
+        al.poll(5)
+        assertEquals("Crew", al.group(g.id)!!.name)
+        assertFalse(bu in al.group(g.id)!!.leaders)
+
+        // owner can still post; roles survive a save/load
+        al.sendGroup(al.group(g.id)!!, "admins only"); bo.poll(5)
+        assertTrue(gtexts(bo.groups.first { it.secret == g.secret }).any { it.endsWith("admins only") })
+        val restored = Group.from(al.group(g.id)!!.json(true))
+        assertTrue(restored.readOnly && restored.owner == au && au in restored.leaders)
+    }
+
     @Test fun lockoutAfterFiveWrongPasswords() {
         assumeTrue(Relay(server).ping())
         val u = "carol_$tag"

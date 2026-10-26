@@ -52,7 +52,8 @@ class ScreenshotTest {
         sam.avatar = testJpeg(0xFFE08A3C.toInt(), 0xFF3C6EE0.toInt())
         core.me!!.avatar = testJpeg(0xFF2E7D32.toInt(), 0xFFB2DFDB.toInt())
         core.contacts += listOf(sam, jo, req, asked)
-        val grp = Group("g1", "Road Crew", "0".repeat(64), false)
+        val grp = Group("g1", "Road Crew", "0".repeat(64), false, owner = "wil_p")
+        grp.leaders.add("wil_p")
         grp.members += listOf("wil_p", "sam_r", "jordan_k")
         grp.msgs += Msg("gm1", false, "who's on the 6am?", now - 500_000, Msg.RECEIVED).also { it.sender = "sam_r" }
         grp.msgs += Msg("gm2", true, "i'll take it", now - 400_000, Msg.SENT)
@@ -106,6 +107,7 @@ class ScreenshotTest {
         Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second
         call(a, "showNewGroup"); shoot(a, "10-newgroup")
         call(a, "showGroup", "g1"); shoot(a, "11-group")
+        call(a, "showGroupSettings", Messenger.core.group("g1")!!); shoot(a, "12-group-settings")
         Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second
         call(a, "showChats")
         a.javaClass.getDeclaredField("drawer").apply { isAccessible = true }.get(a)?.let { dl ->
