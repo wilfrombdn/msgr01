@@ -373,6 +373,35 @@ class RelayFlowTest {
         assertEquals("👍", Msg.from(rexMsg.json()).reactions[su])   // persists
     }
 
+    /** 4.4 replies: the quote reference travels with the message in 1:1 chats and groups, and persists. */
+    @Test fun repliesCarryTheQuote() {
+        assumeTrue(Relay(server).ping())
+        val al = Core(server); val bo = Core(server)
+        val au = "rpa_$tag"; val bu = "rpb_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo")
+        al.addFriend(bu); bo.poll(5); bo.accept(bo.contact(au)!!); al.poll(5)
+        val q = al.queue(al.contact(bu)!!, "dinner at 6?"); al.deliver(al.contact(bu)!!, q)
+        bo.poll(5)
+        val got = bo.contact(au)!!.msgs.last { it.text == "dinner at 6?" }
+        val r = bo.queue(bo.contact(au)!!, "yes!", org.json.JSONObject().put("id", got.id).put("u", au).put("p", got.text))
+        bo.deliver(bo.contact(au)!!, r)
+        al.poll(5)
+        val back = al.contact(bu)!!.msgs.last { it.text == "yes!" }
+        assertEquals(q.id, back.reply?.optString("id"))
+        assertEquals(au, back.reply?.optString("u"))
+        assertEquals(q.id, Msg.from(back.json()).reply?.optString("id"))   // persists
+
+        val g = al.createGroup("Fam", public = false, invite = listOf(bu))
+        bo.poll(5); al.poll(5); bo.poll(5)
+        val gq = al.sendGroup(al.group(g.id)!!, "who's driving?")
+        bo.poll(5); bo.poll(5)
+        val gb = bo.groups.first { it.secret == g.secret }
+        val seen = gb.msgs.last { it.text == "who's driving?" }
+        bo.sendGroup(gb, "me", org.json.JSONObject().put("id", seen.id).put("u", au).put("p", seen.text))
+        al.poll(5); al.poll(5)
+        assertEquals(gq.id, al.group(g.id)!!.msgs.last { it.text == "me" }.reply?.optString("id"))
+    }
+
     /** Read-only groups, admin roles, forged-settings rejection, and role persistence. */
     @Test fun readOnlyGroupAndRoles() {
         assumeTrue(Relay(server).ping())

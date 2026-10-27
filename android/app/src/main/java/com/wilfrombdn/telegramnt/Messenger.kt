@@ -27,6 +27,13 @@ object Messenger {
     /** A user-chosen file (via the system picker) we keep an encrypted full backup in, so chats
      *  survive uninstall/reinstall. Empty = off. Nothing goes to the server. */
     var recoveryUri: String = ""
+    /** How often each emoji was used (reactions + emoji panel); fills the last slots of the react bar. */
+    val emojiUse = HashMap<String, Int>()
+    /** Chat folders per account on this phone (not in any backup). */
+    val allFolders = HashMap<String, MutableList<Folder>>()
+    val folders: MutableList<Folder> get() = synchronized(allFolders) { allFolders.getOrPut(core.me?.user ?: "") { mutableListOf() } }
+    /** Where you were when the app last went to the background, so reopening puts you back there. */
+    var spot = Spot()
     /** False while the server can't be reached (top bar says "Connecting…"). */
     @Volatile var connected = false
         private set
@@ -99,6 +106,7 @@ object Messenger {
             background = o.optBoolean("background", true)
             recoveryUri = o.optString("recoveryUri")
             o.optJSONObject("look")?.let { look.load(it) }
+            loadExtras(o)
             core.loadJson(o)
         } catch (e: Exception) {
             // unreadable (e.g. keystore reset): start signed out; the backup restores friends
@@ -109,7 +117,7 @@ object Messenger {
     fun save() {
         val f = file ?: return
         val d = disk ?: return
-        val o = core.toJson().put("background", background).put("look", look.json()).put("recoveryUri", recoveryUri)
+        val o = extras(core.toJson().put("background", background).put("look", look.json()).put("recoveryUri", recoveryUri))
         val tmp = File(f.path + ".tmp")
         tmp.writeBytes(d.encrypt(o.toString().toByteArray(), "store".toByteArray()))
         tmp.renameTo(f)
@@ -136,6 +144,20 @@ object Messenger {
         } catch (e: Exception) {
             "Couldn't update your recovery file. Pick it again in Settings."
         }
+    }
+
+    fun useEmoji(e: String) { if (e.isNotEmpty()) synchronized(emojiUse) { emojiUse[e] = (emojiUse[e] ?: 0) + 1 } }
+
+    private fun extras(o: JSONObject): JSONObject {
+        o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
+        o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
+        return o.put("spot", spot.json())
+    }
+
+    fun loadExtras(o: JSONObject) {
+        o.optJSONObject("emojiUse")?.let { j -> synchronized(emojiUse) { j.keys().forEach { emojiUse[it] = j.optInt(it) } } }
+        o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
+        o.optJSONObject("spot")?.let { spot = Spot.from(it) }
     }
 
     fun settingsChanged() {
@@ -250,8 +272,8 @@ object Messenger {
         }
     }
 
-    fun send(c: Contact, text: String) {
-        val m = core.queue(c, text)
+    fun send(c: Contact, text: String, reply: JSONObject? = null) {
+        val m = core.queue(c, text, reply)
         io.execute { core.deliver(c, m) }
     }
 
@@ -260,8 +282,8 @@ object Messenger {
         io.execute { core.deliverGroupFile(g, m) }
     }
 
-    fun react(c: Contact, msg: Msg, emoji: String) = io.execute { core.react(c, msg, emoji) }
-    fun reactGroup(g: Group, msg: Msg, emoji: String) = io.execute { core.reactGroup(g, msg, emoji) }
+    fun react(c: Contact, msg: Msg, emoji: String) { useEmoji(emoji); io.execute { core.react(c, msg, emoji) } }
+    fun reactGroup(g: Group, msg: Msg, emoji: String) { useEmoji(emoji); io.execute { core.reactGroup(g, msg, emoji) } }
 
     fun sendFile(c: Contact, name: String, mime: String, data: ByteArray, thumb: ByteArray?) {
         val m = core.queueFile(c, name, mime, data, thumb)
@@ -360,5 +382,32 @@ class Look {
             val r = (color shr 16) and 0xFF; val g = (color shr 8) and 0xFF; val b = color and 0xFF
             return if (0.299 * r + 0.587 * g + 0.114 * b > 160) 0xFF111111.toInt() else 0xFFFFFFFF.toInt()
         }
+    }
+}
+
+/** A chat-list folder: just a named, collapsible bunch of chats ("u:<user>" / "g:<group id>"). */
+class Folder(val id: String, var name: String, var open: Boolean = true, val items: MutableList<String> = mutableListOf()) {
+    companion object {
+        fun toJson(fs: List<Folder>) = org.json.JSONArray().also { a ->
+            fs.forEach { f -> a.put(JSONObject().put("id", f.id).put("n", f.name).put("open", f.open).put("items", org.json.JSONArray(f.items))) }
+        }
+        fun fromJson(a: org.json.JSONArray?): MutableList<Folder> {
+            val out = mutableListOf<Folder>()
+            if (a != null) for (i in 0 until a.length()) {
+                val o = a.getJSONObject(i)
+                val items = o.optJSONArray("items")
+                out += Folder(o.getString("id"), o.optString("n"), o.optBoolean("open", true),
+                    MutableList(items?.length() ?: 0) { items!!.getString(it) })
+            }
+            return out
+        }
+    }
+}
+
+/** The open chat ("chat"/"group" + id) and the message at the top of the screen, or atBottom. */
+data class Spot(val screen: String = "", val id: String = "", val anchor: String = "", val offset: Int = 0, val atBottom: Boolean = true) {
+    fun json(): JSONObject = JSONObject().put("s", screen).put("id", id).put("a", anchor).put("o", offset).put("b", atBottom)
+    companion object {
+        fun from(o: JSONObject) = Spot(o.optString("s"), o.optString("id"), o.optString("a"), o.optInt("o"), o.optBoolean("b", true))
     }
 }

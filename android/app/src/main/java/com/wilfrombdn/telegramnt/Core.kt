@@ -32,10 +32,12 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
     var sender: String? = null
     /** Emoji reactions: @username -> emoji (one per person). */
     val reactions: MutableMap<String, String> = mutableMapOf()
+    /** The message this one replies to: id, u (its author's @username), p (short preview, used if it's gone). */
+    var reply: JSONObject? = null
 
     fun json(): JSONObject = JSONObject().put("id", id).put("mine", mine).put("text", text).put("ts", ts).put("state", state)
         .put("file", file).put("expires", expires).put("sender", sender)
-        .put("reactions", JSONObject(reactions as Map<*, *>))
+        .put("reactions", JSONObject(reactions as Map<*, *>)).put("reply", reply)
 
     companion object {
         const val SENDING = 0
@@ -43,10 +45,18 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
         const val RECEIVED = 2
         const val FAILED = 3
         const val NOTE = 4 // grey line in the middle, e.g. "You are now friends"
+        /** A reply reference built by us, or received (then only well-formed, short fields are kept). */
+        fun replyRef(r: JSONObject?): JSONObject? {
+            r ?: return null
+            val id = r.optString("id"); val u = r.optString("u")
+            if (id.isEmpty() || id.length > 64 || u.length > 40) return null
+            return JSONObject().put("id", id).put("u", u).put("p", r.optString("p").take(160))
+        }
         fun from(o: JSONObject) = Msg(o.getString("id"), o.getBoolean("mine"), o.getString("text"), o.getLong("ts"), o.getInt("state"))
             .also {
                 it.file = o.optJSONObject("file"); it.expires = o.optLong("expires"); it.sender = o.optString("sender").ifEmpty { null }
                 o.optJSONObject("reactions")?.let { r -> for (k in r.keys()) it.reactions[k] = r.getString(k) }
+                it.reply = o.optJSONObject("reply")
             }
     }
 }
@@ -531,8 +541,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         changed()
     }
 
-    fun sendGroup(g: Group, text: String): Msg {
+    fun sendGroup(g: Group, text: String, reply: JSONObject? = null): Msg {
         val msg = Msg(Crypto.randomHex(16), true, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.SENDING)
+        msg.reply = Msg.replyRef(reply)
         synchronized(this) { g.msgs.add(msg) }
         onChange()
         deliverGroup(g, msg)
@@ -562,7 +573,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         msg.state = try {
             if (!g.distSent) postMyDist(m, g)
             val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, msg.text.toByteArray()) }
-            relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gmsg").put("u", m.user).put("id", msg.id).put("c", b64(ct.serialize()))))
+            relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gmsg").put("u", m.user).put("id", msg.id).put("c", b64(ct.serialize()))
+                .apply { msg.reply?.let { put("r", it) } }))
             Msg.SENT
         } catch (e: Exception) {
             Msg.FAILED
@@ -687,7 +699,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     return
                 }
                 if (!g.canPost(u)) return   // read-only: ignore posts from non-leaders
-                addGroupMsg(g, u, id, String(text))
+                addGroupMsg(g, u, id, String(text), Msg.replyRef(inner.optJSONObject("r")))
             }
             "gdel" -> {
                 val id = inner.optString("id")
@@ -787,11 +799,12 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         }
     }
 
-    private fun addGroupMsg(g: Group, u: String, id: String, text: String) {
+    private fun addGroupMsg(g: Group, u: String, id: String, text: String, reply: JSONObject? = null) {
         synchronized(this) {
             g.members.add(u)
             val msg = Msg(id, false, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.RECEIVED)
             msg.sender = u
+            msg.reply = reply
             g.msgs.add(msg)
             if (openChat != "g:${g.id}") g.unread++
         }
@@ -863,8 +876,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     // ---------- messages ----------
 
-    fun queue(c: Contact, text: String): Msg {
+    fun queue(c: Contact, text: String, reply: JSONObject? = null): Msg {
         val msg = Msg(Crypto.randomHex(16), true, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.SENDING)
+        msg.reply = Msg.replyRef(reply)
         if (c.ttl > 0) msg.expires = System.currentTimeMillis() + c.ttl * 1000L
         synchronized(this) { c.msgs.add(msg) }
         onChange()
@@ -903,6 +917,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         msg.state = Msg.SENDING
         msg.state = try {
             val body = JSONObject().put("id", msg.id).put("x", msg.text)
+            msg.reply?.let { body.put("r", it) }
             msg.file?.let { f ->
                 if (!f.has("id")) {
                     val blob = loadBlob(f.getString("local")) ?: throw IOException("attachment missing")
@@ -1200,6 +1215,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     private fun incoming(id: String, inner: JSONObject, ttl: Int): Msg {
         val msg = Msg(id, false, inner.optString("x").take(MAX_TEXT), System.currentTimeMillis(), Msg.RECEIVED)
         msg.file = inner.optJSONObject("f")?.let { checkFile(it) }
+        msg.reply = Msg.replyRef(inner.optJSONObject("r"))
         if (ttl > 0) msg.expires = System.currentTimeMillis() + ttl * 1000L
         if (msg.file != null) toFetch.add(msg)
         return msg

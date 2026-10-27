@@ -1,0 +1,60 @@
+# Builds MSNGR and runs every test on GitHub's machines (much faster than the laptop).
+# Runs on every push to main; the test report, screenshots and a test APK are attached to each run.
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the NDK (strips libsignal's native library)
+        run: sdkmanager --install "ndk;27.3.13750724" > /dev/null
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Start a local test relay
+        working-directory: server
+        run: |
+          python3 relay.py --port 8099 --db "$RUNNER_TEMP/t.db" --test-limits > "$RUNNER_TEMP/relay.log" 2>&1 &
+          for i in $(seq 1 20); do curl -s -o /dev/null http://127.0.0.1:8099/ && break; sleep 1; done
+
+      - name: Tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      # No signing key here, so this APK is debug-signed: for checking the build, not for installing
+      # over the real app. The published APK is still signed on the laptop.
+      - name: Release build
+        run: ./gradlew assembleRelease
+
+      - name: Test results and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests
+          path: |
+            android/app/build/reports/tests/
+            android/app/build/test-results/
+            android/app/build/shots/
+
+      - name: Test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-unsigned-check
+          path: android/app/build/outputs/apk/release/*.apk
