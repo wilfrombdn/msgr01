@@ -184,12 +184,23 @@ class MainActivity : Activity() {
     /** Once Tor is up, look for a newer version (at most every 6 hours) and offer it. */
     private fun maybeCheckUpdate() {
         if (Tor.socksPort() == null) return
-        if (System.currentTimeMillis() - updateChecked < 6 * 3600_000L) return
+        if (System.currentTimeMillis() - updateChecked < 10 * 60_000L) return   // every app open, at most every 10 minutes
         updateChecked = System.currentTimeMillis()
         var u: Updater.Update? = null
         Messenger.run({ u = Updater.check(this) }, { u?.let { if (screen != "viewer" && screen != "crop") updatePrompt(it) } }) {
-            updateChecked = System.currentTimeMillis() - 6 * 3600_000L + 5 * 60_000L   // couldn't reach it: try again in 5 minutes
+            updateChecked = System.currentTimeMillis() - 10 * 60_000L + 60_000L   // couldn't reach it: try again in a minute
         }
+    }
+
+    /** Settings > Check for updates: says exactly what happened. */
+    private fun checkUpdateNow() {
+        if (Tor.socksPort() == null) { toast("Still connecting to Tor — try again in a moment"); return }
+        toast("Checking for updates…")
+        var u: Updater.Update? = null
+        Messenger.run({ u = Updater.check(this) }, {
+            updateChecked = System.currentTimeMillis()
+            u?.let { updatePrompt(it) } ?: toast("You're up to date")
+        }) { e -> toast("Couldn't check for updates (${e.message ?: e.javaClass.simpleName})") }
     }
 
     /** "Update available — Yes/No"; Yes opens what's new and an Update button with a progress bar. */
@@ -2645,6 +2656,8 @@ class MainActivity : Activity() {
         col.addView(gap(8))
         col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
         col.addView(settingRow("Storage", "Photos, videos and files on this phone") { showStorage() })
+        val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")
+        col.addView(settingRow("Check for updates", "You have MSNGR $ver") { checkUpdateNow() })
         col.addView(tv("Connection", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
         col.addView(tv("Direct server   · in progress", 16f, faint).apply { setPadding(dp(20), dp(6), dp(20), dp(2)) })
         col.addView(settingNote("A faster, direct connection to your own server. Coming later."))

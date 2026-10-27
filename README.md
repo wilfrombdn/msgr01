@@ -11,6 +11,7 @@ name has changed.)
 - `server/relay.py`: the server (Python standard library + SQLite)
 - `server/free-server.sh`: laptop + Cloudflare quick tunnel; publishes the address to server.json
 - `SERVER-SETUP.md`: running the server, what it keeps, and honest limits
+- `RELEASING.md`: how every update is shipped (in-app update + download link)
 
 ## Build
 

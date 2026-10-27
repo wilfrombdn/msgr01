@@ -94,4 +94,14 @@ class CryptoTest {
         assertTrue(recent.file!!.has("local")); assertTrue(unsent.file!!.has("local"))
         assertEquals(2000L, core.mediaBytes(msgs))
     }
+
+    /** The app's exact update check, through a local Tor SOCKS port (set TOR_SOCKS=port). */
+    @Test fun updateOverTor() {
+        val port = System.getenv("TOR_SOCKS")?.toIntOrNull()
+        org.junit.Assume.assumeTrue(port != null)
+        val r = Net.Route("wilfrombdn.github.io", 443, true, port)
+        val j = java.io.ByteArrayOutputStream().also { Net.download(r, "/telegramnt/update.json?t=1", it) }
+        println("UPDATE-OVER-TOR: " + j.toString("UTF-8").take(80).replace("\n", " "))
+        assertTrue(org.json.JSONObject(j.toString("UTF-8")).getInt("code") >= 35)
+    }
 }
