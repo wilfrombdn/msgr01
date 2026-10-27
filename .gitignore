@@ -8,3 +8,4 @@ server/telegramnt.db*
 server/files/
 dist/
 SECURITY-AUDIT-*.md
+server/giphy.key

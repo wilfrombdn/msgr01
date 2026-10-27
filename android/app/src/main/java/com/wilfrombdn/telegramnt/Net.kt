@@ -84,6 +84,53 @@ object Net {
         }
     }
 
+    /**
+     * GETs [path] and streams the body into [out] (handles Content-Length or chunked replies), calling
+     * [progress] with (bytes so far, total or -1). Used for the app's own updates from GitHub Pages.
+     */
+    fun download(route: Route, path: String, out: java.io.OutputStream, progress: (Long, Long) -> Unit = { _, _ -> }) {
+        val s = connect(route.host, route.port, route.tls, route.socksPort, 15_000)
+        try {
+            s.soTimeout = 60_000
+            s.getOutputStream().apply {
+                write(("GET $path HTTP/1.1\r\nHost: ${route.host}\r\nUser-Agent: MSNGR\r\nAccept-Encoding: identity\r\n" +
+                    "Connection: close\r\n\r\n").toByteArray(Charsets.ISO_8859_1))
+                flush()
+            }
+            val inp = java.io.BufferedInputStream(s.getInputStream(), 64 * 1024)
+            val code = readLine(inp)?.split(" ")?.getOrNull(1)?.toIntOrNull() ?: throw IOException("bad status")
+            var length = -1L
+            var chunked = false
+            while (true) {
+                val line = readLine(inp) ?: break
+                if (line.isEmpty()) break
+                val i = line.indexOf(':'); if (i <= 0) continue
+                val k = line.substring(0, i).trim(); val v = line.substring(i + 1).trim()
+                if (k.equals("Content-Length", true)) length = v.toLongOrNull() ?: -1
+                if (k.equals("Transfer-Encoding", true) && v.contains("chunked", true)) chunked = true
+            }
+            if (code != 200) throw IOException("HTTP $code")
+            val buf = ByteArray(64 * 1024)
+            var got = 0L
+            fun copy(n: Long) {   // n < 0 = until EOF
+                var left = n
+                while (n < 0 || left > 0) {
+                    val r = inp.read(buf, 0, if (n < 0) buf.size else minOf(buf.size.toLong(), left).toInt())
+                    if (r == -1) { if (n < 0) return else throw IOException("connection dropped") }
+                    out.write(buf, 0, r); got += r; left -= r
+                    progress(got, length)
+                }
+            }
+            if (chunked) while (true) {
+                val size = readLine(inp)?.substringBefore(';')?.trim()?.toLongOrNull(16) ?: throw IOException("bad chunk")
+                if (size == 0L) break
+                copy(size); readLine(inp)
+            } else copy(length)
+        } finally {
+            runCatching { s.close() }
+        }
+    }
+
     /** Reads one CRLF- (or LF-) terminated line as ASCII; null at EOF before any byte. */
     private fun readLine(inp: InputStream): String? {
         val buf = StringBuilder()

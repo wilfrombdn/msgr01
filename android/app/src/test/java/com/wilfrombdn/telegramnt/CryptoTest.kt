@@ -62,4 +62,14 @@ class CryptoTest {
         assertEquals(code, Crypto.safetyCode(b, a))
         assertEquals(35, code.length)
     }
+
+    /** Live check of the published update manifest + APK (set UPDATE_CHECK=1; goes direct, not via Tor). */
+    @Test fun publishedUpdateIsConsistent() {
+        org.junit.Assume.assumeTrue(System.getenv("UPDATE_CHECK") == "1")
+        val r = Net.Route("wilfrombdn.github.io", 443, true, null)
+        val j = java.io.ByteArrayOutputStream().also { Net.download(r, "/telegramnt/update.json", it) }
+        val o = org.json.JSONObject(j.toString("UTF-8"))
+        val apk = java.io.ByteArrayOutputStream().also { Net.download(r, o.getString("apk"), it) }.toByteArray()
+        org.junit.Assert.assertEquals(o.getString("sha256"), Crypto.sha256(apk).hex())
+    }
 }

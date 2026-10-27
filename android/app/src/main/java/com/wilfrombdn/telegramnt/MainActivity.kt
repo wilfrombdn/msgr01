@@ -140,6 +140,7 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        maybeCheckUpdate()
         Messenger.visible = true
         Messenger.listen(refresh)
         if (Messenger.signedIn) startForegroundService(Intent(this, SyncService::class.java))
@@ -174,7 +175,98 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
+    // ---------- in-app updates ----------
+
+    private var updateChecked = 0L
+    private var pendingApk: File? = null
+
+    /** Once Tor is up, look for a newer version (at most every 6 hours) and offer it. */
+    private fun maybeCheckUpdate() {
+        if (Tor.socksPort() == null || !Messenger.connected) return
+        if (System.currentTimeMillis() - updateChecked < 6 * 3600_000L) return
+        updateChecked = System.currentTimeMillis()
+        var u: Updater.Update? = null
+        Messenger.run({ u = Updater.check(this) }, { u?.let { if (screen != "viewer" && screen != "crop") updatePrompt(it) } }) {
+            updateChecked = System.currentTimeMillis() - 6 * 3600_000L + 5 * 60_000L   // couldn't reach it: try again in 5 minutes
+        }
+    }
+
+    /** "Update available — Yes/No"; Yes opens what's new and an Update button with a progress bar. */
+    private fun updatePrompt(u: Updater.Update) {
+        val d = android.app.Dialog(this)
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(16), dp(12), dp(4))
+            background = round(bar, 4)
+            layoutTransition = android.animation.LayoutTransition()   // the panel grows smoothly when it expands
+        }
+        col.addView(tv("Update available", 17.5f, white, true).apply { setPadding(0, 0, dp(8), dp(6)) })
+        col.addView(tv("MSNGR ${u.name} is ready. Update now?", 14.5f, dim).apply { setPadding(0, 0, dp(8), dp(4)) })
+        fun buttons(vararg b: Pair<Pair<String, Int>, () -> Unit>) = LinearLayout(this).apply {
+            gravity = Gravity.END; setPadding(0, dp(4), 0, 0)
+            b.forEach { (lc, act) -> addView(tv(lc.first.uppercase(), 14f, lc.second, true).apply { setPadding(dp(12), dp(10), dp(12), dp(10)); setOnClickListener { act() } }) }
+        }
+        val status = tv("", 13.5f, dim).apply { setPadding(0, dp(6), dp(8), 0); visibility = View.GONE }
+        val fill = View(this).apply { setBackgroundColor(white); pivotX = 0f; scaleX = 0f }
+        val track = FrameLayout(this).apply {
+            setBackgroundColor(panel2); visibility = View.GONE
+            addView(fill, FrameLayout.LayoutParams(-1, -1))
+        }
+        lateinit var ask: View
+        lateinit var go: View
+        fun startUpdate() {
+            go.visibility = View.GONE; track.visibility = View.VISIBLE; status.visibility = View.VISIBLE
+            status.text = "Downloading… 0%"
+            d.setCancelable(false)
+            Updater.onStatus = { err -> runOnUiThread {
+                if (err != null) { status.text = "Couldn't update: $err"; go.visibility = View.VISIBLE; d.setCancelable(true) }
+            } }
+            var apk: File? = null
+            Messenger.run({
+                apk = Updater.download(this, u) { p -> runOnUiThread { fill.scaleX = p; status.text = "Downloading… ${(p * 100).toInt()}%" } }
+            }, {
+                fill.scaleX = 1f
+                status.text = "Installing… MSNGR will close and reopen."
+                val f = apk!!
+                if (!packageManager.canRequestPackageInstalls()) {
+                    // Android asks once whether MSNGR may install its own updates
+                    pendingApk = f
+                    status.text = "Allow MSNGR to install updates, then come back here."
+                    startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:$packageName")))
+                } else Messenger.run({ Updater.install(this, f) }, {}) { e -> status.text = "Couldn't update: ${e.message}"; go.visibility = View.VISIBLE; d.setCancelable(true) }
+            }) { e ->
+                status.text = if (e is java.io.IOException) "Download didn't finish (${e.message}). Try again." else errorText(e)
+                go.visibility = View.VISIBLE; d.setCancelable(true)
+            }
+        }
+        go = buttons(("Not now" to dim) to { d.dismiss() }, ("Update" to white) to { startUpdate() })
+        ask = buttons(("No" to dim) to { d.dismiss() }, ("Yes" to white) to {
+            col.removeView(ask)
+            col.addView(tv("What's new", 15f, white, true).apply { setPadding(0, dp(8), dp(8), dp(4)) })
+            (u.notes.ifEmpty { listOf("Fixes and improvements") }).forEach { n ->
+                col.addView(tv("•  $n", 14f, dim).apply { setLineSpacing(0f, 1.06f); setPadding(0, dp(2), dp(8), dp(2)) })
+            }
+            col.addView(gap(10))
+            col.addView(track, LinearLayout.LayoutParams(-1, dp(5)).apply { rightMargin = dp(8) })
+            col.addView(status)
+            col.addView(go)
+        })
+        col.addView(ask)
+        d.setContentView(ScrollView(this).apply { addView(col) })
+        d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.86).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
+        d.show()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // back from "allow installs from MSNGR": carry on with the update
+        pendingApk?.let { f -> if (packageManager.canRequestPackageInstalls()) { pendingApk = null; Messenger.run({ Updater.install(this, f) }) } }
+    }
+
     private fun redraw() {
+        maybeCheckUpdate()
         if (!Messenger.signedIn) {
             if (screen != "welcome" && screen != "signup" && screen != "login") showWelcome()
             return
@@ -926,7 +1018,7 @@ class MainActivity : Activity() {
         val bar2 = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(listBg); setPadding(dp(14), dp(4), dp(6), dp(4))
         }
-        val box = EditText(this).apply {
+        val box = ChatBox(this) { uri, mime, done -> keyboardContent(uri, mime, done, g) }.apply {
             hint = "Message"; setHintTextColor(dim); setTextColor(white); textSize = look.msg; background = null
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
@@ -1171,7 +1263,7 @@ class MainActivity : Activity() {
             setBackgroundColor(listBg)
             setPadding(dp(14), dp(4), dp(6), dp(4))
         }
-        val box = EditText(this).apply {
+        val box = ChatBox(this) { uri, mime, done -> keyboardContent(uri, mime, done, c) }.apply {
             hint = "Message"
             setHintTextColor(dim)
             setTextColor(white)
@@ -1848,7 +1940,7 @@ class MainActivity : Activity() {
 
     private fun preview(m: Msg): String {
         val f = m.file ?: return m.text
-        return if (f.optString("m") == "image/gif") "GIF" else if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
+        return if (f.optString("m") == "image/gif") "GIF" else if (f.optString("m") == "image/webp") "Sticker" else if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
     }
 
     private fun attachMenu(anchor: View) {   // target already set in attachTo / attachGroupId
@@ -1909,12 +2001,33 @@ class MainActivity : Activity() {
     // ---------- GIFs ----------
 
     private fun isGif(m: Msg) = m.file?.optString("m") == "image/gif"
+    /** GIFs and (possibly animated) WebP stickers both play in place. */
+    private fun isAnimated(m: Msg) = m.file?.optString("m").let { it == "image/gif" || it == "image/webp" }
+
+    /** A GIF / sticker / picture chosen from the phone keyboard's own panel: send it to this chat. */
+    private fun keyboardContent(uri: android.net.Uri, mime: String, done: () -> Unit, target: Any) {
+        stick = true
+        Messenger.run({
+            val data = try { contentResolver.openInputStream(uri)?.use { it.readBytes() } } finally { done() }
+                ?: throw UserError("Couldn't read that from the keyboard")
+            if (data.size > Core.MAX_FILE) throw UserError("That's too big to send")
+            val animated = mime == "image/gif" || mime == "image/webp"
+            val bmp = decodeSmall(data, 1600)
+            val (name, type, bytes) = if (animated) Triple(if (mime == "image/gif") "animation.gif" else "sticker.webp", mime, data)
+                else Triple("photo.jpg", "image/jpeg", jpeg(bmp ?: throw UserError("Couldn't open that picture"), 1600, 85))
+            val thumb = bmp?.let { thumbOf(it) }
+            when (target) {
+                is Contact -> Messenger.sendFile(target, name, type, bytes, thumb)
+                is Group -> Messenger.sendGroupFile(target, name, type, bytes, thumb)
+            }
+        }, {}) { e -> toast(errorText(e)) }
+    }
 
     /** GIFs already on this phone (sent or received in any chat), newest first, no repeats. */
     private fun recentGifs(): List<Msg> {
         val core = Messenger.core
         return synchronized(core) { core.contacts.flatMap { it.msgs } + core.groups.flatMap { it.msgs } }
-            .filter { isGif(it) && it.file?.has("local") == true }
+            .filter { isAnimated(it) && it.file?.has("local") == true }
             .sortedByDescending { it.ts }
             .distinctBy { it.file?.optString("n") to it.file?.optInt("s") }
             .take(30)
@@ -2125,7 +2238,7 @@ class MainActivity : Activity() {
                 addView(ImageView(context).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     bmp?.let { setImageBitmap(it) } ?: setBackgroundColor(Color.parseColor("#33000000"))
-                    if (here && isGif(m)) playGif(this, m, dp(360))
+                    if (here && isAnimated(m)) playGif(this, m, dp(360))
                 }, FrameLayout.LayoutParams(w, h))
                 if (isGif(m)) addView(tv("GIF", 11f, Color.WHITE, true).apply {
                     setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(Color.parseColor("#88000000"), 4)
@@ -2174,7 +2287,7 @@ class MainActivity : Activity() {
         var anim: android.graphics.drawable.Drawable? = null
         Messenger.run({
             val bytes = Messenger.core.openFile(m)
-            if (bytes != null && isGif(m)) anim = decodeGif(bytes, 1600)
+            if (bytes != null && isAnimated(m)) anim = decodeGif(bytes, 1600)
             bmp = bytes?.let { decodeSmall(it, 2400) }
         }, {
             val b = bmp ?: return@run toast("Couldn't open that photo")
