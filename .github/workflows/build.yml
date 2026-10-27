@@ -22,10 +22,12 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
-
+      # GitHub's Ubuntu machines already have the Android SDK; just add the NDK we need
       - name: Install the NDK (strips libsignal's native library)
-        run: sdkmanager --install "ndk;27.3.13750724" > /dev/null
+        run: |
+          SDKM=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin | tail -1)/sdkmanager
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "ndk;27.3.13750724" > /dev/null
 
       - uses: gradle/actions/setup-gradle@v4
 
