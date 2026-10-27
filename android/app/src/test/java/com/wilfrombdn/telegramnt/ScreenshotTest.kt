@@ -172,6 +172,22 @@ class ScreenshotTest {
 
     private fun ShadowLooperIdleFor(ms: Long) = shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(ms))
 
+    @Test fun popupAndSpacing() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChat", "sam_r"); shoot(a, "40-spacing")
+        call(a, "deleteChatConfirm", Messenger.core.contact("sam_r")!!)
+        shadowOf(Looper.getMainLooper()).idle()
+        org.robolectric.shadows.ShadowDialog.getLatestDialog()?.window?.decorView?.let { v ->
+            v.measure(android.view.View.MeasureSpec.makeMeasureSpec(1000, android.view.View.MeasureSpec.EXACTLY),
+                android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED))
+            v.layout(0, 0, v.measuredWidth, v.measuredHeight)
+            val bmp = Bitmap.createBitmap(v.measuredWidth, v.measuredHeight, Bitmap.Config.ARGB_8888)
+            Canvas(bmp).drawColor(android.graphics.Color.GRAY); v.draw(Canvas(bmp))
+            FileOutputStream(File("build/shots", "41-popup.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+    }
+
     @Test fun lightMode() {
         Messenger.initForPreview(fakeCore(signedIn = true))
         Messenger.look.theme = "light"; Messenger.look.inn = Look.BUBBLES.last().second

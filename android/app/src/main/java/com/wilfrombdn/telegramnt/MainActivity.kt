@@ -28,7 +28,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
-import android.widget.Toast
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.core.view.GravityCompat
@@ -297,7 +296,28 @@ class MainActivity : Activity() {
     }
 
     private fun gap(h: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(h)) }
-    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
+    private var notice: TextView? = null
+
+    /** A short message at the bottom in the app's own style (replaces Android's grey toast). */
+    private fun toast(s: String) {
+        val root = window.decorView as? FrameLayout ?: return
+        notice?.let { root.removeView(it) }
+        val v = tv(s, 14.5f, white).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(11), dp(16), dp(11))
+            background = GradientDrawable().apply { setColor(menuBg); setStroke(dp(1), divider); cornerRadius = dp(4).toFloat() }
+            elevation = dp(8).toFloat()
+            alpha = 0f; translationY = dp(12).toFloat()
+        }
+        notice = v
+        root.addView(v, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            setMargins(dp(24), 0, dp(24), dp(92))
+        })
+        v.animate().alpha(1f).translationY(0f).setDuration(160).start()
+        v.postDelayed({
+            v.animate().alpha(0f).setDuration(220).withEndAction { root.removeView(v); if (notice === v) notice = null }.start()
+        }, 2600)
+    }
 
     private fun time(ts: Long): String {
         val now = Calendar.getInstance()
@@ -922,7 +942,7 @@ class MainActivity : Activity() {
         }
         box.setOnEditorActionListener { _, aid, _ -> if (aid == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         bar2.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
-        bar2.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box) } })
+        bar2.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box, g) } })
         bar2.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachGroupId = id; attachTo = null; attachMenu(v) } })
         bar2.addView(icon(R.drawable.ic_send, white) { doSend() })
         // read-only group: non-admins see a notice instead of the composer
@@ -958,7 +978,7 @@ class MainActivity : Activity() {
     }
 
     private fun groupBubble(g: Group, m: Msg): View {
-        val wrap = LinearLayout(this).apply { gravity = if (m.mine) Gravity.END else Gravity.START; setPadding(0, dp(2), 0, dp(2)); tag = m.id }
+        val wrap = LinearLayout(this).apply { gravity = if (m.mine) Gravity.END else Gravity.START; setPadding(0, dp(4), 0, dp(4)); tag = m.id }
         val fill = if (m.mine) look.out else look.inn
         val tcol = Look.textOn(fill)
         val b = LinearLayout(this).apply {
@@ -1176,7 +1196,7 @@ class MainActivity : Activity() {
         }
         box.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
-        input.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box) } })
+        input.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box, c) } })
         input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachTo = c.user; attachGroupId = null; attachMenu(v) } })
         input.addView(icon(R.drawable.ic_send, white) { doSend() })
         replyTo = null; replyBar = makeReplyBar(); chatBox = box
@@ -1405,7 +1425,7 @@ class MainActivity : Activity() {
     private fun bubble(c: Contact, m: Msg): View {
         val wrap = LinearLayout(this).apply {
             gravity = if (m.mine) Gravity.END else Gravity.START
-            setPadding(0, dp(2), 0, dp(2))
+            setPadding(0, dp(4), 0, dp(4))   // a little breathing room between bubbles
             tag = m.id
         }
         val fill = if (m.mine) look.out else look.inn
@@ -1563,7 +1583,7 @@ class MainActivity : Activity() {
     /** Saves the photo to the phone's Pictures/MSNGR folder (only when you ask; outside the app it isn't locked). */
     private fun downloadImage(m: Msg) {
         val f = m.file ?: return
-        val name = "MSNGR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(m.ts)) + ".jpg"
+        val name = "MSNGR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(m.ts)) + if (isGif(m)) ".gif" else ".jpg"
         if (Build.VERSION.SDK_INT < 29) {
             pendingSave = m
             val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(f.optString("m")).putExtra(Intent.EXTRA_TITLE, name)
@@ -1678,14 +1698,14 @@ class MainActivity : Activity() {
     private fun pickList(title: String, sub: String?, items: Array<String>, onPick: (Int) -> Unit) {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         items.forEachIndexed { i, label ->
-            col.addView(tv(label, 16f, white).apply { setPadding(dp(24), dp(14), dp(24), dp(14)); setOnClickListener { listDialog?.dismiss(); onPick(i) } })
+            col.addView(tv(label, 15.5f, white).apply { setPadding(dp(20), dp(11), dp(20), dp(11)); background = pressable(); setOnClickListener { listDialog?.dismiss(); onPick(i) } })
         }
         val wrap = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = round(bar, 6)
-            setPadding(0, dp(18), 0, dp(10))
-            addView(tv(title, 19f, white, true).apply { setPadding(dp(24), 0, dp(24), if (sub == null) dp(8) else dp(4)) })
-            sub?.let { addView(tv(it, 14f, dim).apply { setPadding(dp(24), 0, dp(24), dp(8)) }) }
+            background = round(bar, 4)
+            setPadding(0, dp(14), 0, dp(6))
+            addView(tv(title, 17.5f, white, true).apply { setPadding(dp(20), 0, dp(20), if (sub == null) dp(4) else dp(2)) })
+            sub?.let { addView(tv(it, 14f, dim).apply { setPadding(dp(20), 0, dp(20), dp(6)) }) }
             addView(gap(4))
         }
         wrap.addView(col)
@@ -1693,7 +1713,7 @@ class MainActivity : Activity() {
         d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         d.setContentView(ScrollView(this).apply { addView(wrap) })
         d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-        d.window?.setLayout((resources.displayMetrics.widthPixels * 0.88).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+        d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.86).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
         listDialog = d
         d.show()
     }
@@ -1783,23 +1803,23 @@ class MainActivity : Activity() {
         d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(22), dp(16), dp(10))
-            background = round(bar, 6)
+            setPadding(dp(20), dp(16), dp(12), dp(4))
+            background = round(bar, 4)
         }
-        col.addView(tv(title, 19f, white, true).apply { setPadding(0, 0, dp(8), dp(10)) })
-        message?.let { col.addView(tv(it, 15f, dim).apply { setLineSpacing(0f, 1.15f); setPadding(0, 0, dp(8), dp(8)) }) }
+        col.addView(tv(title, 17.5f, white, true).apply { setPadding(0, 0, dp(8), dp(6)) })
+        message?.let { col.addView(tv(it, 14.5f, dim).apply { setLineSpacing(0f, 1.08f); setPadding(0, 0, dp(8), dp(4)) }) }
         content?.let { col.addView(it, LinearLayout.LayoutParams(-1, -2).apply { rightMargin = dp(8) }) }
-        val row = LinearLayout(this).apply { gravity = Gravity.END; setPadding(0, dp(10), 0, 0) }
+        val row = LinearLayout(this).apply { gravity = Gravity.END; setPadding(0, dp(4), 0, 0) }
         buttons.forEachIndexed { i, (label, color) ->
-            row.addView(tv(label.uppercase(), 14.5f, color, true).apply {
-                setPadding(dp(14), dp(12), dp(14), dp(12))
+            row.addView(tv(label.uppercase(), 14f, color, true).apply {
+                setPadding(dp(12), dp(10), dp(12), dp(10))
                 setOnClickListener { d.dismiss(); onButton(i) }
             })
         }
         col.addView(row, LinearLayout.LayoutParams(-1, -2))
         d.setContentView(col)
         d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-        d.window?.setLayout((resources.displayMetrics.widthPixels * 0.88).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+        d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.86).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
         d.show()
     }
 
@@ -1828,7 +1848,7 @@ class MainActivity : Activity() {
 
     private fun preview(m: Msg): String {
         val f = m.file ?: return m.text
-        return if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
+        return if (f.optString("m") == "image/gif") "GIF" else if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
     }
 
     private fun attachMenu(anchor: View) {   // target already set in attachTo / attachGroupId
@@ -1886,8 +1906,91 @@ class MainActivity : Activity() {
         return out
     }
 
+    // ---------- GIFs ----------
+
+    private fun isGif(m: Msg) = m.file?.optString("m") == "image/gif"
+
+    /** GIFs already on this phone (sent or received in any chat), newest first, no repeats. */
+    private fun recentGifs(): List<Msg> {
+        val core = Messenger.core
+        return synchronized(core) { core.contacts.flatMap { it.msgs } + core.groups.flatMap { it.msgs } }
+            .filter { isGif(it) && it.file?.has("local") == true }
+            .sortedByDescending { it.ts }
+            .distinctBy { it.file?.optString("n") to it.file?.optInt("s") }
+            .take(30)
+    }
+
+    /** Animated drawables, decoded once per message (fillChat rebuilds the views often). */
+    private val gifCache = HashMap<String, android.graphics.drawable.Drawable>()
+
+    /** Decodes [bytes] as a playing GIF (Android 9+), or its first frame on older phones. Off the main thread. */
+    private fun decodeGif(bytes: ByteArray, maxSide: Int): android.graphics.drawable.Drawable? = runCatching {
+        if (Build.VERSION.SDK_INT >= 28) {
+            android.graphics.ImageDecoder.decodeDrawable(android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))) { d, info, _ ->
+                val big = maxOf(info.size.width, info.size.height)
+                if (big > maxSide) d.setTargetSampleSize(big / maxSide + 1)
+            }
+        } else decodeSmall(bytes, maxSide)?.let { android.graphics.drawable.BitmapDrawable(resources, it) }
+    }.getOrNull()
+
+    /** Puts message [m]'s GIF into [iv], playing (decoded in the background the first time). */
+    private fun playGif(iv: ImageView, m: Msg, maxSide: Int) {
+        fun show(d: android.graphics.drawable.Drawable) {
+            iv.setImageDrawable(d)
+            if (Build.VERSION.SDK_INT >= 28 && d is android.graphics.drawable.AnimatedImageDrawable) d.start()
+        }
+        gifCache[m.id]?.let { return show(it) }
+        var d: android.graphics.drawable.Drawable? = null
+        Messenger.run({ d = Messenger.core.openFile(m)?.let { decodeGif(it, maxSide) } }, {
+            d?.let { gifCache[m.id] = it; if (iv.isAttachedToWindow) show(it) }
+        })
+    }
+
+    private fun showGifTab(grid: LinearLayout, scroll: ScrollView, target: Any) {
+        grid.removeAllViews()
+        grid.addView(tv("＋  GIF from your phone", 15f, white, true).apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(12)); background = pressable(); isClickable = true
+            setOnClickListener {
+                emojiPopup?.dismiss(); emojiPopup = null
+                if (target is Contact) { attachTo = target.user; attachGroupId = null } else if (target is Group) { attachGroupId = target.id; attachTo = null }
+                val i = Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/gif")
+                @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_FILE)
+            }
+        }, LinearLayout.LayoutParams(-1, -2))
+        val gifs = recentGifs()
+        if (gifs.isEmpty()) grid.addView(tv("GIFs you send or receive show up here so you can send them again.", 14f, dim).apply {
+            gravity = Gravity.CENTER; setPadding(dp(24), dp(20), dp(24), dp(20))
+        })
+        var row: LinearLayout? = null
+        gifs.forEachIndexed { i, m ->
+            if (i % 3 == 0) row = LinearLayout(this).also { grid.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+            row!!.addView(ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(panel2)
+                playGif(this, m, dp(140))
+                setOnClickListener { emojiPopup?.dismiss(); emojiPopup = null; resendGif(m, target) }
+            }, LinearLayout.LayoutParams(0, dp(96), 1f).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
+        }
+        if (gifs.size % 3 != 0) repeat(3 - gifs.size % 3) { row?.addView(View(this), LinearLayout.LayoutParams(0, dp(96), 1f).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }) }
+        scroll.scrollTo(0, 0)
+    }
+
+    /** Sends a GIF that's already on this phone to the open chat or group. */
+    private fun resendGif(m: Msg, target: Any) {
+        stick = true
+        Messenger.run({
+            val bytes = Messenger.core.openFile(m) ?: throw UserError("Couldn't open that GIF")
+            val thumb = decodeSmall(bytes, 400)?.let { thumbOf(it) }
+            val name = m.file?.optString("n")?.ifBlank { null } ?: "animation.gif"
+            when (target) {
+                is Contact -> Messenger.sendFile(target, name, "image/gif", bytes, thumb)
+                is Group -> Messenger.sendGroupFile(target, name, "image/gif", bytes, thumb)
+            }
+        }, {}) { e -> toast(errorText(e)) }
+    }
+
     /** Telegram-style emoji panel that pops up above the clip and inserts into [box] at the cursor. */
-    private fun emojiPicker(anchor: View, box: EditText) {
+    private fun emojiPicker(anchor: View, box: EditText, target: Any) {
         emojiPopup?.let { it.dismiss(); emojiPopup = null; return }   // tapping the face again closes it
         val data = loadEmoji()
         if (data.isEmpty()) return
@@ -1917,6 +2020,12 @@ class MainActivity : Activity() {
         }
 
         val tabs = LinearLayout(this).apply { setBackgroundColor(bar); setPadding(dp(2), 0, dp(2), 0) }
+        // GIF tab first: your recent GIFs (sent or received in any chat) + one from your phone
+        tabs.addView(tv("GIF", 13f, white, true).apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(11), 0, dp(11))
+            background = pressable(); isClickable = true
+            setOnClickListener { showGifTab(grid, scroll, target) }
+        }, LinearLayout.LayoutParams(0, -2, 1f))
         data.forEach { (header, emojis) ->
             tabs.addView(tv(header.substringBefore(' '), 19f).apply {
                 gravity = Gravity.CENTER; setPadding(0, dp(9), 0, dp(9))
@@ -1978,14 +2087,14 @@ class MainActivity : Activity() {
                 }
             }
             val mime = contentResolver.getType(uri) ?: "application/octet-stream"
-            if (asPhoto || (mime.startsWith("image/") && mime != "image/gif")) {
+            if (mime != "image/gif" && (asPhoto || mime.startsWith("image/"))) {
                 // re-saved as JPEG: smaller, and hidden details like GPS location are dropped
                 val bmp = loadPhoto(uri) ?: throw UserError("Couldn't open that photo")
                 out(name.substringBeforeLast('.') + ".jpg", "image/jpeg", jpeg(bmp, 1600, 85), thumbOf(bmp))
             } else {
                 if (size > Core.MAX_FILE) throw UserError("Files can be up to ${Core.MAX_FILE / 1024 / 1024} MB")
                 val data = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError("Couldn't read that file")
-                out(name, mime, data, null)
+                out(name, mime, data, if (mime == "image/gif") decodeSmall(data, 400)?.let { thumbOf(it) } else null)
             }
             // the camera's unencrypted temp file has now been read into memory; don't leave it on disk
             if (uri.authority == "$packageName.files") runCatching { contentResolver.delete(uri, null, null) }
@@ -2016,7 +2125,11 @@ class MainActivity : Activity() {
                 addView(ImageView(context).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     bmp?.let { setImageBitmap(it) } ?: setBackgroundColor(Color.parseColor("#33000000"))
+                    if (here && isGif(m)) playGif(this, m, dp(360))
                 }, FrameLayout.LayoutParams(w, h))
+                if (isGif(m)) addView(tv("GIF", 11f, Color.WHITE, true).apply {
+                    setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(Color.parseColor("#88000000"), 4)
+                }, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(dp(6), dp(6), 0, 0) })
                 if (!here) addView(tv(if (m.mine) "" else "Downloading…", 13f, Color.WHITE).apply {
                     setPadding(dp(8), dp(4), dp(8), dp(4))
                     background = round(Color.parseColor("#99000000"), 10)
@@ -2058,13 +2171,19 @@ class MainActivity : Activity() {
     /** Full-screen photo, unlocked only in memory. */
     private fun showImage(m: Msg) {
         var bmp: android.graphics.Bitmap? = null
-        Messenger.run({ bmp = Messenger.core.openFile(m)?.let { decodeSmall(it, 2400) } }, {
+        var anim: android.graphics.drawable.Drawable? = null
+        Messenger.run({
+            val bytes = Messenger.core.openFile(m)
+            if (bytes != null && isGif(m)) anim = decodeGif(bytes, 1600)
+            bmp = bytes?.let { decodeSmall(it, 2400) }
+        }, {
             val b = bmp ?: return@run toast("Couldn't open that photo")
             screen = "viewer"
             setContentView(FrameLayout(this).apply {
                 setBackgroundColor(Color.BLACK)
                 addView(ImageView(context).apply {
                     setImageBitmap(b); scaleType = ImageView.ScaleType.FIT_CENTER
+                    anim?.let { a -> setImageDrawable(a); if (Build.VERSION.SDK_INT >= 28 && a is android.graphics.drawable.AnimatedImageDrawable) a.start() }
                     setOnLongClickListener { longPressMenu(null, null, imageActions(m)); true }
                 })
                 addView(icon(R.drawable.ic_back, Color.WHITE) { leaveViewer() }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START))

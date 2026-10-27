@@ -15,7 +15,6 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -261,5 +260,15 @@ class CameraActivity : ComponentActivity() {
         if (recording != null) stopVideo()
     }
 
-    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
+    /** A short notice at the bottom in the app's style (not Android's grey toast). */
+    private fun toast(s: String) {
+        val root = window.decorView as? FrameLayout ?: return
+        val v = TextView(this).apply {
+            text = s; setTextColor(Color.WHITE); textSize = 14.5f
+            setPadding(d(16), d(11), d(16), d(11))
+            background = GradientDrawable().apply { setColor(0xEE2A2A2A.toInt()); cornerRadius = d(4).toFloat() }
+        }
+        root.addView(v, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = d(84) })
+        v.postDelayed({ v.animate().alpha(0f).setDuration(220).withEndAction { root.removeView(v) }.start() }, 2200)
+    }
 }
