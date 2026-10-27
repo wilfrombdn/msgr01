@@ -54,8 +54,29 @@ class MainActivity : Activity() {
     private val faint = Color.parseColor("#5A5A5A")
     private val panel2 = Color.parseColor("#2A2A2A")
     private val red = Color.parseColor("#E5534B")
+    private val amber = Color.parseColor("#E8C24A")   // gentle yellow for the Tor "first connection is slow" note
     private val avatarColors = listOf("#E17076", "#FAA774", "#A695E7", "#7BC862", "#6EC9CB", "#65AADD", "#EE7AAE")
         .map { Color.parseColor(it) }
+
+    // Backgrounds get a faint, tileable monochrome noise so screens aren't dead-flat — gives the app a
+    // bit of a textured, "real surface" feel. Same base colour, just gently grainy. Cached per colour.
+    private val noiseTiles = HashMap<Int, android.graphics.Bitmap>()
+    private fun texturedBg(base: Int): android.graphics.drawable.Drawable {
+        val bmp = noiseTiles.getOrPut(base) {
+            val size = 180
+            val r = Color.red(base); val g = Color.green(base); val b = Color.blue(base)
+            val rnd = java.util.Random(7)   // fixed seed = the texture is the same every launch
+            val px = IntArray(size * size) {
+                val d = rnd.nextInt(21) - 10 // ±10 brightness jitter: a subtle grain that still reads as one colour
+                Color.rgb((r + d).coerceIn(0, 255), (g + d).coerceIn(0, 255), (b + d).coerceIn(0, 255))
+            }
+            android.graphics.Bitmap.createBitmap(px, size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        }
+        return android.graphics.drawable.BitmapDrawable(resources, bmp).apply {
+            setTileModeXY(android.graphics.Shader.TileMode.REPEAT, android.graphics.Shader.TileMode.REPEAT)
+        }
+    }
+    private fun wallBg() = texturedBg(wall)
 
     private var screen = "chats"
     private var chatUser: String? = null
@@ -122,7 +143,10 @@ class MainActivity : Activity() {
 
     private fun redraw() {
         if (!Messenger.signedIn) {
-            if (screen == "welcome" && Messenger.connected) pendingNext?.let { pendingNext = null; welcomeStatus?.text = ""; it(); return }
+            if (screen == "welcome") {
+                welcomeTorNote?.visibility = if (Messenger.connected) View.GONE else View.VISIBLE
+                if (Messenger.connected) pendingNext?.let { pendingNext = null; welcomeStatus?.text = ""; it(); return }
+            }
             if (screen != "welcome" && screen != "signup" && screen != "login") showWelcome()
             return
         }
@@ -236,7 +260,7 @@ class MainActivity : Activity() {
 
     private fun page(top: View, body: View, bg: Int = listBg): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setBackgroundColor(bg)
+        background = texturedBg(bg)
         fitsSystemWindows = true
         addView(top)
         addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -301,8 +325,13 @@ class MainActivity : Activity() {
         col.addView(gap(24))
         welcomeStatus = tv(if (Messenger.connected || pendingNext == null) "" else "Connecting…", 14f, dim).apply { gravity = Gravity.CENTER }
         col.addView(welcomeStatus)
+        welcomeTorNote = tv(TOR_WAIT_NOTE, 13.5f, amber).apply {
+            gravity = Gravity.CENTER; setLineSpacing(0f, 1.25f); setPadding(dp(12), dp(14), dp(12), 0)
+            visibility = if (Messenger.connected) View.GONE else View.VISIBLE
+        }
+        col.addView(welcomeTorNote)
         setContentView(ScrollView(this).apply {
-            setBackgroundColor(listBg)
+            background = texturedBg(listBg)
             fitsSystemWindows = true
             isFillViewport = true
             addView(col, android.widget.FrameLayout.LayoutParams(-1, -1))
@@ -310,6 +339,8 @@ class MainActivity : Activity() {
     }
 
     private var welcomeStatus: TextView? = null
+    private var welcomeTorNote: TextView? = null
+    private val TOR_WAIT_NOTE = "First connection can take a minute. The app is building a private route through the Tor network — hopping your connection through several relays around the world and setting up fresh encryption at each one. That's slower than a normal connection, but it's what hides where you are. It's quicker after this."
     private var pendingNext: (() -> Unit)? = null
 
     /** The server is found automatically; if it isn't reachable yet, carry on once it is. */
@@ -663,7 +694,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER; setBackgroundColor(listBg); setPadding(dp(16), dp(16), dp(16), dp(16))
         }
         setContentView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setBackgroundColor(wall); fitsSystemWindows = true
+            orientation = LinearLayout.VERTICAL; background = wallBg(); fitsSystemWindows = true
             addView(groupTop, LinearLayout.LayoutParams(-1, -2))
             addView(groupScroller, LinearLayout.LayoutParams(-1, 0, 1f))
             addView(bottom, LinearLayout.LayoutParams(-1, -2))
@@ -764,11 +795,28 @@ class MainActivity : Activity() {
         col.addView(settingNote("When on, only admins can post. Anyone can still react. Note: this is enforced by the app, not the server — a modified app could still post, so don't treat it as a security guarantee."))
         col.addView(tv("Admins", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
         val chosen = g.leaders.toMutableSet()
+        val iAmOwner = g.owner.isNotEmpty() && g.owner == Messenger.core.me?.user
         synchronized(Messenger.core) { g.members.sorted() }.forEach { member ->
             val isOwner = member == g.owner
-            col.addView(settingSwitch("@$member" + if (isOwner) "  (owner)" else "", isOwner || member in chosen) { on ->
+            val sw = settingSwitch("@$member" + if (isOwner) "  (owner)" else "", isOwner || member in chosen) { on ->
                 if (on) chosen.add(member) else chosen.remove(member)
-            }.apply { if (isOwner) isEnabled = false })
+            }.apply { if (isOwner) isEnabled = false }
+            // only the owner can remove, and not themselves
+            if (iAmOwner && !isOwner) {
+                col.addView(LinearLayout(this).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(sw, LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(tv("Remove", 15f, red).apply {
+                        setPadding(dp(16), dp(14), dp(20), dp(14)); background = pressable(); isClickable = true
+                        setOnClickListener {
+                            popup("Remove @$member?", "They'll lose access to new messages. The group gets a new key, so this only works for members on the latest app version.",
+                                null, "Cancel" to dim, "Remove" to red) { i ->
+                                if (i == 1) Messenger.run({ Messenger.core.rekeyGroup(g, setOf(member)); Messenger.kick() }, { showGroupSettings(Messenger.core.group(g.id) ?: g) }) { e -> toast(errorText(e)) }
+                            }
+                        }
+                    })
+                })
+            } else col.addView(sw)
         }
         col.addView(gap(20))
         col.addView(cta("Save") {
@@ -890,7 +938,7 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(wall)
+            background = wallBg()
             fitsSystemWindows = true
             addView(chatTop, LinearLayout.LayoutParams(-1, -2))
             addView(banner, LinearLayout.LayoutParams(-1, -2))
@@ -1752,6 +1800,11 @@ class MainActivity : Activity() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(gap(8))
         col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
+        col.addView(tv("Connection", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+        col.addView(tv("Tor   ✓ active", 16f, white).apply { setPadding(dp(20), dp(6), dp(20), dp(2)) })
+        col.addView(settingNote("Everything goes through the Tor network, so no one — not even the server's host — ever sees your IP address. This is the only connection right now."))
+        col.addView(tv("Direct server   · in progress", 16f, faint).apply { setPadding(dp(20), dp(10), dp(20), dp(2)) })
+        col.addView(settingNote("A faster, direct connection to your own server. Coming later."))
         col.addView(gap(8))
         col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged() })
         col.addView(settingNote("Keeps a small \"connected\" notification. No Google push service is used."))

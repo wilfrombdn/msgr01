@@ -10,8 +10,6 @@ import com.google.crypto.tink.RegistryConfiguration
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
 import org.json.JSONObject
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.Executors
 
 /**
@@ -19,10 +17,9 @@ import java.util.concurrent.Executors
  * Android Keystore, finds the server by itself, and keeps the mailbox connection open.
  */
 object Messenger {
-    /** Where the app looks up the current server, so it can move without an app update. */
-    const val SERVER_LIST = "https://wilfrombdn.github.io/telegramnt/server.json"
-    /** Used if the list can't be reached. Empty until the cloud server is set up. */
-    const val BUILT_IN = ""
+    /** The server's permanent Tor address, baked in. The .onion IS the server's public key, so the app
+     *  can only ever talk to the real server, and nothing (no Cloudflare, no directory fetch) sees an IP. */
+    const val ONION = "http://b5yezgiz6sehrwie3qcnmplgbxcc7lfrclqukbmlnya332gh53wplzad.onion"
 
     lateinit var core: Core
     var background = true
@@ -59,7 +56,8 @@ object Messenger {
             .build().keysetHandle.getPrimitive(RegistryConfiguration.get(), Aead::class.java)
         file = File(app.filesDir, "store2.bin")
         File(app.filesDir, "store.bin").delete() // 1.0 test chats; that version had no accounts
-        start(Core(BUILT_IN))
+        Tor.start(app)                                  // start the embedded Tor daemon (bootstraps in the background)
+        start(Core(ONION) { Tor.socksPort() })          // all traffic goes to the .onion through Tor's SOCKS port
         load()
     }
 
@@ -202,26 +200,21 @@ object Messenger {
         if (connected != on) { connected = on; changed() }
     }
 
-    /** Looks up the server and checks it answers. Network: call off the main thread. */
+    /** Checks the server answers over Tor. Returns false while Tor is still bootstrapping (fail-closed:
+     *  the request only ever goes through Tor, never a fallback that would expose an IP). Off-main only. */
     fun findServer(): Boolean {
-        val candidates = listOfNotNull(core.relay.server.ifBlank { null }, fetchServerList(), BUILT_IN.ifBlank { null })
-        for (s in candidates.distinct()) {
-            if (Relay(s).ping()) {
-                if (s != core.relay.server) core.relay = Relay(s)
-                setConnected(true)
-                return true
-            }
-        }
-        setConnected(false)
-        return false
+        val ok = core.relay.ping()
+        setConnected(ok)
+        return ok
     }
 
     private var finding: Thread? = null
 
-    /** Before sign-in: keep looking for the server quietly until it answers. */
+    /** Before sign-in: keep trying the server (via Tor) quietly until it answers. */
     @Synchronized
     fun connectInBackground() {
         if (connected || finding?.isAlive == true) return
+        Tor.start(app)   // make sure the daemon is coming up
         finding = Thread({
             var wait = 3_000L
             while (!signedIn && !findServer()) {
@@ -229,20 +222,6 @@ object Messenger {
                 wait = (wait * 2).coerceAtMost(30_000L)
             }
         }, "find-server").apply { isDaemon = true; start() }
-    }
-
-    private fun fetchServerList(): String? = try {
-        val c = URL(SERVER_LIST).openConnection() as HttpURLConnection
-        c.connectTimeout = 10_000
-        c.readTimeout = 10_000
-        try {
-            val s = JSONObject(c.inputStream.bufferedReader().readText()).optString("server").trimEnd('/')
-            s.takeIf { it.startsWith("https://") } // only ever auto-connect over https
-        } finally {
-            c.disconnect()
-        }
-    } catch (e: Exception) {
-        null
     }
 
     // ---------- background work ----------

@@ -138,7 +138,7 @@ class Me(
 class Group(
     val id: String,
     var name: String,
-    val secret: String,          // the shared secret; whoever has it is in the group
+    var secret: String,          // the shared secret; whoever has it is in the group (rotated on a re-key)
     val public: Boolean,         // true = joinable by invite link; false = friends added directly
     var cursor: Long = 0,        // last group-mailbox position read
     var unread: Int = 0,
@@ -148,11 +148,18 @@ class Group(
     val owner: String = "",      // creator @username; anchored into the address so a tampered link can't claim it. "" = legacy group (no roles)
 ) {
     @Volatile var distSent = false   // have I posted my sender key this session (not persisted)
+    @Volatile var distAt = 0L        // when I last posted it (not persisted); re-posted so late joiners can read me
     val leaders = mutableSetOf<String>()  // @usernames allowed to change settings (owner is always one)
     var readOnly = false                  // true = only leaders can post (client-enforced)
     var setVer = 0                        // version counter for settings changes (newer wins)
+    var epoch = 0                         // re-key generation; a higher epoch's secret replaces a lower one
     val pending = mutableListOf<Triple<String, String, ByteArray>>() // gmsgs waiting for a sender key
     val pendingCtl = mutableListOf<Pair<String, ByteArray>>()        // gctl controls waiting for a sender key
+    val rekeyDue = mutableSetOf<String>()               // owner: members a leave means I still have to re-key out
+    val rekeyResend = mutableListOf<ResendItem>()       // owner: re-key blobs to re-post so offline members still migrate
+    /** A sealed re-key announcement the owner re-posts to the old mailbox until [until], so a member who was
+     *  offline during the re-key still finds it when they come back (the group mailbox TTL is short). */
+    class ResendItem(val addr: String, val blob: String, val until: Long, var last: Long)
     val lastTs get() = msgs.lastOrNull()?.ts ?: created
     // owner-anchored v2 derivation for new groups; legacy groups (no owner) keep the old one
     val addr get() = Crypto.sha256((if (owner.isEmpty()) "msgr01-group|$secret" else "msgr01-group-v2|$owner|$secret").toByteArray()).hex()
@@ -166,7 +173,9 @@ class Group(
     fun json(withMsgs: Boolean): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("secret", secret).put("public", public)
         .put("cursor", cursor).put("created", created).put("members", JSONArray(members.toList()))
-        .put("owner", owner).put("leaders", JSONArray(leaders.toList())).put("readOnly", readOnly).put("setVer", setVer)
+        .put("owner", owner).put("leaders", JSONArray(leaders.toList())).put("readOnly", readOnly).put("setVer", setVer).put("epoch", epoch)
+        .put("rekeyDue", JSONArray(rekeyDue.toList()))
+        .put("rekeyResend", JSONArray(rekeyResend.map { JSONObject().put("addr", it.addr).put("blob", it.blob).put("until", it.until).put("last", it.last) }))
         .apply { if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() })) }
 
     companion object {
@@ -175,7 +184,11 @@ class Group(
                 o.optLong("cursor"), o.optInt("unread"), o.optLong("created"), owner = o.optString("owner"))
             o.optJSONArray("members")?.let { for (i in 0 until it.length()) g.members.add(it.getString(i)) }
             o.optJSONArray("leaders")?.let { for (i in 0 until it.length()) g.leaders.add(it.getString(i)) }
-            g.readOnly = o.optBoolean("readOnly"); g.setVer = o.optInt("setVer")
+            g.readOnly = o.optBoolean("readOnly"); g.setVer = o.optInt("setVer"); g.epoch = o.optInt("epoch")
+            o.optJSONArray("rekeyDue")?.let { for (i in 0 until it.length()) g.rekeyDue.add(it.getString(i)) }
+            o.optJSONArray("rekeyResend")?.let { for (i in 0 until it.length()) it.getJSONObject(i).let { r ->
+                g.rekeyResend.add(ResendItem(r.getString("addr"), r.getString("blob"), r.getLong("until"), r.optLong("last")))
+            } }
             o.optJSONArray("msgs")?.let { for (i in 0 until it.length()) g.msgs.add(Msg.from(it.getJSONObject(i))) }
             return g
         }
@@ -188,8 +201,8 @@ class UserError(msg: String) : IOException(msg)
  * All the chat rules, with no Android in it, so it can be tested on a computer.
  * Network calls happen on the caller's thread; state changes are synchronized.
  */
-class Core(server: String) {
-    var relay = Relay(server)
+class Core(server: String, private val socks: () -> Int? = { null }) {
+    var relay = Relay(server, socks)
     @Volatile var me: Me? = null
     val contacts = mutableListOf<Contact>()
     val groups = mutableListOf<Group>()
@@ -420,8 +433,88 @@ class Core(server: String) {
 
     fun leaveGroup(g: Group) {
         val m = me
-        if (m != null) runCatching { relay.gsend(g.addr, gseal(g, JSONObject().put("t", "leave").put("u", m.user))) }
+        if (m != null) runCatching {
+            // authenticated leave (gctl): proves it's really me, so the owner can safely re-key me out.
+            gctl(g, m, JSONObject().put("t", "leave"))
+            // legacy outer leave too, so clients older than 4.2 still drop me from their member list.
+            relay.gsend(g.addr, gseal(g, JSONObject().put("t", "leave").put("u", m.user)))
+        }
         synchronized(this) { groups.remove(g) }
+        changed()
+    }
+
+    /**
+     * Owner-only: rotate the group to a fresh secret, excluding everyone in [remove]. The new secret is
+     * sealed individually to each remaining member's directory key inside an authenticated gctl posted to
+     * the OLD mailbox — a removed member can read the announcement but can't open any member's piece, and
+     * can't forge one (the gctl is encrypted with the owner's sender key). After this, new messages go to a
+     * new mailbox the removed member can't read. Everyone must be on 4.2+ or they're effectively removed.
+     */
+    fun rekeyGroup(g: Group, remove: Set<String>) = synchronized(g.rekeyDue) {   // one re-key at a time per group
+        val m = me ?: throw UserError("Not signed in")
+        if (g.owner.isEmpty() || m.user != g.owner) throw UserError("Only the group owner can remove members")
+        val removeN = remove.map { it.removePrefix("@").lowercase() }.toSet()
+        val kept = synchronized(this) { g.members.filter { it != m.user && it !in removeN } }
+        val newSecret = Crypto.randomHex()
+        val newEpoch = g.epoch + 1
+        val keys = JSONObject()
+        for (u in kept) {
+            // a friend's key is pinned; otherwise take it from the directory. lookup() returns null only for a
+            // deregistered @user (safe to drop); a network/429 error throws and aborts the whole re-key.
+            val encStr = contact(u)?.takeIf { it.status == Contact.FRIENDS }?.theirEnc ?: relay.lookup(u)?.enc ?: continue
+            val encKey = Crypto.parsePublic(unb64(encStr), Crypto.ENC_TEMPLATE) ?: throw IOException("bad key for @$u")
+            keys.put(u, b64(Crypto.seal(m.sig, encKey, rekeyBind(g.owner, g.secret, newEpoch, u), newSecret.toByteArray())))
+        }
+        val newLeaders = synchronized(this) { g.leaders.filter { it !in removeN } }
+        val oldAddr = g.addr
+        val bytes = gctlBytes(g, m, JSONObject().put("t", "rekey").put("ep", newEpoch).put("n", g.name)
+            .put("public", g.public).put("ro", g.readOnly).put("ldr", JSONArray(newLeaders)).put("keys", keys))
+        relay.gsend(oldAddr, bytes)
+        val now = System.currentTimeMillis()
+        // keep re-posting to the old mailbox so a member offline during the re-key still finds it (up to MSG_TTL)
+        synchronized(this) { g.rekeyResend.add(Group.ResendItem(oldAddr, b64(bytes), now + REKEY_RESEND_WINDOW, now)) }
+        migrateGroup(g, newSecret, newEpoch, removeN, g.name, g.readOnly, newLeaders.toSet())
+    }
+
+    /** Owner: if a leave (or a failed earlier attempt) left members to re-key out, do it now. Durable: on
+     *  failure the names stay in rekeyDue and the next poll retries. */
+    private fun drainRekeyDue(g: Group) {
+        val due = synchronized(g.rekeyDue) { g.rekeyDue.toSet() }
+        if (due.isEmpty()) return
+        try {
+            rekeyGroup(g, due)
+            synchronized(g.rekeyDue) { g.rekeyDue.removeAll(due) }
+        } catch (e: Exception) { /* keep them queued; retry next poll */ }
+    }
+
+    /** Owner: re-post each buffered re-key announcement to its old mailbox about once a day until it expires,
+     *  so a member who was offline during the re-key still finds it. */
+    private fun resendRekeys(m: Me, g: Group) {
+        val now = System.currentTimeMillis()
+        val items = synchronized(this) { g.rekeyResend.toList() }
+        for (item in items) {
+            if (now > item.until) { synchronized(this) { g.rekeyResend.remove(item) }; continue }
+            if (now - item.last < REKEY_RESEND_EVERY) continue
+            runCatching { relay.gsend(item.addr, unb64(item.blob)); item.last = now }
+        }
+    }
+
+    private fun rekeyBind(owner: String, oldSecret: String, epoch: Int, user: String) =
+        "msgr01-rekey-v1|$owner|$oldSecret|$epoch|$user"
+
+    /** Switch a group to a new secret/epoch: fresh mailbox, fresh sender keys, dropped members. */
+    private fun migrateGroup(g: Group, newSecret: String, newEpoch: Int, removed: Set<String>, name: String, ro: Boolean, leaders: Set<String>) {
+        val m = me ?: return
+        synchronized(this) {
+            g.secret = newSecret; g.epoch = newEpoch
+            g.name = name.take(80).ifEmpty { g.name }; g.readOnly = ro
+            g.members.removeAll(removed)
+            g.leaders.clear(); g.leaders.addAll(leaders); if (g.owner.isNotEmpty()) g.leaders.add(g.owner)
+            g.cursor = 0; g.distSent = false
+            g.pending.clear(); g.pendingCtl.clear()
+            g.msgs.add(note(if (removed.isNotEmpty()) "Group security was updated and a member was removed." else "Group security was updated."))
+        }
+        runCatching { postMyDist(m, g) }   // publish my sender key in the new mailbox
         changed()
     }
 
@@ -470,6 +563,7 @@ class Core(server: String) {
         val sig = m.signal.identity.privateKey.calculateSignature(skdm)
         relay.gsend(g.addr, gseal(g, JSONObject().put("t", "skdm").put("u", m.user).put("d", b64(skdm)).put("sig", b64(sig))))
         g.distSent = true
+        g.distAt = System.currentTimeMillis()
     }
 
     private fun gseal(g: Group, inner: JSONObject) = Crypto.gcmSeal(g.key, "msgr01-group", inner.toString().toByteArray())
@@ -479,10 +573,13 @@ class Core(server: String) {
      * with my sender key, so the receiver's successful decrypt under my address proves it's me —
      * unlike the outer "u" field, which any member could forge.
      */
-    private fun gctl(g: Group, m: Me, payload: JSONObject) {
+    private fun gctl(g: Group, m: Me, payload: JSONObject) = relay.gsend(g.addr, gctlBytes(g, m, payload))
+
+    /** Builds a sealed gctl without sending it, so a re-key blob can be buffered and re-posted later. */
+    private fun gctlBytes(g: Group, m: Me, payload: JSONObject): ByteArray {
         if (!g.distSent) postMyDist(m, g)
         val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, payload.toString().toByteArray()) }
-        relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gctl").put("u", m.user).put("c", b64(ct.serialize()))))
+        return gseal(g, JSONObject().put("t", "gctl").put("u", m.user).put("c", b64(ct.serialize())))
     }
 
     /** Queues a group attachment: locked with its own key, same as a 1:1 attachment. */
@@ -505,7 +602,8 @@ class Core(server: String) {
         if (!g.canPost(m.user)) { msg.state = Msg.FAILED; onChange(); return }
         val f = msg.file ?: return
         msg.state = try {
-            if (!f.has("id")) f.put("id", relay.upload(loadBlob(f.getString("local")) ?: throw IOException("attachment missing")))
+            // group blobs fan out with no per-reader delete, so ask the server to drop them after a week
+            if (!f.has("id")) f.put("id", relay.upload(loadBlob(f.getString("local")) ?: throw IOException("attachment missing"), GROUP_FILE_TTL))
             // what others receive: no "local" (that's my private blob key), but the server id + file key
             val out = JSONObject().put("id", f.getString("id")).put("k", f.getString("k")).put("n", f.optString("n"))
                 .put("m", f.optString("m")).put("s", f.optInt("s")).put("grp", true)
@@ -524,6 +622,10 @@ class Core(server: String) {
 
     /** Reads new group-mailbox messages for [g]. */
     private fun pollGroup(m: Me, g: Group, wait: Int) {
+        // re-post my sender key before it ages out of the short-lived group mailbox, so anyone who joins
+        // (or re-syncs) later can still read my messages.
+        if (g.distSent && System.currentTimeMillis() - g.distAt > GROUP_FILE_TTL * 500L) runCatching { postMyDist(m, g) }
+        if (m.user == g.owner && g.owner.isNotEmpty()) { drainRekeyDue(g); resendRekeys(m, g) }
         val got = relay.gfetch(g.addr, g.cursor, wait)
         if (got.isEmpty()) return
         // decode everything, then handle sender-key announcements before chat messages so a
@@ -554,7 +656,10 @@ class Core(server: String) {
                 val identKey = try { IdentityKey(unb64(p.ident)) } catch (e: Exception) { return }
                 if (!identKey.publicKey.verifySignature(skdm, sig)) return // someone posting as @u
                 synchronized(m.signal) { GroupSessionBuilder(m.signal).process(SignalProtocolAddress(u, 1), SenderKeyDistributionMessage(skdm)) }
-                synchronized(this) { g.members.add(u) }
+                val isNew = synchronized(this) { g.members.add(u) }
+                // a new member just arrived: re-post my sender key so they can read my messages
+                // (the short group TTL may have swept my earlier one). u != me guards against self-echo.
+                if (isNew && g.distSent && u != m.user) runCatching { postMyDist(m, g) }
             }
             "gmsg" -> {
                 val id = inner.optString("id")
@@ -577,7 +682,10 @@ class Core(server: String) {
                 synchronized(this) { g.msgs.removeAll { it.id == id && it.sender == u } }
                 onChange()
             }
-            "leave" -> synchronized(this) { g.members.remove(u) }
+            // The outer "leave" trusts the forgeable "u", so in owner-anchored groups it must NOT change
+            // membership (a member could forge a leave for anyone). Those groups rely on the authenticated
+            // gctl "leave" instead. Legacy groups (no owner) keep the old behaviour.
+            "leave" -> if (g.owner.isEmpty()) synchronized(this) { g.members.remove(u) }
             "gctl" -> {
                 val ct = unb64(inner.optString("c"))
                 val plain = try {
@@ -622,6 +730,31 @@ class Core(server: String) {
                     }
                 }
                 onChange()
+            }
+            "leave" -> {   // authenticated departure: drop them, and if I'm the owner, re-key so they lose access
+                if (u == g.owner) return
+                synchronized(this) { g.members.remove(u) }
+                // queue the re-key durably; drainRekeyDue (in pollGroup) retries if the network call fails now
+                if (me?.user == g.owner && g.owner.isNotEmpty()) { synchronized(g.rekeyDue) { g.rekeyDue.add(u) }; drainRekeyDue(g) }
+                onChange()
+            }
+            "rekey" -> {   // only the owner may re-key, and only to a newer epoch
+                val ep = p.optInt("ep", 0)
+                if (u != g.owner || g.owner.isEmpty() || ep <= g.epoch) return
+                val keys = p.optJSONObject("keys") ?: return
+                val mine = keys.optString(m.user)
+                if (mine.isEmpty()) {   // no piece for me => I was removed
+                    synchronized(this) { g.msgs.add(note("You were removed from this group.")) }
+                    synchronized(this) { groups.remove(g) }
+                    onChange(); return
+                }
+                val opened = Crypto.open(m.enc, rekeyBind(g.owner, g.secret, ep, m.user), unb64(mine)) ?: return
+                val newSecret = opened.inner?.let { String(it) } ?: return
+                if (newSecret.length != 64 || !newSecret.all { it in "0123456789abcdef" }) return
+                val leaders = mutableSetOf<String>().apply { p.optJSONArray("ldr")?.let { for (i in 0 until it.length()) add(it.getString(i)) } }
+                val kept = mutableSetOf(g.owner, m.user).apply { keys.keys().forEach { add(it) } }
+                val removed = synchronized(this) { g.members.filter { it !in kept } }.toSet()
+                migrateGroup(g, newSecret, ep, removed, p.optString("n", g.name), p.optBoolean("ro", g.readOnly), leaders)
             }
         }
     }
@@ -1141,7 +1274,7 @@ class Core(server: String) {
 
     @Synchronized
     fun toJson(): JSONObject {
-        val o = JSONObject().put("server", relay.server)
+        val o = JSONObject()   // the server address is fixed in the app now (hardcoded onion), not saved
         me?.let { m ->
             o.put("me", JSONObject().put("user", m.user).put("name", m.name).put("device", m.device)
                 .put("enc", b64(Crypto.privateBytes(m.enc))).put("sig", b64(Crypto.privateBytes(m.sig)))
@@ -1156,7 +1289,7 @@ class Core(server: String) {
 
     @Synchronized
     fun loadJson(o: JSONObject) {
-        o.optString("server").takeIf { it.isNotEmpty() }?.let { relay = Relay(it) }
+        // (server address is hardcoded in the app now; any old saved "server" is ignored)
         val mo = o.optJSONObject("me") ?: return
         val enc = Crypto.parsePrivate(unb64(mo.getString("enc")), Crypto.ENC_TEMPLATE) ?: return
         val sig = Crypto.parsePrivate(unb64(mo.getString("sig")), Crypto.SIG_TEMPLATE) ?: return
@@ -1186,6 +1319,9 @@ class Core(server: String) {
         const val MAX_TEXT = 4000
         const val MAX_AVATAR = 8000 // bytes of JPEG; fits in one sealed message
         const val MAX_FILE = 25 * 1024 * 1024
+        const val GROUP_FILE_TTL = 7 * 24 * 3600   // group blobs fan out (no per-reader delete); keep them a week
+        const val REKEY_RESEND_WINDOW = 30L * 24 * 3600 * 1000  // owner re-posts a re-key this long so offline members migrate
+        const val REKEY_RESEND_EVERY = 24L * 3600 * 1000        // ...about once a day
         private const val FILE_LABEL = "telegramnt-file"
 
         fun cleanName(n: String) = n.replace(Regex("[/\\\\\\u0000-\\u001f]"), "_").take(120).ifBlank { "file" }

@@ -3,20 +3,36 @@ package com.wilfrombdn.telegramnt
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
-import java.net.HttpURLConnection
+import java.net.Socket
 import java.net.URL
 import java.util.Base64
 
-/** Talks to the MSNGR server. Messages only ever travel sealed. */
-class Relay(val server: String) {
+/**
+ * Talks to the MSNGR server. Messages only ever travel sealed.
+ *
+ * All traffic goes through [Net], which connects either directly (tests, and the future "Direct" path)
+ * or through Tor's SOCKS5 proxy to a .onion address. [socks] returns the live Tor SOCKS port, or null
+ * for a direct connection; for a .onion server it must be non-null or the request fails (fail-closed —
+ * we never silently fall back to a non-Tor route).
+ */
+class Relay(val server: String, private val socks: () -> Int? = { null }) {
     class Incoming(val token: String, val id: String, val blob: ByteArray)
     class Profile(val user: String, val enc: String, val sig: String, val inbox: String, val ident: String)
 
-    @Volatile private var live: HttpURLConnection? = null
+    @Volatile private var live: Socket? = null
+
+    private fun route(): Net.Route {
+        val u = URL(server)
+        val tls = u.protocol == "https"
+        val port = if (u.port != -1) u.port else if (tls) 443 else 80
+        // a .onion can only be reached through Tor; refuse rather than leak the request to a DNS lookup
+        val sp = if (u.host.endsWith(".onion")) (socks() ?: throw IOException("Tor is not ready yet")) else null
+        return Net.Route(u.host, port, tls, sp)
+    }
 
     /** Breaks off a waiting fetch so the next one can include new mailboxes. */
     fun kick() {
-        live?.disconnect()
+        runCatching { live?.close() }
     }
 
     class GroupMsg(val seq: Long, val blob: ByteArray)
@@ -106,40 +122,20 @@ class Relay(val server: String) {
     }
 
     /** Uploads an already-encrypted attachment; returns its id. */
-    fun upload(blob: ByteArray): String {
-        val c = URL("$server/upload").openConnection() as HttpURLConnection
-        try {
-            c.requestMethod = "POST"
-            c.connectTimeout = 15_000
-            c.readTimeout = 120_000
-            c.doOutput = true
-            c.setFixedLengthStreamingMode(blob.size)
-            c.setRequestProperty("Content-Type", "application/octet-stream")
-            c.outputStream.use { it.write(blob) }
-            val code = c.responseCode
-            val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: "{}"
-            if (code != 200) throw RelayError(code, runCatching { JSONObject(text).optString("error") }.getOrNull() ?: "")
-            return JSONObject(text).getString("id")
-        } finally {
-            c.disconnect()
-        }
+    /** [ttlSeconds] asks the server to drop the blob after that long (group files live a short time). */
+    fun upload(blob: ByteArray, ttlSeconds: Int = 0): String {
+        val headers = if (ttlSeconds > 0) mapOf("X-TTL" to ttlSeconds.toString()) else emptyMap()
+        val r = Net.request(route(), "POST", "/upload", "application/octet-stream", blob, headers, readMs = 120_000)
+        val text = String(r.body).ifEmpty { "{}" }
+        if (r.code != 200) throw RelayError(r.code, runCatching { JSONObject(text).optString("error") }.getOrNull() ?: "")
+        return JSONObject(text).getString("id")
     }
 
     fun download(id: String): ByteArray {
-        val c = URL("$server/download").openConnection() as HttpURLConnection
-        try {
-            c.requestMethod = "POST"
-            c.connectTimeout = 15_000
-            c.readTimeout = 120_000
-            c.doOutput = true
-            c.setRequestProperty("Content-Type", "application/json")
-            c.outputStream.use { it.write(JSONObject().put("id", id).toString().toByteArray()) }
-            val code = c.responseCode
-            if (code != 200) throw RelayError(code, "")
-            return c.inputStream.use { it.readBytes() }
-        } finally {
-            c.disconnect()
-        }
+        val r = Net.request(route(), "POST", "/download", "application/json",
+            JSONObject().put("id", id).toString().toByteArray(), readMs = 120_000)
+        if (r.code != 200) throw RelayError(r.code, "")
+        return r.body
     }
 
     fun doneWith(id: String) {
@@ -147,36 +143,21 @@ class Relay(val server: String) {
     }
 
     fun ping(): Boolean = try {
-        val c = URL("$server/").openConnection() as HttpURLConnection
-        c.connectTimeout = 10_000
-        c.readTimeout = 10_000
-        try {
-            c.responseCode == 200 && c.inputStream.bufferedReader().readText().contains("telegramnt")
-        } finally {
-            c.disconnect()
-        }
-    } catch (e: IOException) {
+        val r = Net.request(route(), "GET", "/", "text/plain", ByteArray(0), readMs = 10_000, connectMs = 10_000)
+        r.code == 200 && String(r.body).contains("telegramnt")
+    } catch (e: Exception) {
         false
     }
 
     private fun post(path: String, body: JSONObject, readTimeoutSec: Int, track: Boolean = false): JSONObject {
-        val c = URL(server + path).openConnection() as HttpURLConnection
-        if (track) live = c
+        val r = Net.request(route(), "POST", path, "application/json", body.toString().toByteArray(),
+            readMs = readTimeoutSec * 1000, onSocket = { if (track) live = it })
         try {
-            c.requestMethod = "POST"
-            c.connectTimeout = 15_000
-            c.readTimeout = readTimeoutSec * 1000
-            c.doOutput = true
-            c.useCaches = false
-            c.setRequestProperty("Content-Type", "application/json")
-            c.outputStream.use { it.write(body.toString().toByteArray()) }
-            val code = c.responseCode
-            val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: "{}"
-            if (code != 200) throw RelayError(code, runCatching { JSONObject(text).optString("error") }.getOrNull() ?: "")
+            val text = String(r.body).ifEmpty { "{}" }
+            if (r.code != 200) throw RelayError(r.code, runCatching { JSONObject(text).optString("error") }.getOrNull() ?: "")
             return JSONObject(text)
         } finally {
             if (track) live = null
-            c.disconnect()
         }
     }
 

@@ -41,6 +41,7 @@ MAX_PER_GROUP = 5000           # messages kept in one group mailbox
 MAX_TOKENS_PER_FETCH = 500
 MAX_WAIT = 30                   # seconds a fetch may wait for new mail
 MSG_TTL = 30 * 24 * 3600        # undelivered messages are dropped after this
+GROUP_MSG_TTL = 7 * 24 * 3600   # group mailboxes fan out (no per-reader delete), so keep them a short time
 BOX_TTL = 365 * 24 * 3600       # mailboxes nobody checks for a year are dropped
 RATE_PER_MIN = 120              # requests per minute from one address
 NEW_BOXES_PER_MIN = 20          # new mailboxes per minute from one address
@@ -127,6 +128,11 @@ class Store:
             CREATE TABLE IF NOT EXISTS gmsgs(seq INTEGER PRIMARY KEY AUTOINCREMENT, addr TEXT, ts REAL, blob BLOB);
             CREATE INDEX IF NOT EXISTS gmsgs_addr ON gmsgs(addr, seq);
         """)
+        # per-file retention hint (group files ask for a shorter life than 1:1); added live, so migrate in place
+        try:
+            self.db.execute("ALTER TABLE files ADD COLUMN ttl REAL")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         # Signal keys: identity, registration id, signed prekey and Kyber (post-quantum) prekey
         cols = [r[1] for r in self.db.execute("PRAGMA table_info(accounts)")]
         for col, kind in (("ident", "BLOB"), ("reg", "INTEGER"), ("spk", "TEXT"), ("kpk", "TEXT")):
@@ -216,11 +222,12 @@ class Store:
             self.db.execute("DELETE FROM boxes WHERE seen < ? AND addr NOT IN (SELECT inbox FROM accounts)",
                             (now - BOX_TTL,))
             self.db.execute("DELETE FROM msgs WHERE addr NOT IN (SELECT addr FROM boxes)")
-            old = [r[0] for r in self.db.execute("SELECT id FROM files WHERE ts < ?", (now - MSG_TTL,))]
+            # each file lives for its own hint (group files ask for less), capped at MSG_TTL
+            old = [r[0] for r in self.db.execute("SELECT id FROM files WHERE ? - ts > COALESCE(ttl, ?)", (now, MSG_TTL))]
         for fid in old:
             self.drop_file(fid)
         with self.lock:
-            self.db.execute("DELETE FROM gmsgs WHERE ts < ?", (now - MSG_TTL,))
+            self.db.execute("DELETE FROM gmsgs WHERE ts < ?", (now - GROUP_MSG_TTL,))
 
     # ---- attachments: sealed blobs the phones encrypted; the key never comes here ----
 
@@ -396,7 +403,13 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             self.close_connection = True
             return self.reply(400, {"error": "upload failed"})
-        store.q("INSERT INTO files VALUES(?,?,?)", fid, n, hour())
+        ttl = None  # default: MSG_TTL (handled in sweep). Clients may ask for a shorter life via X-TTL.
+        try:
+            hint = int(self.headers.get("X-TTL", ""))
+            ttl = max(3600, min(hint, MSG_TTL))  # clamp: never longer than MSG_TTL, never under an hour
+        except ValueError:
+            pass
+        store.q("INSERT INTO files(id, size, ts, ttl) VALUES(?,?,?,?)", fid, n, hour(), ttl)
         self.reply(200, {"id": fid})
 
     def api_download(self, req, who):

@@ -19,8 +19,8 @@ android {
         applicationId = "com.wilfrombdn.telegramnt"
         minSdk = 26
         targetSdk = 34
-        versionCode = 21
-        versionName = "4.1"
+        versionCode = 23
+        versionName = "4.3"
     }
     signingConfigs {
         create("release") {
@@ -45,7 +45,9 @@ android {
     packaging {
         // libsignal ships desktop copies of its native code and a testing build; phones need neither
         resources { excludes += listOf("libsignal_jni*.so", "libsignal_jni*.dylib", "signal_jni*.dll") }
-        jniLibs { excludes += listOf("**/libsignal_jni_testing.so") }
+        // kmp-tor's resource-exec-tor ships the tor binary in jniLibs; it must be unpacked to the app's
+        // nativeLibDir on install so it can be executed.
+        jniLibs { useLegacyPackaging = true; excludes += listOf("**/libsignal_jni_testing.so") }
     }
     compileOptions {
         isCoreLibraryDesugaringEnabled = true // libsignal uses newer Java APIs than Android 8 has
@@ -74,6 +76,9 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("androidx.camera:camera-video:1.4.1")
     implementation("org.signal:libsignal-android:0.105.0") // Signal's encryption (Double Ratchet, sender keys) // FileProvider, to open attachments in other apps
+    // Embedded Tor: the app reaches the relay's .onion through Tor, so there's no middleman that sees IPs.
+    implementation("io.matthewnelson.kmp-tor:runtime:2.6.0")
+    implementation("io.matthewnelson.kmp-tor:resource-exec-tor:408.22.0") // bundles the tor binary per ABI
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.signal:libsignal-client:0.105.0") // same library with desktop native code, for tests
     testImplementation("org.json:json:20240303")
