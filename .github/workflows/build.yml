@@ -38,12 +38,12 @@ jobs:
           for i in $(seq 1 20); do curl -s -o /dev/null http://127.0.0.1:8099/ && break; sleep 1; done
 
       - name: Tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: bash ./gradlew testDebugUnitTest --stacktrace
 
       # No signing key here, so this APK is debug-signed: for checking the build, not for installing
       # over the real app. The published APK is still signed on the laptop.
       - name: Release build
-        run: ./gradlew assembleRelease
+        run: bash ./gradlew assembleRelease
 
       - name: Test results and screenshots
         if: always()
