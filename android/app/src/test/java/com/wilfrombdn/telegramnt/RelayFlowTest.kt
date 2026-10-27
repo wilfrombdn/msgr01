@@ -373,6 +373,61 @@ class RelayFlowTest {
         assertEquals("👍", Msg.from(rexMsg.json()).reactions[su])   // persists
     }
 
+    /** 5.0 call room: two phones join with the same room id, get paired, and bytes flow both ways. */
+    @Test fun callRoomPairsTwoPhones() {
+        assumeTrue(Relay(server).ping())
+        val room = Crypto.randomHex(32)
+        val a = Relay(server).pipe(room)
+        var b: java.net.Socket? = null
+        val t = Thread { b = Relay(server).pipe(room) }.apply { start() }
+        assertEquals(1, a.getInputStream().read())
+        t.join(10_000)
+        assertEquals(1, b!!.getInputStream().read())
+        a.getOutputStream().apply { write("hello".toByteArray()); flush() }
+        val got = ByteArray(5); java.io.DataInputStream(b!!.getInputStream()).readFully(got)
+        assertEquals("hello", String(got))
+        a.close()
+        assertEquals(-1, b!!.getInputStream().read())   // one hangs up: the other's line closes
+    }
+
+    /** 5.0 calls: offer/ring/answer/end, cancel -> missed, decline; each phone writes its own summary. */
+    @Test fun callSignalingAndSummaries() {
+        assumeTrue(Relay(server).ping())
+        val al = Core(server); val bo = Core(server)
+        val au = "cla_$tag"; val bu = "clb_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo")
+        al.addFriend(bu); bo.poll(5); bo.accept(bo.contact(au)!!, friend = true); al.poll(5)
+        fun last(c: Core, u: String) = c.contact(u)!!.msgs.last { it.call != null }.call!!
+
+        // answered call
+        val k = al.startCall(al.contact(bu)!!)
+        bo.poll(5)
+        val inc = bo.call!!
+        assertEquals(Core.Call.INCOMING, inc.phase); assertEquals(k.room, inc.room); assertEquals(k.key, inc.key)
+        Thread.sleep(4000); al.poll(5)
+        assertEquals(Core.Call.RINGING, al.call!!.phase)
+        bo.answerCall(); bo.callConnected(); al.callConnected()
+        Thread.sleep(1200)
+        al.hangUp()
+        assertNull(al.call)
+        assertEquals("ok", last(al, bu).getString("s")); assertEquals("out", last(al, bu).getString("d"))
+        bo.poll(5)
+        assertNull(bo.call)
+        assertEquals("ok", last(bo, au).getString("s")); assertEquals("in", last(bo, au).getString("d"))
+
+        // caller gives up before an answer: they see "cancelled", the other phone "missed"
+        al.startCall(al.contact(bu)!!); bo.poll(5)
+        al.hangUp(); bo.poll(5)
+        assertEquals("cancelled", last(al, bu).getString("s")); assertEquals("missed", last(bo, au).getString("s"))
+
+        // declined
+        al.startCall(al.contact(bu)!!); bo.poll(5)
+        bo.hangUp(); al.poll(5)
+        assertEquals("declined", last(bo, au).getString("s")); assertEquals("declined", last(al, bu).getString("s"))
+        assertNull(al.call); assertNull(bo.call)
+        assertEquals("declined", Msg.from(al.contact(bu)!!.msgs.last { it.call != null }.json()).call!!.getString("s"))   // persists
+    }
+
     /** 4.8 GIF search goes through our server (skipped where the server has no GIPHY key, e.g. CI). */
     @Test fun gifSearchThroughRelay() {
         assumeTrue(Relay(server).ping())

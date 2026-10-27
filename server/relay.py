@@ -30,6 +30,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import threading
 import time
@@ -49,6 +50,11 @@ BOX_TTL = 365 * 24 * 3600       # mailboxes nobody checks for a year are dropped
 RATE_PER_MIN = 120              # requests per minute from one address
 GIF_RATE_PER_MIN = 240          # GIF searches/sends (own budget so GIFs never crowd out messages)
 GIF_PAGE = 24
+PIPE_WAIT = 120                 # seconds a caller's call room waits for the other phone
+PIPE_IDLE = 60                  # a call with no audio either way for this long is dropped
+PIPE_MAX_SECONDS = 4 * 3600     # longest call
+PIPE_MAX_ACTIVE = 40            # call rooms open at once
+ROOM = re.compile(r"^[0-9a-f]{64}$")
 GIF_MAX = 8 * 1024 * 1024       # a single GIF we'll pass on
 GIPHY_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "giphy.key")
 NEW_BOXES_PER_MIN = 20          # new mailboxes per minute from one address
@@ -321,11 +327,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         srv = self.server
         who = self.client_id()
-        gif = self.path in ("/gifs", "/gif")
+        gif = self.path in ("/gifs", "/gif", "/pipe")   # GIFs and calls have their own budget, apart from messages
         if not (srv.gif_rate if gif else srv.rate).add(who, 1, GIF_RATE_PER_MIN if gif else srv.rate_per_min):
             return self.reply(429, {"error": "slow down"})
         if self.path == "/upload":
             return self.upload(who)
+        if self.path == "/pipe":
+            return self.pipe()
         try:
             n = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -437,6 +445,78 @@ class Handler(BaseHTTPRequestHandler):
                 if not chunk:
                     break
                 self.wfile.write(chunk)
+
+    # ---- voice calls: pair the two phones by a random room id and pass their (already encrypted) audio ----
+
+    def pipe(self):
+        """The two phones in a call each POST /pipe with the same X-Room (random, from the call's encrypted
+        setup). Whoever arrives first waits; once both are here each gets one 0x01 byte, then bytes flow
+        straight through both ways until either hangs up. The audio is encrypted end to end by the phones,
+        so this only ever sees noise, and over Tor it never learns who is calling whom."""
+        srv = self.server
+        room = self.headers.get("X-Room", "")
+        if not ROOM.match(room):
+            return self.reply(400, {"error": "bad request"})
+        me = {"sock": self.connection, "paired": threading.Event(), "done": threading.Event()}
+        with srv.pipe_lock:
+            partner = srv.pipe_wait.pop(room, None)
+            if partner is None:
+                if len(srv.pipe_wait) + srv.pipe_active >= PIPE_MAX_ACTIVE:
+                    return self.reply(503, {"error": "busy"})
+                srv.pipe_wait[room] = me
+            else:
+                srv.pipe_active += 1
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.flush()
+        self.close_connection = True
+        if partner is None:   # first one here: wait for the other phone, then let its thread do the relaying
+            if not me["paired"].wait(PIPE_WAIT):
+                with srv.pipe_lock:
+                    if srv.pipe_wait.get(room) is me:
+                        del srv.pipe_wait[room]
+                if not me["paired"].is_set():
+                    return
+            me["done"].wait(PIPE_MAX_SECONDS + 60)
+            return
+        try:
+            a, b = partner["sock"], self.connection
+            for sk in (a, b):
+                sk.settimeout(PIPE_IDLE)
+            partner["paired"].set()
+            for sk in (a, b):
+                sk.sendall(b"\x01")
+            stop = threading.Event()
+            deadline = time.time() + PIPE_MAX_SECONDS
+
+            def copy(src, dst):
+                try:
+                    while not stop.is_set() and time.time() < deadline:
+                        chunk = src.recv(16384)
+                        if not chunk:
+                            break
+                        dst.sendall(chunk)
+                except OSError:
+                    pass
+                stop.set()
+                for sk in (a, b):   # one side gone: end the call for both
+                    try:
+                        sk.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+
+            t = threading.Thread(target=copy, args=(a, b), daemon=True)
+            t.start()
+            copy(b, a)
+            t.join(5)
+        except OSError:
+            pass
+        finally:
+            with srv.pipe_lock:
+                srv.pipe_active -= 1
+            partner["done"].set()
 
     # ---- GIF search (GIPHY), proxied so GIPHY never sees users' addresses and the key stays here ----
 
@@ -709,6 +789,9 @@ class Server(ThreadingHTTPServer):
         self.store = store
         self.rate = Counter(60)
         self.gif_rate = Counter(60)
+        self.pipe_lock = threading.Lock()
+        self.pipe_wait = {}
+        self.pipe_active = 0
         self.gif_urls = GifUrls()
         self.gif_pool = concurrent.futures.ThreadPoolExecutor(8)
         key = os.environ.get("GIPHY_KEY", "")

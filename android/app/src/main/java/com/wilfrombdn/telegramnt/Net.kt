@@ -131,6 +131,27 @@ object Net {
         }
     }
 
+    /**
+     * Opens a long-lived two-way stream (the voice-call room): sends a POST with [headers], checks for
+     * 200, and hands back the socket positioned right after the response headers.
+     */
+    fun openStream(route: Route, path: String, headers: Map<String, String>, readMs: Int): Socket {
+        val s = connect(route.host, route.port, route.tls, route.socksPort, 15_000)
+        try {
+            s.soTimeout = readMs
+            val head = StringBuilder("POST $path HTTP/1.1\r\nHost: ${route.host}\r\nContent-Length: 0\r\n")
+            for ((k, v) in headers) head.append("$k: $v\r\n")
+            s.getOutputStream().apply { write(head.append("\r\n").toString().toByteArray(Charsets.ISO_8859_1)); flush() }
+            val inp = s.getInputStream()
+            val code = readLine(inp)?.split(" ")?.getOrNull(1)?.toIntOrNull() ?: throw IOException("bad status")
+            while (true) { val line = readLine(inp) ?: break; if (line.isEmpty()) break }
+            if (code != 200) throw IOException("HTTP $code")
+            return s
+        } catch (e: Exception) {
+            runCatching { s.close() }; throw e
+        }
+    }
+
     /** Reads one CRLF- (or LF-) terminated line as ASCII; null at EOF before any byte. */
     private fun readLine(inp: InputStream): String? {
         val buf = StringBuilder()

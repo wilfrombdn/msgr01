@@ -104,4 +104,12 @@ class CryptoTest {
         println("UPDATE-OVER-TOR: " + j.toString("UTF-8").take(80).replace("\n", " "))
         assertTrue(org.json.JSONObject(j.toString("UTF-8")).getInt("code") >= 35)
     }
+
+    /** µ-law voice coding stays close to the original sound across the whole range. */
+    @Test fun ulawRoundTrip() {
+        for (x in listOf(0, 100, -100, 1000, -1000, 8000, -8000, 30000, -30000)) {
+            val y = CallAudio.roundTrip(x)
+            assertTrue("$x -> $y", Math.abs(y - x) <= maxOf(8, Math.abs(x) / 16))
+        }
+    }
 }

@@ -1,6 +1,7 @@
 package com.wilfrombdn.telegramnt
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -98,6 +99,7 @@ object Messenger {
         }
         core.onChange = { save(); changed() }
         core.onNew = { contact -> if (!visible) ui.post { onNotify?.invoke(contact) } }
+        core.onCall = { k -> ui.post { callChanged(k) } }
     }
 
     val signedIn get() = core.me != null
@@ -107,6 +109,77 @@ object Messenger {
     private fun changed() {
         val ls = synchronized(listeners) { listeners.toList() }
         ui.post { ls.forEach { it() } }
+    }
+
+    // ---------- calls ----------
+
+    val callListeners = java.util.concurrent.CopyOnWriteArrayList<(Core.Call) -> Unit>()
+    private var ringtone: android.media.Ringtone? = null
+    private var ringback: android.media.ToneGenerator? = null
+    private const val INCOMING_NOTE = 90
+
+    /** Reacts to every call change: rings, shows the call screen or alert, stops sound, and times out. */
+    private fun callChanged(k: Core.Call) {
+        if (!::app.isInitialized) return
+        val nm = app.getSystemService(android.app.NotificationManager::class.java)
+        if (k.phase == Core.Call.INCOMING) {
+            startRinging()
+            if (visible) app.startActivity(Intent(app, CallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            nm.notify(INCOMING_NOTE, CallActivity.incomingNotice(app, k))
+            ui.postDelayed({ if (core.call === k && k.phase == Core.Call.INCOMING) core.endCall(k, "missed") }, 65_000)
+        } else stopRinging()
+        if (k.phase != Core.Call.INCOMING) nm.cancel(INCOMING_NOTE)
+        // the caller hears a ringing tone until they answer
+        if (k.outgoing && k.phase == Core.Call.RINGING) {
+            if (ringback == null) ringback = runCatching { android.media.ToneGenerator(android.media.AudioManager.STREAM_VOICE_CALL, 70).apply { startTone(android.media.ToneGenerator.TONE_SUP_RINGTONE) } }.getOrNull()
+        } else { ringback?.release(); ringback = null }
+        if (k.phase == Core.Call.ENDED) {
+            CallAudio.stop()
+            app.stopService(Intent(app, CallService::class.java))
+        }
+        callListeners.forEach { it(k) }
+    }
+
+    private fun startRinging() {
+        if (ringtone?.isPlaying == true) return
+        ringtone = runCatching {
+            android.media.RingtoneManager.getRingtone(app, android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE))?.apply {
+                audioAttributes = android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build()
+                if (android.os.Build.VERSION.SDK_INT >= 28) isLooping = true
+                play()
+            }
+        }.getOrNull()
+        runCatching {
+            app.getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 800, 1200), 0))
+        }
+    }
+
+    private fun stopRinging() {
+        runCatching { ringtone?.stop() }; ringtone = null
+        runCatching { app.getSystemService(android.os.Vibrator::class.java)?.cancel() }
+    }
+
+    /** Calls [c]: joins the call room right away and waits there for them (up to a minute). */
+    fun startCall(ctx: Context, c: Contact, fail: (Exception) -> Unit) {
+        run({ core.startCall(c) }, {
+            val k = core.call ?: return@run
+            ctx.startActivity(Intent(ctx, CallActivity::class.java))
+            runCatching { ctx.startForegroundService(Intent(ctx, CallService::class.java)) }
+            CallAudio.start(ctx, k)
+            ui.postDelayed({ if (core.call === k && k.phase <= Core.Call.RINGING) io.execute { core.hangUp("noanswer") } }, 60_000)
+        }, fail)
+    }
+
+    fun answer(ctx: Context) {
+        val k = core.call ?: return
+        core.answerCall()
+        runCatching { ctx.startForegroundService(Intent(ctx, CallService::class.java)) }
+        CallAudio.start(ctx, k)
+    }
+
+    fun hangUp() {
+        CallAudio.stop()   // marks it as hung up on purpose, so the summary isn't "couldn't connect"
+        io.execute { core.hangUp() }
     }
 
     // ---------- saving ----------

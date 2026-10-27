@@ -156,6 +156,9 @@ class Relay(val server: String, private val socks: () -> Int? = { null }) {
         return r.body
     }
 
+    /** Joins a voice-call room (same route as everything else: Tor to the .onion today). */
+    fun pipe(room: String): Socket = Net.openStream(route(), "/pipe", mapOf("X-Room" to room), readMs = 130_000)
+
     fun doneWith(id: String) {
         post("/done", JSONObject().put("id", id), 20)
     }

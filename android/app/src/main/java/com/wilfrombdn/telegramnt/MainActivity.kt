@@ -823,6 +823,7 @@ class MainActivity : Activity() {
         private const val CREATE_RECOVERY = 10
         private const val OPEN_RECOVERY = 11
         private const val SAVE_IMAGE = 13
+        private const val MIC_FOR_CALL = 14
 
         /** Fixed reactions, then the most-used emoji not already in the bar, padded with [filler]. */
         fun quickReactions(use: Map<String, Int>, fixed: List<String>, filler: List<String>): List<String> {
@@ -875,7 +876,8 @@ class MainActivity : Activity() {
             c.status == Contact.ASKING -> (last?.takeIf { it.state == Msg.RECEIVED }?.let { "Message request: ${it.text}" } ?: "Wants to be your friend") to blue
             c.status == Contact.ASKED && last?.state == Msg.NOTE -> "Friend request sent" to dim
             last == null -> "" to dim
-            last.mine -> "You: ${preview(last)}" to dim
+            last.mine && last.call == null -> "You: ${preview(last)}" to dim
+            last.call?.optString("s") == "missed" -> preview(last) to red
             else -> preview(last) to dim
         }
         line2.addView(tv(preview, 15f, previewColor).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -1335,10 +1337,14 @@ class MainActivity : Activity() {
             else -> if (c.verified) "@${c.user} · verified ✓" else "@${c.user}"
         }
         chatTop?.removeAllViews()
-        chatTop?.addView(topBar(c.name, sub, LinearLayout(this).apply {
+        val blocked = Messenger.core.callBlocked(c)
+        val netNote = blocked?.takeIf { c.status == Contact.FRIENDS }   // "your network differs…" shows under the name
+        chatTop?.addView(topBar(c.name, netNote ?: sub, LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(icon(R.drawable.ic_back) { showChats() })
             addView(avatar(c.name, 40, c.avatar))
+        }, icon(R.drawable.ic_call, if (blocked == null) white else faint, 22) {
+            if (blocked != null) toast(blocked) else callFriend(c)
         }, icon(R.drawable.ic_more).also { v -> v.setOnClickListener { chatMenu(c, v) } }), LinearLayout.LayoutParams(-1, -2))
 
         banner?.removeAllViews()
@@ -1529,7 +1535,79 @@ class MainActivity : Activity() {
         })
     }
 
+    // ---------- calls ----------
+
+    private var callAfterMic: Contact? = null
+
+    private fun callFriend(c: Contact) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            callAfterMic = c
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC_FOR_CALL); return
+        }
+        Messenger.core.call?.let { startActivity(Intent(this, CallActivity::class.java)); return }   // already in one: show it
+        Messenger.startCall(this, c) { e -> toast(errorText(e)) }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != MIC_FOR_CALL) return
+        val c = callAfterMic; callAfterMic = null
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) c?.let { callFriend(it) }
+        else toast("MSNGR needs the microphone for calls")
+    }
+
+    private fun callTitle(k: org.json.JSONObject): String {
+        val out = k.optString("d") == "out"
+        return when (k.optString("s")) {
+            "ok" -> if (out) "Outgoing call" else "Incoming call"
+            "missed" -> "Missed call"
+            "declined" -> if (out) "Call declined" else "Declined call"
+            "cancelled" -> "Cancelled call"
+            "busy" -> "Line busy"
+            "noanswer" -> "No answer"
+            else -> "Call failed"
+        }
+    }
+
+    private fun callDuration(sec: Int) = when {
+        sec >= 3600 -> "%d h %d min".format(sec / 3600, sec % 3600 / 60)
+        sec >= 60 -> "%d min %d s".format(sec / 60, sec % 60)
+        else -> "$sec s"
+    }
+
+    /** Telegram-style call summary in the chat; tap the phone to call back. */
+    private fun callBubble(c: Contact, m: Msg): View {
+        val k = m.call!!
+        val ok = k.optString("s") == "ok"
+        val bad = k.optString("s") in listOf("missed", "failed") && k.optString("d") == "in" || k.optString("s") == "failed"
+        val wrap = LinearLayout(this).apply { gravity = if (m.mine) Gravity.END else Gravity.START; setPadding(0, dp(4), 0, dp(4)); tag = m.id }
+        val fill = if (m.mine) look.out else look.inn
+        val ink = Look.textOn(fill)
+        val sub = (ink and 0x00FFFFFF) or (0x99 shl 24)
+        val b = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            background = round(fill, if (look.square) 0 else 14)
+            setPadding(dp(12), dp(8), dp(6), dp(8))
+        }
+        b.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(tv(callTitle(k), 15.5f, ink, true))
+            addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, 0)
+                addView(tv(if (k.optString("d") == "out") "↗" else "↙", 14f, if (bad) red else if (ok) Color.parseColor("#34C759") else sub, true).apply { setPadding(0, 0, dp(5), 0) })
+                addView(tv(time(m.ts) + if (ok) ", " + callDuration(k.optInt("dur")) else "", 13f, sub))
+            })
+        })
+        b.addView(icon(R.drawable.ic_call, ink, 22, 12) { callFriend(c) }.apply { (layoutParams as LinearLayout.LayoutParams).leftMargin = dp(18) })
+        b.setOnLongClickListener {
+            longPressMenu(null, null, listOf("Delete for me" to { Messenger.core.deleteMessage(c, m, forEveryone = false); fillChat() })); true
+        }
+        wrap.addView(b, LinearLayout.LayoutParams(-2, -2).apply { if (m.mine) leftMargin = dp(56) else rightMargin = dp(56) })
+        return wrap
+    }
+
     private fun bubble(c: Contact, m: Msg): View {
+        if (m.call != null) return callBubble(c, m)
         val wrap = LinearLayout(this).apply {
             gravity = if (m.mine) Gravity.END else Gravity.START
             setPadding(0, dp(4), 0, dp(4))   // a little breathing room between bubbles
@@ -1954,6 +2032,7 @@ class MainActivity : Activity() {
     private val pictures = HashMap<String, android.graphics.Bitmap?>()
 
     private fun preview(m: Msg): String {
+        m.call?.let { return callTitle(it) + if (it.optString("s") == "ok") " (${callDuration(it.optInt("dur"))})" else "" }
         val f = m.file ?: return m.text
         return if (f.optString("m") == "image/gif") "GIF" else if (f.optString("m") == "image/webp") "Sticker" else if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
     }

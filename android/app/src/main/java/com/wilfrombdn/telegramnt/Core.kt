@@ -34,10 +34,12 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
     val reactions: MutableMap<String, String> = mutableMapOf()
     /** The message this one replies to: id, u (its author's @username), p (short preview, used if it's gone). */
     var reply: JSONObject? = null
+    /** A call summary instead of a message: d = "out"/"in", s = ok/missed/declined/cancelled/busy/noanswer/failed, dur = seconds. */
+    var call: JSONObject? = null
 
     fun json(): JSONObject = JSONObject().put("id", id).put("mine", mine).put("text", text).put("ts", ts).put("state", state)
         .put("file", file).put("expires", expires).put("sender", sender)
-        .put("reactions", JSONObject(reactions as Map<*, *>)).put("reply", reply)
+        .put("reactions", JSONObject(reactions as Map<*, *>)).put("reply", reply).put("call", call)
 
     companion object {
         const val SENDING = 0
@@ -57,6 +59,7 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
                 it.file = o.optJSONObject("file"); it.expires = o.optLong("expires"); it.sender = o.optString("sender").ifEmpty { null }
                 o.optJSONObject("reactions")?.let { r -> for (k in r.keys()) it.reactions[k] = r.getString(k) }
                 it.reply = o.optJSONObject("reply")
+                it.call = o.optJSONObject("call")
             }
     }
 }
@@ -83,6 +86,7 @@ class Contact(
     var theirIdent: String? = null,     // their Signal identity key, from the directory
     var ttl: Int = 0,                   // disappearing-messages timer in seconds (0 = off), shared by both sides
     var theirReadUpto: Long = 0,        // my sent messages up to this time have been read by them
+    var net: String = Core.NET_TOR,     // how they connect ("tor" / "direct"); calls need both on the same one
 ) {
     val myAddr get() = Crypto.addressOf(myToken)
     val lastTs get() = msgs.lastOrNull()?.ts ?: created
@@ -91,7 +95,7 @@ class Contact(
     fun json(withMsgs: Boolean): JSONObject = JSONObject()
         .put("user", user).put("name", name).put("status", status).put("myToken", myToken)
         .put("theirAddr", theirAddr).put("theirEnc", theirEnc).put("theirSig", theirSig)
-        .put("verified", verified).put("created", created).put("theirInbox", theirInbox).put("waitingForAdd", waitingForAdd).put("theirIdent", theirIdent).put("ttl", ttl)
+        .put("verified", verified).put("created", created).put("theirInbox", theirInbox).put("waitingForAdd", waitingForAdd).put("theirIdent", theirIdent).put("ttl", ttl).put("net", net)
         .apply {
             if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() }))
                 .put("avatar", avatar?.let { Base64.getEncoder().encodeToString(it) })
@@ -115,6 +119,7 @@ class Contact(
             c.waitingForAdd = o.optBoolean("waitingForAdd")
             c.theirIdent = o.optString("theirIdent").ifEmpty { null }
             c.ttl = o.optInt("ttl")
+            c.net = o.optString("net", Core.NET_TOR).ifEmpty { Core.NET_TOR }
             c.avatar = o.optString("avatar").takeIf { it.isNotEmpty() }?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
             return c
         }
@@ -856,6 +861,129 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     // ---------- disappearing messages ----------
 
+    // ---------- voice calls ----------
+    // Set up over the encrypted chat (offer -> ring -> answer by joining the call room -> end). The audio
+    // itself runs through the server's call room on the same route as messages (Tor today), encrypted
+    // end to end with the call key that only the two phones have. Each phone writes its own summary.
+
+    class Call(val id: String, val user: String, val outgoing: Boolean, val key: String, val room: String) {
+        @Volatile var phase = DIALING
+        @Volatile var connectedAt = 0L
+        @Volatile var muted = false
+        val startedAt = System.currentTimeMillis()
+        companion object { const val DIALING = 0; const val RINGING = 1; const val INCOMING = 2; const val CONNECTING = 3; const val ACTIVE = 4; const val ENDED = 5 }
+    }
+
+    /** How this phone reaches the server; calls follow the same route. */
+    var netMode = NET_TOR
+    @Volatile var call: Call? = null
+        private set
+    /** Every change to the current call (any thread); the Android side shows the call screen / rings. */
+    var onCall: (Call) -> Unit = {}
+    private val seenCalls = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /** Why the call button is greyed out for [c], or null if you can call them. */
+    fun callBlocked(c: Contact): String? = when {
+        c.status != Contact.FRIENDS -> "Only friends can call"
+        c.net != netMode -> "Your network differs — switch to ${if (c.net == NET_DIRECT) "Direct" else "Tor"} to call"
+        else -> null
+    }
+
+    private fun callCtl(c: Contact, o: JSONObject) { val m = me ?: return; sealSignal(m, c, c.theirAddr!!, o) }
+
+    /** Starts a call to [c]. Network: call off the main thread. */
+    fun startCall(c: Contact): Call {
+        callBlocked(c)?.let { throw UserError(it) }
+        if (call != null) throw UserError("You're already in a call")
+        val k = Call(Crypto.randomHex(16), c.user, true, Crypto.randomHex(32), Crypto.randomHex(32))
+        seenCalls.add(k.id)
+        call = k; onCall(k)
+        try {
+            callCtl(c, JSONObject().put("t", "call").put("id", k.id).put("k", k.key).put("r", k.room)
+                .put("ts", System.currentTimeMillis()).put("n", netMode))
+        } catch (e: Exception) { endCall(k, "failed"); throw e }
+        return k
+    }
+
+    fun answerCall() { val k = call ?: return; if (k.phase == Call.INCOMING) { k.phase = Call.CONNECTING; onCall(k) } }
+
+    /** The audio connected (both phones are in the call room). */
+    fun callConnected() { val k = call ?: return; if (k.phase < Call.ACTIVE) { k.phase = Call.ACTIVE; k.connectedAt = System.currentTimeMillis(); onCall(k) } }
+
+    /** Hang up / decline / cancel from this phone. Network: off the main thread. */
+    fun hangUp(status: String? = null) {
+        val k = call ?: return
+        val c = contact(k.user)
+        val s = status ?: when {
+            k.phase == Call.ACTIVE -> "ok"
+            k.phase == Call.INCOMING -> "declined"
+            k.outgoing -> "cancelled"
+            else -> "failed"
+        }
+        endCall(k, s)
+        if (c != null) runCatching { callCtl(c, JSONObject().put("t", if (s == "declined") "dec" else "end").put("id", k.id)) }
+    }
+
+    /** Ends [k] here and writes this phone's summary into the chat. */
+    fun endCall(k: Call, status: String) {
+        if (k.phase == Call.ENDED) return
+        k.phase = Call.ENDED
+        if (call === k) call = null
+        val c = contact(k.user)
+        if (c != null) {
+            val dur = if (k.connectedAt > 0) ((System.currentTimeMillis() - k.connectedAt) / 1000).toInt() else 0
+            val missed = status == "missed"
+            val msg = Msg(Crypto.randomHex(16), k.outgoing, "", System.currentTimeMillis(), if (k.outgoing) Msg.SENT else Msg.RECEIVED)
+            msg.call = JSONObject().put("d", if (k.outgoing) "out" else "in").put("s", status).put("dur", dur).put("id", k.id)
+            synchronized(this) { c.msgs.add(msg); if (missed && openChat != c.user) c.unread++ }
+            onChange()
+            if (missed && openChat != c.user) onNew(c)
+        }
+        onCall(k)
+    }
+
+    private fun onCallCtl(m: Me, c: Contact, o: JSONObject) {
+        val id = o.optString("id")
+        if (id.length != 32) return
+        val k = call
+        when (o.optString("t")) {
+            "call" -> {
+                if (!seenCalls.add(id)) return                               // redelivered: ring only once
+                val key = o.optString("k"); val room = o.optString("r")
+                if (key.length != 64 || room.length != 64 || !key.all { it in "0123456789abcdef" } || !room.all { it in "0123456789abcdef" }) return
+                o.optString("n").takeIf { it == NET_TOR || it == NET_DIRECT }?.let { c.net = it }
+                if (c.status != Contact.FRIENDS) return                        // only friends can call
+                val incoming = Call(id, c.user, false, key, room)
+                // picked up late (phone was offline): it's a missed call, don't ring now
+                if (System.currentTimeMillis() - o.optLong("ts", 0) > 60_000) { endCall(incoming, "missed"); return }
+                if (k != null && k.phase != Call.ENDED) {
+                    // both called each other at once: the call from the alphabetically-first username wins
+                    if (k.outgoing && k.user == c.user && k.phase <= Call.RINGING && m.user > c.user) {
+                        k.phase = Call.ENDED; call = null; onCall(k)             // drop mine quietly, take theirs
+                    } else {
+                        if (!(k.outgoing && k.user == c.user)) {
+                            endCall(incoming, "missed")
+                            Thread { runCatching { callCtl(c, JSONObject().put("t", "busy").put("id", id)) } }.start()
+                        }
+                        return
+                    }
+                }
+                incoming.phase = Call.INCOMING
+                call = incoming; onCall(incoming)
+                Thread { runCatching { callCtl(c, JSONObject().put("t", "ring").put("id", id)) } }.start()
+            }
+            "ring" -> if (k != null && k.id == id && k.phase == Call.DIALING) { k.phase = Call.RINGING; onCall(k) }
+            "dec" -> if (k != null && k.id == id) endCall(k, "declined")
+            "busy" -> if (k != null && k.id == id) endCall(k, "busy")
+            "end" -> if (k != null && k.id == id) endCall(k, when {
+                k.phase == Call.INCOMING -> "missed"
+                k.phase == Call.ACTIVE -> "ok"
+                k.outgoing -> "failed"
+                else -> "missed"
+            })
+        }
+    }
+
     /** Sets (or clears, with 0) the disappearing-messages timer for this chat and tells the other side. */
     fun setTimer(c: Contact, seconds: Int) {
         val m = me ?: return
@@ -1214,6 +1342,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 synchronized(this) { c.msgs.removeAll { it.id == id && !it.mine } } // only lets them erase their own
                 onChange()
             }
+            "call", "ring", "dec", "busy", "end" -> onCallCtl(m, c, inner)
+            "net" -> { val n = inner.optString("n"); if (n == NET_TOR || n == NET_DIRECT) { c.net = n; onChange() } }
             "read" -> {
                 val ts = inner.optLong("ts", 0)
                 if (ts > c.theirReadUpto) { c.theirReadUpto = ts; onChange() }
@@ -1387,6 +1517,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         const val MAX_TEXT = 4000
         const val MAX_AVATAR = 8000 // bytes of JPEG; fits in one sealed message
         const val MAX_FILE = 25 * 1024 * 1024
+        const val NET_TOR = "tor"
+        const val NET_DIRECT = "direct"
         const val GROUP_FILE_TTL = 7 * 24 * 3600   // group blobs fan out (no per-reader delete); keep them a week
         const val REKEY_RESEND_WINDOW = 30L * 24 * 3600 * 1000  // owner re-posts a re-key this long so offline members migrate
         const val REKEY_RESEND_EVERY = 24L * 3600 * 1000        // ...about once a day

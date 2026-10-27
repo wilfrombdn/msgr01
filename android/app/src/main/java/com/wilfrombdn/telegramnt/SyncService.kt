@@ -62,7 +62,8 @@ class SyncService : Service() {
             val n = Notification.Builder(ctx, CH_MSG)
                 .setSmallIcon(R.drawable.ic_notify)
                 .setContentTitle(c.name)
-                .setContentText(if (c.status == Contact.ASKING) "Wants to be your friend" else "New message")
+                .setContentText(if (c.status == Contact.ASKING) "Wants to be your friend"
+                    else if (c.msgs.lastOrNull()?.call?.optString("s") == "missed") "Missed call" else "New message")
                 .setVisibility(Notification.VISIBILITY_PRIVATE)
                 .setContentIntent(open)
                 .setAutoCancel(true)

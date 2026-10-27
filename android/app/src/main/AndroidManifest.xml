@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- in-app updates: MSNGR can install its own newer version (Android asks once) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- voice calls -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <!-- allowBackup off: keys and chats never go to Google backups.
@@ -38,6 +44,12 @@
         <activity android:name=".CameraActivity" android:exported="false"
             android:screenOrientation="portrait"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name=".CallActivity" android:exported="false"
+            android:launchMode="singleTask" android:screenOrientation="portrait"
+            android:showWhenLocked="true" android:turnScreenOn="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <service android:name=".CallService" android:exported="false"
+            android:foregroundServiceType="microphone" />
         <receiver android:name=".UpdateReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />

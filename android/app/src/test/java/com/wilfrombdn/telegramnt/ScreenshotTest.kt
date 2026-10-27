@@ -49,6 +49,8 @@ class ScreenshotTest {
             it.file = org.json.JSONObject().put("id", "1".repeat(32)).put("k", "0".repeat(64)).put("n", "invoice-october.pdf").put("m", "application/pdf").put("s", 182_000).put("local", "x")
         }
         sam.msgs.first { it.id == "3" }.reactions["sam_r"] = "👍"
+        sam.msgs += Msg("c1", true, "", now - 20_000, Msg.SENT).also { it.call = org.json.JSONObject().put("d", "out").put("s", "ok").put("dur", 151) }
+        sam.msgs += Msg("c2", false, "", now - 10_000, Msg.RECEIVED).also { it.call = org.json.JSONObject().put("d", "in").put("s", "missed").put("dur", 0) }
         sam.msgs += Msg("r1", false, "same, way faster too", now - 30_000, Msg.RECEIVED).also {
             it.reply = org.json.JSONObject().put("id", "3").put("u", "wil_p").put("p", "yep, everything's end-to-end encrypted now")
         }   // 👍 on a 1:1 message
