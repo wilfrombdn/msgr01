@@ -710,7 +710,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             // The outer "leave" trusts the forgeable "u", so in owner-anchored groups it must NOT change
             // membership (a member could forge a leave for anyone). Those groups rely on the authenticated
             // gctl "leave" instead. Legacy groups (no owner) keep the old behaviour.
-            "leave" -> if (g.owner.isEmpty()) synchronized(this) { g.members.remove(u) }
+            "leave" -> if (g.owner.isEmpty()) { synchronized(this) { if (g.members.remove(u)) g.msgs.add(note("@$u left the group")) }; onChange() }
             "gctl" -> {
                 val ct = unb64(inner.optString("c"))
                 val plain = try {
@@ -758,7 +758,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             }
             "leave" -> {   // authenticated departure: drop them, and if I'm the owner, re-key so they lose access
                 if (u == g.owner) return
-                synchronized(this) { g.members.remove(u) }
+                // a grey line in the chat so everyone sees who left (once, even if the leave arrives twice)
+                synchronized(this) { if (g.members.remove(u)) g.msgs.add(note("@$u left the group")) }
                 // queue the re-key durably; drainRekeyDue (in pollGroup) retries if the network call fails now
                 if (me?.user == g.owner && g.owner.isNotEmpty()) { synchronized(g.rekeyDue) { g.rekeyDue.add(u) }; drainRekeyDue(g) }
                 onChange()

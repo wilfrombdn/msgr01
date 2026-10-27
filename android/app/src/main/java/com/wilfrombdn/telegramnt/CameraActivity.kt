@@ -90,7 +90,14 @@ class CameraActivity : ComponentActivity() {
                 return true
             }
         })
-        preview.setOnTouchListener { _, e -> pinch.onTouchEvent(e); true }
+        // double-tap the viewfinder to switch between front and back cameras (not mid-video)
+        val taps = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                if (recording == null) { front = !front; startCamera() }
+                return true
+            }
+        })
+        preview.setOnTouchListener { _, e -> pinch.onTouchEvent(e); if (!pinch.isInProgress) taps.onTouchEvent(e); true }
 
         timer = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = 15f; text = "● 0:00"
@@ -107,7 +114,7 @@ class CameraActivity : ComponentActivity() {
 
         hint = TextView(this).apply {
             setTextColor(0xCCFFFFFF.toInt()); textSize = 13f; gravity = Gravity.CENTER
-            text = "Tap for photo  ·  hold for video  ·  slide up to zoom"
+            text = "Tap for photo  ·  hold for video  ·  slide up to zoom\nDouble-tap the screen to flip the camera"
         }
         root.addView(hint, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = d(130) })
 

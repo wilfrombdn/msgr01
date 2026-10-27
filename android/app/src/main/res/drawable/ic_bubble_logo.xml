@@ -1,0 +1,39 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="72dp" android:height="72dp" android:viewportWidth="72" android:viewportHeight="72">
+  <!-- the app icon's 3D bubble on its own (no black square), cropped tight for the welcome screen -->
+  <group android:translateX="-20" android:translateY="-24">
+    <!-- soft drop shadow -->
+    <group android:translateX="3" android:translateY="7">
+      <path android:pathData="M38,26 L70,26 Q86,26 86,42 L86,56 Q86,72 70,72 L50,72 L30,86 Q28,87.5 29,85.5 L34.5,72 L38,72 Q22,72 22,56 L22,42 Q22,26 38,26 Z" android:fillAlpha="0.5">
+        <aapt:attr name="android:fillColor">
+          <gradient android:type="linear" android:startX="54" android:startY="26" android:endX="54" android:endY="86"
+              android:startColor="#00FFFFFF" android:endColor="#33FFFFFF" />
+        </aapt:attr>
+      </path>
+    </group>
+    <!-- the bubble's thickness: a darker copy pushed down-right -->
+    <group android:translateX="2.2" android:translateY="4">
+      <path android:pathData="M38,26 L70,26 Q86,26 86,42 L86,56 Q86,72 70,72 L50,72 L30,86 Q28,87.5 29,85.5 L34.5,72 L38,72 Q22,72 22,56 L22,42 Q22,26 38,26 Z">
+        <aapt:attr name="android:fillColor">
+          <gradient android:type="linear" android:startX="22" android:startY="26" android:endX="86" android:endY="86"
+              android:startColor="#FF9C9CA2" android:endColor="#FF4A4A50" />
+        </aapt:attr>
+      </path>
+    </group>
+    <!-- the face: white fading to a cool light grey -->
+    <path android:pathData="M38,26 L70,26 Q86,26 86,42 L86,56 Q86,72 70,72 L50,72 L30,86 Q28,87.5 29,85.5 L34.5,72 L38,72 Q22,72 22,56 L22,42 Q22,26 38,26 Z">
+      <aapt:attr name="android:fillColor">
+        <gradient android:type="linear" android:startX="28" android:startY="26" android:endX="80" android:endY="78"
+            android:startColor="#FFFFFFFF" android:endColor="#FFC6C6CC" />
+      </aapt:attr>
+    </path>
+    <!-- glossy highlight along the top -->
+    <path android:pathData="M39,30 L69,30 Q81,30 82,41 Q66,36 46,38 Q32,39 26,45 Q27,30 39,30 Z">
+      <aapt:attr name="android:fillColor">
+        <gradient android:type="linear" android:startX="54" android:startY="30" android:endX="54" android:endY="45"
+            android:startColor="#CCFFFFFF" android:endColor="#00FFFFFF" />
+      </aapt:attr>
+    </path>
+  </group>
+</vector>

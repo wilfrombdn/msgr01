@@ -355,9 +355,10 @@ class Look {
     var ui = 1f          // scales all app text
     var msg = 16f        // message text size in sp
     var square = false   // square bubble corners
+    var theme = "dark"   // "dark", "light" or "system" (match the phone)
 
     fun json(): JSONObject = JSONObject().put("out", out).put("in", inn).put("ui", ui.toDouble())
-        .put("msg", msg.toDouble()).put("square", square)
+        .put("msg", msg.toDouble()).put("square", square).put("theme", theme)
 
     fun load(o: JSONObject) {
         out = o.optInt("out", out)
@@ -365,6 +366,7 @@ class Look {
         ui = o.optDouble("ui", 1.0).toFloat().coerceIn(0.8f, 1.5f)
         msg = o.optDouble("msg", 16.0).toFloat().coerceIn(12f, 28f)
         square = o.optBoolean("square")
+        theme = o.optString("theme", "dark").takeIf { it in listOf("dark", "light", "system") } ?: "dark"
     }
 
     companion object {

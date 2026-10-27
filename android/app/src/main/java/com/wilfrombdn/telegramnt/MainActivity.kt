@@ -43,20 +43,29 @@ import java.util.Locale
 /** Telegram-style dark look, every screen built in code (like League Radio). */
 class MainActivity : Activity() {
     // dark greys; bubble colours, sizes and corners come from Settings > Appearance
-    private val bar = Color.parseColor("#1F1F1F")       // top bars
-    private val listBg = Color.parseColor("#141414")    // chat list, inputs
-    private val wall = Color.parseColor("#0B0B0B")      // behind messages
-    private val menuBg = Color.parseColor("#2A2A2A")    // drop-down menus
+    // Light / Dark / match the phone (Settings > Appearance). Each colour below has a dark and a light value.
+    private val dark: Boolean get() = when (look.theme) {
+        "light" -> false
+        "system" -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_NO
+        else -> true
+    }
+    private fun pick(d: String, l: String) = Color.parseColor(if (dark) d else l)
+    private val bar get() = pick("#1F1F1F", "#F7F7F8")       // top bars
+    private val listBg get() = pick("#141414", "#FFFFFF")    // chat list, inputs
+    private val wall get() = pick("#0B0B0B", "#E6E6EA")      // behind messages
+    private val menuBg get() = pick("#2A2A2A", "#FFFFFF")    // drop-down menus
+    private val raised get() = pick("#3A3A3A", "#D9D9DE")    // highlights, outlines, chip borders
+    private val nestedBg get() = pick("#181818", "#F3F3F5")  // chats inside an open folder
     private val look get() = Messenger.look
     private val blue = Color.parseColor("#4EA4F6")      // status only: unread, ticks, requests
-    private val ink = Color.parseColor("#111111")       // text on white buttons
-    private val white = Color.WHITE
-    private val dim = Color.parseColor("#8E8E93")
-    private val divider = Color.parseColor("#262626")
-    private val faint = Color.parseColor("#5A5A5A")
-    private val panel2 = Color.parseColor("#2A2A2A")
+    private val ink get() = pick("#111111", "#FFFFFF")       // text on the main (white / dark) buttons
+    private val white get() = pick("#FFFFFF", "#111111")     // main text and icons (dark text in light mode)
+    private val dim get() = pick("#8E8E93", "#6D6D72")
+    private val divider get() = pick("#262626", "#E3E3E6")
+    private val faint get() = pick("#5A5A5A", "#B0B0B5")
+    private val panel2 get() = pick("#2A2A2A", "#EDEDF0")
     private val red = Color.parseColor("#E5534B")
-    private val amber = Color.parseColor("#E8C24A")   // gentle yellow for the Tor "first connection is slow" note
+    private val amber get() = pick("#E8C24A", "#9A6B00")   // gentle yellow for the Tor "first connection is slow" note
     private val avatarColors = listOf("#E17076", "#FAA774", "#A695E7", "#7BC862", "#6EC9CB", "#65AADD", "#EE7AAE")
         .map { Color.parseColor(it) }
 
@@ -89,8 +98,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         // keep chats out of screenshots and the recent-apps preview
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        window.statusBarColor = bar
-        window.navigationBarColor = listBg
+        applyBars()
         Messenger.init(this)
         SyncService.channels(this)
         File(cacheDir, "open").deleteRecursively() // unlocked copies of opened attachments
@@ -111,6 +119,15 @@ class MainActivity : Activity() {
             sp.screen == "group" && Messenger.core.group(sp.id) != null -> showGroup(sp.id, at)
             else -> showChats()
         }
+    }
+
+    /** Status/navigation bar colours (and dark icons on them in light mode). */
+    private fun applyBars() {
+        window.statusBarColor = bar
+        window.navigationBarColor = listBg
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = if (dark) 0 else
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -160,10 +177,6 @@ class MainActivity : Activity() {
 
     private fun redraw() {
         if (!Messenger.signedIn) {
-            if (screen == "welcome") {
-                welcomeTorNote?.visibility = if (Messenger.connected) View.GONE else View.VISIBLE
-                if (Messenger.connected) pendingNext?.let { pendingNext = null; welcomeStatus?.text = ""; it(); return }
-            }
             if (screen != "welcome" && screen != "signup" && screen != "login") showWelcome()
             return
         }
@@ -195,7 +208,7 @@ class MainActivity : Activity() {
     private fun round(color: Int, r: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(r).toFloat() }
 
     /** A tappable background that lightens while pressed, so rows clearly read as buttons. */
-    private fun pressable(pressed: Int = Color.parseColor("#24FFFFFF")) = android.graphics.drawable.StateListDrawable().apply {
+    private fun pressable(pressed: Int = pick("#24FFFFFF", "#14000000")) = android.graphics.drawable.StateListDrawable().apply {
         addState(intArrayOf(android.R.attr.state_pressed), android.graphics.drawable.ColorDrawable(pressed))
         addState(intArrayOf(), android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
     }
@@ -308,16 +321,13 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(dp(32), dp(32), dp(32), dp(32))
         }
-        col.addView(ImageView(this).apply {
-            setImageResource(R.mipmap.ic_launcher)
-            outlineProvider = object : android.view.ViewOutlineProvider() {
-                override fun getOutline(v: View, o: android.graphics.Outline) = o.setOval(0, 0, v.width, v.height)
-            }
-            clipToOutline = true
-        }, LinearLayout.LayoutParams(dp(150), dp(150)))
-        col.addView(gap(24))
-        col.addView(tv("MSNGR", 26f, white, true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, -2))
-        col.addView(gap(12))
+        // the white bubble from the icon (no black square) with the name beside it
+        col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(ImageView(context).apply { setImageResource(R.drawable.ic_bubble_logo) }, LinearLayout.LayoutParams(dp(64), dp(64)))
+            addView(tv("MSNGR", 34f, white, true).apply { typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(dp(12), 0, 0, 0) })
+        }, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        col.addView(gap(18))
         col.addView(tv("The world's most private messaging app.\nEvery chat is end-to-end encrypted.\nNo phone number or email needed.", 16f, dim).apply {
             gravity = Gravity.CENTER
             setLineSpacing(0f, 1.2f)
@@ -327,12 +337,12 @@ class MainActivity : Activity() {
             col.addView(tv(it, 14f, red).apply { gravity = Gravity.CENTER })
         }
         col.addView(gap(40))
-        col.addView(cta("Start Messaging") { connectThen { showSignup() } }, ctaParams())
+        col.addView(cta("Start Messaging") { connectThen { showLogin() } }, ctaParams())
         col.addView(gap(14))
-        col.addView(tv("I already have an account", 16f, white, true).apply {
+        col.addView(tv("I don't have an account", 16f, white, true).apply {
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(10), dp(8), dp(10))
-            setOnClickListener { connectThen { showLogin() } }
+            setOnClickListener { connectThen { showSignup() } }
         })
         col.addView(tv("Restore from a backup file", 15f, dim).apply {
             gravity = Gravity.CENTER
@@ -340,11 +350,11 @@ class MainActivity : Activity() {
             setOnClickListener { pickRecoveryToRestore() }
         })
         col.addView(gap(24))
-        welcomeStatus = tv(if (Messenger.connected || pendingNext == null) "" else "Connecting…", 14f, dim).apply { gravity = Gravity.CENTER }
+        welcomeStatus = tv("", 15f, dim, true).apply { gravity = Gravity.CENTER }
         col.addView(welcomeStatus)
         welcomeTorNote = tv(TOR_WAIT_NOTE, 13.5f, amber).apply {
             gravity = Gravity.CENTER; setLineSpacing(0f, 1.25f); setPadding(dp(12), dp(14), dp(12), 0)
-            visibility = if (Messenger.connected) View.GONE else View.VISIBLE
+            visibility = View.GONE
         }
         col.addView(welcomeTorNote)
         setContentView(ScrollView(this).apply {
@@ -353,6 +363,50 @@ class MainActivity : Activity() {
             isFillViewport = true
             addView(col, android.widget.FrameLayout.LayoutParams(-1, -1))
         })
+        celebrating = false
+        startTicker()
+    }
+
+    /** Welcome-screen connection line: "Connecting." → ".." → "..." once a second; then a green
+     *  "Connected!" for a second before moving on. The slow-Tor note only shows after 30 s of trying. */
+    private var connectStart = 0L
+    private var dots = 0
+    private var celebrating = false
+    private val green = Color.parseColor("#4CD964")
+    private val ticker = object : Runnable {
+        override fun run() {
+            val st = welcomeStatus ?: return
+            if (screen !in listOf("welcome") || celebrating) return
+            if (Messenger.connected) {
+                welcomeTorNote?.visibility = View.GONE
+                if (st.text.isEmpty()) return   // already connected when the screen opened: nothing to show
+                celebrating = true
+                st.text = "Connected!"; st.setTextColor(green)
+                st.postDelayed({
+                    celebrating = false
+                    st.text = ""; st.setTextColor(dim)
+                    if (screen == "welcome") pendingNext?.let { pendingNext = null; it() }
+                }, 1000)
+                return
+            }
+            if (connectStart == 0L) connectStart = System.currentTimeMillis()
+            dots = dots % 3 + 1
+            // always three dots wide (the unused ones invisible) so the centred word doesn't wobble
+            st.text = android.text.SpannableString("Connecting...").apply {
+                setSpan(android.text.style.ForegroundColorSpan(Color.TRANSPARENT), 10 + dots, 13, 0)
+            }
+            st.setTextColor(dim)
+            if (System.currentTimeMillis() - connectStart >= 30_000) welcomeTorNote?.visibility = View.VISIBLE
+            st.postDelayed(this, 1000)
+        }
+    }
+
+    private fun startTicker() {
+        val st = welcomeStatus ?: return
+        if (Messenger.connected || celebrating) return
+        st.removeCallbacks(ticker)   // never two loops at once
+        if (st.text.isEmpty()) { dots = 0; st.text = "Connecting" }
+        ticker.run()
     }
 
     private var welcomeStatus: TextView? = null
@@ -364,8 +418,8 @@ class MainActivity : Activity() {
     private fun connectThen(next: () -> Unit) {
         if (Messenger.connected) return next()
         pendingNext = next
-        welcomeStatus?.text = "Connecting…"
         Messenger.connectInBackground()
+        startTicker()
     }
 
     private fun accountForm(title: String, signup: Boolean) {
@@ -404,6 +458,7 @@ class MainActivity : Activity() {
             val u = user.text.toString().trim().removePrefix("@").lowercase()
             val p = pass.text.toString()
             if (signup && p != pass2.text.toString()) { toast("The passwords don't match"); return@setOnClickListener }
+            dismissKeyboard()
             go.text = if (signup) "Making your keys…" else "Logging in…"
             go.isEnabled = false
             Messenger.run({
@@ -446,7 +501,7 @@ class MainActivity : Activity() {
         // everything else, keyed "u:<user>" / "g:<group>" so folders can hold either
         val rows = (all - requests.toSet()).map { Triple("u:${it.user}", it.lastTs, it as Any) } + grps.map { Triple("g:${it.id}", it.lastTs, it as Any) }
         fun rowFor(t: Triple<String, Long, Any>, bg: Int = listBg) = (t.third as? Contact)?.let { chatRow(it, t.first, bg) } ?: groupRow(t.third as Group, t.first, bg)
-        val nested = Color.parseColor("#181818")   // chats inside an open folder sit on a slightly lighter strip
+        val nested = nestedBg   // chats inside an open folder sit on a slightly different strip
         val byKey = rows.associateBy { it.first }
         val inFolder = HashSet<String>()
         if (q.isEmpty()) {
@@ -526,7 +581,7 @@ class MainActivity : Activity() {
             isClickable = true
             tag = "folder:${f.id}"
         }
-        row.addView(icon(R.drawable.ic_folder, white, 26, 14).apply { background = circle(Color.parseColor("#2E2E2E")) })
+        row.addView(icon(R.drawable.ic_folder, white, 26, 14).apply { background = circle(panel2) })
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
         mid.addView(tv(f.name, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         mid.addView(tv(if (count == 0) "Hold a chat and drag it here" else "$count chat" + if (count != 1) "s" else "", 14f, dim).apply { setPadding(0, dp(2), 0, 0) })
@@ -730,7 +785,7 @@ class MainActivity : Activity() {
         row.addView(FrameLayout(this).apply {
             addView(avatar(g.name, 54))
             addView(icon(R.drawable.ic_more, white, 12, 0).apply {
-                background = circle(Color.parseColor("#3A3A3A")); setPadding(dp(2), dp(2), dp(2), dp(2))
+                background = circle(raised); setPadding(dp(2), dp(2), dp(2), dp(2))
             }, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.BOTTOM or Gravity.END))
         })
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
@@ -1342,7 +1397,7 @@ class MainActivity : Activity() {
         addView(tv(text, 13.5f, white).apply {
             gravity = Gravity.CENTER
             setPadding(dp(10), dp(4), dp(10), dp(4))
-            background = round(Color.parseColor("#CC262626"), 12)
+            background = round(pick("#CC262626", "#CCFFFFFF"), 12)
             onClick?.let { f -> setOnClickListener { f() } }
         })
     }
@@ -1440,7 +1495,7 @@ class MainActivity : Activity() {
             quickReactions().forEach { e ->
                 reactRow.addView(tv(e).apply {
                     textSize = 22f; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(6))
-                    background = if (e == mine) android.graphics.drawable.ColorDrawable(Color.parseColor("#3A3A3A")) else pressable()
+                    background = if (e == mine) android.graphics.drawable.ColorDrawable(raised) else pressable()
                     setOnClickListener { d.dismiss(); onReact(if (e == mine) "" else e) }   // tap your own to remove it
                 }, LinearLayout.LayoutParams(0, -2, 1f))
             }
@@ -1572,7 +1627,7 @@ class MainActivity : Activity() {
             val mineHere = me != null && me in who
             row.addView(tv("$emoji ${who.size}", 13f, if (mineHere) white else dim).apply {
                 setPadding(dp(8), dp(3), dp(8), dp(3))
-                background = round(Color.parseColor(if (mineHere) "#3A4654" else "#2A2A2A"), 12)
+                background = round(if (mineHere) pick("#3A4654", "#D3E3F5") else panel2, 12)
                 setOnClickListener { toggle(emoji) }
             }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(4) })
         }
@@ -1657,7 +1712,7 @@ class MainActivity : Activity() {
         // header: avatar on the left, name + @username to its right
         col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.parseColor("#2A2A2A"), bar))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(panel2, bar))
             setPadding(dp(20), dp(24), dp(16), dp(20))
             addView(avatar(me?.name ?: "", 58, me?.avatar))
             addView(LinearLayout(context).apply {
@@ -1962,7 +2017,7 @@ class MainActivity : Activity() {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     bmp?.let { setImageBitmap(it) } ?: setBackgroundColor(Color.parseColor("#33000000"))
                 }, FrameLayout.LayoutParams(w, h))
-                if (!here) addView(tv(if (m.mine) "" else "Downloading…", 13f, white).apply {
+                if (!here) addView(tv(if (m.mine) "" else "Downloading…", 13f, Color.WHITE).apply {
                     setPadding(dp(8), dp(4), dp(8), dp(4))
                     background = round(Color.parseColor("#99000000"), 10)
                 }, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
@@ -2012,7 +2067,7 @@ class MainActivity : Activity() {
                     setImageBitmap(b); scaleType = ImageView.ScaleType.FIT_CENTER
                     setOnLongClickListener { longPressMenu(null, null, imageActions(m)); true }
                 })
-                addView(icon(R.drawable.ic_back) { leaveViewer() }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START))
+                addView(icon(R.drawable.ic_back, Color.WHITE) { leaveViewer() }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START))
                 fitsSystemWindows = true
             })
         })
@@ -2133,7 +2188,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.BLACK)
             setPadding(dp(16), dp(10), dp(16), dp(16))
-            addView(tv("Cancel", 16f, white, true).apply {
+            addView(tv("Cancel", 16f, Color.WHITE, true).apply {
                 gravity = Gravity.CENTER
                 setPadding(dp(12), dp(14), dp(12), dp(14))
                 setOnClickListener { showProfile() }
@@ -2141,7 +2196,7 @@ class MainActivity : Activity() {
             addView(mainButton("Done") {
                 val jpeg = crop.crop()
                 Messenger.run({ Messenger.core.setAvatar(jpeg) }, { showProfile() }) { e -> toast(errorText(e)); showProfile() }
-            }, LinearLayout.LayoutParams(0, -2, 1f))
+            }.apply { background = round(Color.WHITE, 10); setTextColor(Color.parseColor("#111111")) }, LinearLayout.LayoutParams(0, -2, 1f))
         }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2175,8 +2230,8 @@ class MainActivity : Activity() {
         textSize = 16f * look.ui
         isChecked = on
         val st = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-        thumbTintList = android.content.res.ColorStateList(st, intArrayOf(white, Color.parseColor("#9AA4AE")))
-        trackTintList = android.content.res.ColorStateList(st, intArrayOf(Color.parseColor("#80FFFFFF"), Color.parseColor("#3A4654")))
+        thumbTintList = android.content.res.ColorStateList(st, intArrayOf(white, pick("#9AA4AE", "#FFFFFF")))
+        trackTintList = android.content.res.ColorStateList(st, intArrayOf((white and 0x00FFFFFF) or (0x80 shl 24), pick("#3A4654", "#C4C4CA")))
         setPadding(dp(20), dp(14), dp(20), dp(14))
         setOnCheckedChangeListener { _, checked -> change(checked) }
     }
@@ -2311,7 +2366,7 @@ class MainActivity : Activity() {
                     setPadding(0, dp(10), 0, dp(10))
                     background = GradientDrawable().apply {
                         setColor(if (on) white else Color.TRANSPARENT)
-                        setStroke(dp(1), if (on) white else Color.parseColor("#3A3A3A"))
+                        setStroke(dp(1), if (on) white else raised)
                         cornerRadius = dp(4).toFloat()
                     }
                     setOnClickListener { onPick(i); Messenger.settingsChanged(); showAppearance() }
@@ -2329,7 +2384,7 @@ class MainActivity : Activity() {
                         background = GradientDrawable().apply {
                             shape = GradientDrawable.OVAL
                             setColor(color)
-                            setStroke(dp(if (color == current) 3 else 1), if (color == current) white else Color.parseColor("#3A3A3A"))
+                            setStroke(dp(if (color == current) 3 else 1), if (color == current) white else raised)
                         }
                     }, LinearLayout.LayoutParams(dp(44), dp(44)))
                     addView(tv(name, 12f, if (color == current) white else dim).apply { setPadding(0, dp(4), 0, 0); maxLines = 1 })
@@ -2338,6 +2393,14 @@ class MainActivity : Activity() {
             })
         })
 
+        section("THEME")
+        chips("Dark" to (look.theme == "dark"), "Light" to (look.theme == "light"), "Match phone" to (look.theme == "system")) { i ->
+            look.theme = listOf("dark", "light", "system")[i]
+            // the default dark "their" bubble is heavy on a light background; swap it for the light one
+            if (!dark && look.inn == Look.BUBBLES[1].second) look.inn = Look.BUBBLES.last().second
+            if (dark && look.inn == Look.BUBBLES.last().second) look.inn = Look.BUBBLES[1].second
+            applyBars()
+        }
         section("YOUR BUBBLES")
         swatches(look.out) { look.out = it }
         section("THEIR BUBBLES")

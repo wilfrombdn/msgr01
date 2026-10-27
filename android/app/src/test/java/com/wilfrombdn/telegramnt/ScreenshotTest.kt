@@ -172,6 +172,16 @@ class ScreenshotTest {
 
     private fun ShadowLooperIdleFor(ms: Long) = shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(ms))
 
+    @Test fun lightMode() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        Messenger.look.theme = "light"; Messenger.look.inn = Look.BUBBLES.last().second
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChats"); shoot(a, "30-light-chats")
+        call(a, "showChat", "sam_r"); shoot(a, "31-light-chat")
+        call(a, "showAppearance"); shoot(a, "32-light-appearance")
+        Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second
+    }
+
     /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */
     @Test fun composerWraps() {
         Messenger.initForPreview(fakeCore(signedIn = true))
