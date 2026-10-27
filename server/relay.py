@@ -20,6 +20,9 @@ Python 3.9+ standard library only. Run:  python3 relay.py --port 8080 --db teleg
 """
 
 import argparse
+import concurrent.futures
+import urllib.parse
+import urllib.request
 import base64
 import hashlib
 import hmac
@@ -44,6 +47,10 @@ MSG_TTL = 30 * 24 * 3600        # undelivered messages are dropped after this
 GROUP_MSG_TTL = 7 * 24 * 3600   # group mailboxes fan out (no per-reader delete), so keep them a short time
 BOX_TTL = 365 * 24 * 3600       # mailboxes nobody checks for a year are dropped
 RATE_PER_MIN = 120              # requests per minute from one address
+GIF_RATE_PER_MIN = 240          # GIF searches/sends (own budget so GIFs never crowd out messages)
+GIF_PAGE = 24
+GIF_MAX = 8 * 1024 * 1024       # a single GIF we'll pass on
+GIPHY_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "giphy.key")
 NEW_BOXES_PER_MIN = 20          # new mailboxes per minute from one address
 SIGNUPS_PER_HOUR = 5            # new accounts per hour from one address
 MAX_CONNECTIONS = 2000
@@ -314,7 +321,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         srv = self.server
         who = self.client_id()
-        if not srv.rate.add(who, 1, srv.rate_per_min):
+        gif = self.path in ("/gifs", "/gif")
+        if not (srv.gif_rate if gif else srv.rate).add(who, 1, GIF_RATE_PER_MIN if gif else srv.rate_per_min):
             return self.reply(429, {"error": "slow down"})
         if self.path == "/upload":
             return self.upload(who)
@@ -429,6 +437,62 @@ class Handler(BaseHTTPRequestHandler):
                 if not chunk:
                     break
                 self.wfile.write(chunk)
+
+    # ---- GIF search (GIPHY), proxied so GIPHY never sees users' addresses and the key stays here ----
+
+    def api_gifs(self, req, who):
+        """Trending (empty q) or search results, each with a small animated preview inlined."""
+        key = self.server.giphy_key
+        if not key:
+            return self.reply(503, {"error": "GIFs aren't set up on this server"})
+        q = str(req.get("q", ""))[:60].strip()
+        offset = max(0, min(int(req.get("offset", 0)), 500))
+        params = {"api_key": key, "limit": GIF_PAGE, "offset": offset, "rating": "pg-13"}
+        if q:
+            params["q"] = q
+        url = "https://api.giphy.com/v1/gifs/%s?%s" % ("search" if q else "trending", urllib.parse.urlencode(params))
+        try:
+            data = json.loads(giphy_get(url, 1024 * 1024)).get("data", [])
+        except Exception:
+            return self.reply(502, {"error": "GIF search is unavailable right now"})
+        items = []
+        for g in data:
+            im = g.get("images", {})
+            # small animated WebP loop for the picker grid (~25 KB each); a still frame if there isn't one
+            prev = im.get("preview_webp") or im.get("fixed_width_small_still") or {}
+            full = im.get("fixed_width") or im.get("downsized") or {}
+            gid = g.get("id", "")
+            if not (isinstance(gid, str) and GIF_ID.match(gid) and prev.get("url") and full.get("url")):
+                continue
+            self.server.gif_urls[gid] = full["url"]
+            items.append((gid, prev["url"], int(full.get("width") or 200), int(full.get("height") or 200)))
+        def fetch(it):
+            try:
+                return it, base64.b64encode(giphy_get(it[1], 600 * 1024)).decode()
+            except Exception:
+                return it, None
+        out = []
+        for (gid, _, w, h), b in self.server.gif_pool.map(fetch, items):
+            if b:
+                out.append({"id": gid, "w": w, "h": h, "p": b})
+        self.reply(200, {"gifs": out})
+
+    def api_gif(self, req, who):
+        """The full GIF to send (only ids we handed out in a recent search)."""
+        gid = req["id"]
+        url = self.server.gif_urls.get(gid) if isinstance(gid, str) else None
+        if not url:
+            return self.reply(404, {"error": "no such GIF"})
+        try:
+            body = giphy_get(url, GIF_MAX)
+        except Exception:
+            return self.reply(502, {"error": "couldn't get that GIF"})
+        self.send_response(200)
+        self.send_header("Content-Type", "image/gif")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def api_done(self, req, who):
         """The receiver has the file: forget it."""
@@ -606,12 +670,51 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, {"ok": True})
 
 
+GIF_ID = re.compile(r"^[A-Za-z0-9]{1,40}$")
+
+
+def giphy_get(url, cap):
+    """GET from GIPHY (only its own hosts), refusing anything larger than cap bytes."""
+    host = urllib.parse.urlparse(url).hostname or ""
+    if not (host == "giphy.com" or host.endswith(".giphy.com")):
+        raise ValueError("not giphy")
+    r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "MSNGR-relay"}), timeout=15)
+    body = r.read(cap + 1)
+    if len(body) > cap:
+        raise ValueError("too big")
+    return body
+
+
+class GifUrls:
+    """id -> media URL from recent searches, bounded so it can't grow forever."""
+    def __init__(self, cap=5000):
+        self.cap, self.d, self.lock = cap, {}, threading.Lock()
+
+    def __setitem__(self, k, v):
+        with self.lock:
+            self.d.pop(k, None)
+            self.d[k] = v
+            while len(self.d) > self.cap:
+                self.d.pop(next(iter(self.d)))
+
+    def get(self, k):
+        with self.lock:
+            return self.d.get(k)
+
+
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, addr, store, behind_proxy):
         self.store = store
         self.rate = Counter(60)
+        self.gif_rate = Counter(60)
+        self.gif_urls = GifUrls()
+        self.gif_pool = concurrent.futures.ThreadPoolExecutor(8)
+        key = os.environ.get("GIPHY_KEY", "")
+        if not key and os.path.exists(GIPHY_KEY_FILE):
+            key = open(GIPHY_KEY_FILE).read().strip()
+        self.giphy_key = key
         self.new_boxes = Counter(60)
         self.signups = Counter(3600)
         self.uploads = Counter(3600)

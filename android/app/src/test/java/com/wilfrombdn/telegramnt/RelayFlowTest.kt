@@ -373,6 +373,17 @@ class RelayFlowTest {
         assertEquals("👍", Msg.from(rexMsg.json()).reactions[su])   // persists
     }
 
+    /** 4.8 GIF search goes through our server (skipped where the server has no GIPHY key, e.g. CI). */
+    @Test fun gifSearchThroughRelay() {
+        assumeTrue(Relay(server).ping())
+        val r = Relay(server)
+        val found = try { r.gifs("thumbs up", 0) } catch (e: Relay.RelayError) { assumeTrue(e.code != 503); throw e }
+        assertTrue(found.isNotEmpty())
+        assertTrue(found[0].preview.isNotEmpty())
+        val full = r.gif(found[0].id)
+        assertEquals("GIF8", String(full.copyOfRange(0, 4)))
+    }
+
     /** 4.4 replies: the quote reference travels with the message in 1:1 chats and groups, and persists. */
     @Test fun repliesCarryTheQuote() {
         assumeTrue(Relay(server).ping())

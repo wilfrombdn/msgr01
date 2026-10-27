@@ -138,6 +138,24 @@ class Relay(val server: String, private val socks: () -> Int? = { null }) {
         return r.body
     }
 
+    class Gif(val id: String, val w: Int, val h: Int, val preview: ByteArray)
+
+    /** GIF search through the server (trending when [q] is empty); previews come inline. */
+    fun gifs(q: String, offset: Int): List<Gif> {
+        val arr = post("/gifs", JSONObject().put("q", q).put("offset", offset), 90).optJSONArray("gifs") ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.getJSONObject(i)
+            runCatching { Gif(o.getString("id"), o.optInt("w", 200), o.optInt("h", 200), Base64.getDecoder().decode(o.getString("p"))) }.getOrNull()
+        }
+    }
+
+    /** The full GIF for sending. */
+    fun gif(id: String): ByteArray {
+        val r = Net.request(route(), "POST", "/gif", "application/json", JSONObject().put("id", id).toString().toByteArray(), readMs = 120_000)
+        if (r.code != 200) throw RelayError(r.code, "")
+        return r.body
+    }
+
     fun doneWith(id: String) {
         post("/done", JSONObject().put("id", id), 20)
     }
