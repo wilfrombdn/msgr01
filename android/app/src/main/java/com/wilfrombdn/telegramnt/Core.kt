@@ -1060,6 +1060,11 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 if (inc.token == m.inboxToken) onRequest(m, inc.blob) else byToken[inc.token]?.let { onChat(m, it, inc.blob) }
             } catch (e: IOException) {
                 continue // e.g. lookup failed; message stays unacked and comes back next round
+            } catch (e: Exception) {
+                // A message we can't handle must never jam the mailbox: before, it threw out of poll(),
+                // the app showed "Connecting…" forever and every retry hit the same message. Skip it.
+                unreadable++
+                drop("skipped:${e.javaClass.simpleName}")
             }
             synchronized(this) { (if (inc.token == m.inboxToken) inboxAcks else acks).add(inc.id) }
         }

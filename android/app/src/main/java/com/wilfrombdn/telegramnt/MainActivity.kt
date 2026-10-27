@@ -182,7 +182,7 @@ class MainActivity : Activity() {
 
     /** Once Tor is up, look for a newer version (at most every 6 hours) and offer it. */
     private fun maybeCheckUpdate() {
-        if (Tor.socksPort() == null || !Messenger.connected) return
+        if (Tor.socksPort() == null) return
         if (System.currentTimeMillis() - updateChecked < 6 * 3600_000L) return
         updateChecked = System.currentTimeMillis()
         var u: Updater.Update? = null
@@ -598,6 +598,7 @@ class MainActivity : Activity() {
     // ---------- chat list ----------
 
     private fun showChats() {
+        val refreshing = screen == "chats"   // same screen redrawing (new message, reconnect), not arriving from elsewhere
         emojiPopup?.dismiss(); emojiPopup = null
         if (screen != "chats") Messenger.spot = Spot()
         screen = "chats"
@@ -666,6 +667,7 @@ class MainActivity : Activity() {
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
         )
         // Content + a left slide-out drawer (opens by tapping the lines or swiping from the edge).
+        val keepOpen = refreshing && drawer?.isDrawerOpen(GravityCompat.START) == true   // refreshes rebuild the screen; don't snap the menu shut
         val d = DrawerLayout(this)
         d.addView(page(top, frame), DrawerLayout.LayoutParams(-1, -1))
         d.addView(drawerPanel(d), DrawerLayout.LayoutParams(
@@ -674,6 +676,7 @@ class MainActivity : Activity() {
         d.setScrimColor(0x99000000.toInt())
         drawer = d
         setContentView(d)
+        if (keepOpen) d.openDrawer(GravityCompat.START, false)
         // while still connecting over Tor, refresh so the status line (bootstrap %, ready, error) updates live
         if (!Messenger.connected) d.postDelayed({ if (screen == "chats" && !Messenger.connected) redraw() }, 3000)
     }
