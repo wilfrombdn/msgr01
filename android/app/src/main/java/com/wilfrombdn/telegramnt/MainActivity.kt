@@ -164,6 +164,7 @@ class MainActivity : Activity() {
             drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
             !Messenger.signedIn && screen != "welcome" -> showWelcome()
             screen == "viewer" -> leaveViewer()
+            screen == "storage" -> showSettings()
             Messenger.signedIn && screen != "chats" -> showChats()
             search.isNotEmpty() -> { search = ""; showChats() }
             else -> super.onBackPressed()
@@ -2333,11 +2334,12 @@ class MainActivity : Activity() {
                 if (isGif(m)) addView(tv("GIF", 11f, Color.WHITE, true).apply {
                     setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(Color.parseColor("#88000000"), 4)
                 }, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(dp(6), dp(6), 0, 0) })
-                if (!here) addView(tv(if (m.mine) "" else "Downloading…", 13f, Color.WHITE).apply {
+                val cleared = f.optBoolean("cleared")
+                if (!here) addView(tv(if (cleared) "Removed to save space" else if (m.mine) "" else "Downloading…", 13f, Color.WHITE).apply {
                     setPadding(dp(8), dp(4), dp(8), dp(4))
                     background = round(Color.parseColor("#99000000"), 10)
                 }, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
-                setOnClickListener { if (here) showImage(m) else retryFetch(m) }
+                setOnClickListener { if (here) showImage(m) else if (cleared) toast("This was removed from your phone to save space") else retryFetch(m) }
                 setOnLongClickListener { onLong(); true }
                 layoutParams = LinearLayout.LayoutParams(w, h).apply { bottomMargin = dp(4) }
             }
@@ -2350,9 +2352,9 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(10), 0, 0, 0)
                 addView(tv(f.optString("n"), 15f, ink, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.MIDDLE })
-                addView(tv(sizeText(f.optInt("s")) + if (here) "" else if (m.mine) "" else " · downloading…", 13f, (ink and 0x00FFFFFF) or (0x99 shl 24)))
+                addView(tv(sizeText(f.optInt("s")) + if (here) "" else if (f.optBoolean("cleared")) " · removed to save space" else if (m.mine) "" else " · downloading…", 13f, (ink and 0x00FFFFFF) or (0x99 shl 24)))
             })
-            setOnClickListener { if (here) openOutside(m) else retryFetch(m) }
+            setOnClickListener { if (here) openOutside(m) else if (f.optBoolean("cleared")) toast("This was removed from your phone to save space") else retryFetch(m) }
             setOnLongClickListener { onLong(); true }
         }
     }
@@ -2642,6 +2644,7 @@ class MainActivity : Activity() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(gap(8))
         col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
+        col.addView(settingRow("Storage", "Photos, videos and files on this phone") { showStorage() })
         col.addView(tv("Connection", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
         col.addView(tv("Direct server   · in progress", 16f, faint).apply { setPadding(dp(20), dp(6), dp(20), dp(2)) })
         col.addView(settingNote("A faster, direct connection to your own server. Coming later."))
@@ -2659,6 +2662,70 @@ class MainActivity : Activity() {
         col.addView(tv("MSNGR ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
             13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })
         setContentView(page(topBar("Settings", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
+    }
+
+    // ---------- storage ----------
+
+    private fun mb(n: Long) = when {
+        n >= 1024L * 1024 * 1024 -> "%.1f GB".format(n / 1073741824f)
+        n >= 1024 * 1024 -> "%.1f MB".format(n / 1048576f)
+        n >= 1024 -> "${n / 1024} KB"
+        else -> "$n B"
+    }
+
+    /** How much each chat's photos/videos/files take, clear them per chat, and auto-delete old ones. */
+    private fun showStorage() {
+        screen = "storage"
+        val core = Messenger.core
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        data class Item(val name: String, val avatar: ByteArray?, val msgs: List<Msg>, val bytes: Long)
+        val items = synchronized(core) {
+            core.contacts.map { Item(it.name, it.avatar, it.msgs.toList(), 0) } + core.groups.map { Item(it.name, null, it.msgs.toList(), 0) }
+        }.map { it.copy(bytes = core.mediaBytes(it.msgs)) }.sortedByDescending { it.bytes }
+        val total = items.sumOf { it.bytes }
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(18), dp(20), dp(14))
+            addView(tv(mb(total), 28f, white, true))
+            addView(tv("used by photos, videos and files on this phone. Your messages themselves take almost nothing.", 14f, dim).apply { setPadding(0, dp(2), 0, 0) })
+        })
+
+        col.addView(tv("AUTO-DELETE MEDIA", 14f, dim, true).apply { setPadding(dp(20), dp(12), dp(20), dp(8)) })
+        val opts = listOf("Never" to 0, "1 year" to 365, "30 days" to 30)
+        col.addView(LinearLayout(this).apply {
+            setPadding(dp(16), 0, dp(16), 0)
+            opts.forEach { (label, days) ->
+                val on = Messenger.keepMediaDays == days
+                addView(tv(label, 15f, if (on) ink else white, true).apply {
+                    gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(10))
+                    background = GradientDrawable().apply { setColor(if (on) white else Color.TRANSPARENT); setStroke(dp(1), if (on) white else raised); cornerRadius = dp(4).toFloat() }
+                    setOnClickListener {
+                        Messenger.keepMediaDays = days; Messenger.settingsChanged()
+                        Messenger.run({ Messenger.sweepMedia(force = true) }, { showStorage() })
+                    }
+                }, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(4), 0, dp(4), 0) })
+            }
+        })
+        col.addView(settingNote("Photos, videos and files older than this are removed from this phone. The messages stay, with a small blurry preview so you can see something was sent.").apply { setPadding(dp(20), dp(8), dp(20), dp(10)) })
+
+        col.addView(tv("BY CHAT", 14f, dim, true).apply { setPadding(dp(20), dp(12), dp(20), dp(4)) })
+        val withMedia = items.filter { it.bytes > 0 }
+        if (withMedia.isEmpty()) col.addView(settingNote("No photos, videos or files stored."))
+        withMedia.forEach { it ->
+            col.addView(LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(10)); background = pressable(); isClickable = true
+                addView(avatar(it.name, 40, it.avatar))
+                addView(tv(it.name, 16f, white).apply { setPadding(dp(14), 0, 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(tv(mb(it.bytes), 15f, dim))
+                setOnClickListener { _ ->
+                    popup("Clear photos and videos?", "Removes ${mb(it.bytes)} of photos, videos and files in \"${it.name}\" from this phone. The text stays, and each one keeps a small blurry preview. They can't be downloaded again.",
+                        null, "Cancel" to dim, "Clear" to red) { i ->
+                        if (i == 1) Messenger.run({ core.clearMedia(it.msgs) }, { it.msgs.forEach { m -> pictures.remove(m.id); gifCache.remove(m.id) }; toast("Cleared"); showStorage() })
+                    }
+                }
+            })
+        }
+        col.addView(gap(20))
+        setContentView(page(topBar("Storage", left = icon(R.drawable.ic_back) { showSettings() }), ScrollView(this).apply { addView(col) }))
     }
 
     // ---------- appearance ----------

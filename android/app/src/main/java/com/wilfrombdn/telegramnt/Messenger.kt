@@ -34,6 +34,18 @@ object Messenger {
     val folders: MutableList<Folder> get() = synchronized(allFolders) { allFolders.getOrPut(core.me?.user ?: "") { mutableListOf() } }
     /** Where you were when the app last went to the background, so reopening puts you back there. */
     var spot = Spot()
+    /** Auto-delete photos/videos/files older than this many days from this phone (0 = never). */
+    var keepMediaDays = 0
+    private var lastMediaSweep = 0L
+
+    /** Applies the auto-delete setting (at most hourly unless [now] is set). */
+    fun sweepMedia(force: Boolean = false) {
+        if (keepMediaDays <= 0 || !signedIn) return
+        val t = System.currentTimeMillis()
+        if (!force && t - lastMediaSweep < 3600_000L) return
+        lastMediaSweep = t
+        core.clearMedia(core.allMsgs(), t - keepMediaDays * 86_400_000L)
+    }
     /** False while the server can't be reached (top bar says "Connecting…"). */
     @Volatile var connected = false
         private set
@@ -81,6 +93,8 @@ object Messenger {
             // attachments are stored still locked with their own keys (the keys live in the locked store)
             core.saveBlob = { id, bytes -> File(dir, id).writeBytes(bytes) }
             core.loadBlob = { id -> File(dir, id).takeIf { it.exists() }?.readBytes() }
+            core.deleteBlob = { id -> File(dir, id).delete() }
+            core.blobSize = { id -> File(dir, id).length() }
         }
         core.onChange = { save(); changed() }
         core.onNew = { contact -> if (!visible) ui.post { onNotify?.invoke(contact) } }
@@ -151,6 +165,7 @@ object Messenger {
     private fun extras(o: JSONObject): JSONObject {
         o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
+        o.put("keepMediaDays", keepMediaDays)
         return o.put("spot", spot.json())
     }
 
@@ -158,6 +173,7 @@ object Messenger {
         o.optJSONObject("emojiUse")?.let { j -> synchronized(emojiUse) { j.keys().forEach { emojiUse[it] = j.optInt(it) } } }
         o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
         o.optJSONObject("spot")?.let { spot = Spot.from(it) }
+        keepMediaDays = o.optInt("keepMediaDays", 0)
     }
 
     fun settingsChanged() {
@@ -323,6 +339,7 @@ object Messenger {
                     if (!connected && !findServer()) throw java.io.IOException("offline")
                     core.poll(25)
                     core.purgeExpired()
+                    sweepMedia()
                     setConnected(true)
                     backoff = 2_000L
                 } catch (e: InterruptedException) {

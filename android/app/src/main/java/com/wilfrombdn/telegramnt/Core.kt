@@ -229,6 +229,37 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     /** Where encrypted attachments are kept on this device (Android: files folder; tests: memory). */
     var saveBlob: (String, ByteArray) -> Unit = { _, _ -> }
     var loadBlob: (String) -> ByteArray? = { null }
+    var deleteBlob: (String) -> Unit = {}
+    var blobSize: (String) -> Long = { 0L }
+
+    /** Bytes this phone stores for these messages' photos, videos and files. */
+    fun mediaBytes(msgs: List<Msg>): Long =
+        msgs.sumOf { m -> m.file?.optString("local")?.takeIf { it.isNotEmpty() }?.let(blobSize) ?: 0L }
+
+    /**
+     * Removes attachments (sent before [olderThan]) from this phone to free space. The message and
+     * its small blurry preview stay; it's marked "cleared" so nothing tries to download it again.
+     * Attachments still waiting to be sent are left alone.
+     */
+    fun clearMedia(msgs: List<Msg>, olderThan: Long = Long.MAX_VALUE): Int {
+        var n = 0
+        synchronized(this) {
+            for (m in msgs) {
+                val f = m.file ?: continue
+                val local = f.optString("local")
+                if (local.isEmpty() || m.ts > olderThan || (m.mine && !f.has("id"))) continue
+                deleteBlob(local)
+                f.remove("local"); f.put("cleared", true)
+                toFetch.remove(m)
+                n++
+            }
+        }
+        if (n > 0) onChange()
+        return n
+    }
+
+    /** Every message on this phone (all chats and groups). */
+    fun allMsgs(): List<Msg> = synchronized(this) { contacts.flatMap { it.msgs } + groups.flatMap { it.msgs } }
     private val toFetch = mutableListOf<Msg>()
 
     private val acks = mutableSetOf<String>()
@@ -1243,7 +1274,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     /** Downloads one received attachment, checks it opens, keeps the locked copy, tells the server to forget it. */
     fun fetchFile(msg: Msg): Boolean {
         val f = msg.file ?: return false
-        if (f.has("local")) return true
+        if (f.has("local") || f.optBoolean("cleared")) return true
         val id = f.getString("id")
         val blob = relay.download(id)
         if (Crypto.gcmOpen(f.getString("k").unhex(), FILE_LABEL, blob) == null) return false
@@ -1349,7 +1380,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         groups.clear()
         o.optJSONArray("groups")?.let { for (i in 0 until it.length()) groups.add(Group.from(it.getJSONObject(i))) }
         // attachments that arrived but weren't downloaded yet
-        for (c in contacts) for (msg in c.msgs) if (!msg.mine && msg.file?.has("local") == false) toFetch.add(msg)
+        for (c in contacts) for (msg in c.msgs) if (!msg.mine && msg.file?.has("local") == false && msg.file?.optBoolean("cleared") != true) toFetch.add(msg)
     }
 
     companion object {

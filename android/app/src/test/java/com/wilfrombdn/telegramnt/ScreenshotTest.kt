@@ -188,6 +188,13 @@ class ScreenshotTest {
         }
     }
 
+    @Test fun storage() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        Messenger.core.blobSize = { 3_400_000L }
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showStorage"); shoot(a, "50-storage")
+    }
+
     @Test fun lightMode() {
         Messenger.initForPreview(fakeCore(signedIn = true))
         Messenger.look.theme = "light"; Messenger.look.inn = Look.BUBBLES.last().second

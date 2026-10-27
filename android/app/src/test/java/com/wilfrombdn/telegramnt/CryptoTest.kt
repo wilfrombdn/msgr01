@@ -72,4 +72,26 @@ class CryptoTest {
         val apk = java.io.ByteArrayOutputStream().also { Net.download(r, o.getString("apk"), it) }.toByteArray()
         org.junit.Assert.assertEquals(o.getString("sha256"), Crypto.sha256(apk).hex())
     }
+
+    /** 4.9 storage: clearing keeps the text + preview, frees the file, skips unsent and recent ones. */
+    @Test fun clearMediaKeepsMessages() {
+        val core = Core("http://127.0.0.1:1")
+        val disk = HashMap<String, ByteArray>()
+        core.deleteBlob = { disk.remove(it) }; core.blobSize = { disk[it]?.size?.toLong() ?: 0L }
+        val now = System.currentTimeMillis()
+        fun photo(id: String, ts: Long, mine: Boolean, uploaded: Boolean) = Msg(id, mine, "caption", ts, Msg.SENT).also {
+            disk[id] = ByteArray(1000)
+            it.file = org.json.JSONObject().put("local", id).put("th", "abc").put("m", "image/jpeg").apply { if (uploaded) put("id", "x".repeat(32)) }
+        }
+        val old = photo("a", now - 40L * 86_400_000, false, true)
+        val recent = photo("b", now - 1000, false, true)
+        val unsent = photo("c", now - 40L * 86_400_000, true, false)
+        val msgs = listOf(old, recent, unsent)
+        assertEquals(3000L, core.mediaBytes(msgs))
+        assertEquals(1, core.clearMedia(msgs, now - 30L * 86_400_000))   // 30-day auto-delete
+        assertFalse(old.file!!.has("local")); assertTrue(old.file!!.optBoolean("cleared"))
+        assertEquals("caption", old.text); assertEquals("abc", old.file!!.optString("th"))
+        assertTrue(recent.file!!.has("local")); assertTrue(unsent.file!!.has("local"))
+        assertEquals(2000L, core.mediaBytes(msgs))
+    }
 }
