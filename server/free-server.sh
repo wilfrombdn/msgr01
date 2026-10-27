@@ -25,7 +25,7 @@ Log notice file $ONION_DIR/tor.log
 EOF
 fi
 
-python3 "$HERE/relay.py" --host 127.0.0.1 --port $PORT --db "$HERE/telegramnt.db" --behind-proxy &
+python3 "$HERE/relay.py" --host 127.0.0.1 --port $PORT --db "$HERE/telegramnt.db" --behind-proxy --signups-per-hour 20 &
 RELAY=$!
 tor -f "$ONION_DIR/torrc" >/dev/null 2>&1 &
 TOR=$!

@@ -148,21 +148,33 @@ object Messenger {
     private fun archiveFile(user: String): File? =
         file?.let { File(it.parentFile, "archive-" + Crypto.sha256(user.toByteArray()).hex().take(16) + ".bin") }
 
-    /** Logs out but keeps this account's chats, locked, for the next log in on this phone. */
+    /** Logs out but keeps this account's chats AND Signal keys, locked, for the next log in on this phone. */
     fun logOut() {
         val m = core.me ?: return
         val d = disk
         val f = archiveFile(m.user)
         if (d != null && f != null) {
             val o = org.json.JSONObject().put("contacts", core.toJson().getJSONArray("contacts"))
+                .put("signal", m.signal.toJson())   // keep the full Signal store so a log-in here keeps the keys/sessions
             f.writeBytes(d.encrypt(o.toString().toByteArray(), "archive|${m.user}".toByteArray()))
         }
         core.signOut()
     }
 
     fun logIn(user: String, password: String) {
-        core.login(user, password)
+        core.login(user, password, archivedStore(user))   // reuse this phone's kept keys if we have them
         restoreArchive(user)
+    }
+
+    /** The full Signal store a previous log-out on this phone kept for [user], or null (new phone). */
+    private fun archivedStore(user: String): SignalStore? {
+        val f = archiveFile(user) ?: return null
+        val d = disk ?: return null
+        if (!f.exists()) return null
+        return try {
+            org.json.JSONObject(String(d.decrypt(f.readBytes(), "archive|$user".toByteArray())))
+                .optJSONObject("signal")?.let { SignalStore.fromJson(it) }
+        } catch (e: Exception) { null }
     }
 
     fun deleteAccount(password: String) {
@@ -296,10 +308,11 @@ object Messenger {
                 } catch (e: Exception) {
                     if (!(e is java.io.IOException && e.message?.contains("closed") == true)) setConnected(false)
                     try { Thread.sleep(backoff) } catch (i: InterruptedException) { return@Thread }
-                    backoff = (backoff * 2).coerceAtMost(60_000L)
-                    // Server unreachable for a while: it may have moved, so look it up again.
-                    // (an old Cloudflare address answers 530, so server errors count too)
-                    if (backoff >= 16_000L && (e !is Relay.RelayError || e.code >= 500)) runCatching { findServer() }
+                    // Retry quickly: the usual reason we're not connected is Tor still building its first
+                    // circuit (~a minute). A short cap means we connect within seconds of Tor becoming ready,
+                    // instead of being stuck in a long backoff. The server address is fixed (the onion), so
+                    // there's nothing to re-look-up.
+                    backoff = (backoff * 2).coerceAtMost(8_000L)
                 }
             }
         }, "mailbox").apply { isDaemon = true; start() }

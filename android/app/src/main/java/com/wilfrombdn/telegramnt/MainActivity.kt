@@ -447,7 +447,8 @@ class MainActivity : Activity() {
         }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
 
         val top = if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
-            if (Messenger.connected) "MSNGR" else "Connecting…", null,
+            if (Messenger.connected) "MSNGR" else "Connecting…",
+            if (Messenger.connected) null else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
         )
@@ -460,6 +461,8 @@ class MainActivity : Activity() {
         d.setScrimColor(0x99000000.toInt())
         drawer = d
         setContentView(d)
+        // while still connecting over Tor, refresh so the status line (bootstrap %, ready, error) updates live
+        if (!Messenger.connected) d.postDelayed({ if (screen == "chats" && !Messenger.connected) redraw() }, 3000)
     }
 
     private var screenSearch = false
@@ -1801,8 +1804,11 @@ class MainActivity : Activity() {
         col.addView(gap(8))
         col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
         col.addView(tv("Connection", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
-        col.addView(tv("Tor   ✓ active", 16f, white).apply { setPadding(dp(20), dp(6), dp(20), dp(2)) })
+        val torReady = Tor.socksPort() != null && Messenger.connected
+        col.addView(tv("Tor" + if (torReady) "   ✓ active" else "   — ${Tor.status()}", 16f, if (torReady) white else amber).apply { setPadding(dp(20), dp(6), dp(20), dp(2)) })
         col.addView(settingNote("Everything goes through the Tor network, so no one — not even the server's host — ever sees your IP address. This is the only connection right now."))
+        if (Messenger.core.unreadable > 0) col.addView(tv("⚠ ${Messenger.core.unreadable} message(s) arrived but couldn't be decrypted — the two accounts' keys are out of sync (usually from reinstalling/restoring). Fresh accounts fix this.", 13.5f, amber).apply { setPadding(dp(20), dp(2), dp(20), dp(10)) })
+        if (Messenger.core.lastDrop.isNotEmpty()) col.addView(tv("diag · last fetched message: ${Messenger.core.lastDrop}", 12.5f, dim).apply { setPadding(dp(20), 0, dp(20), dp(10)) })
         col.addView(tv("Direct server   · in progress", 16f, faint).apply { setPadding(dp(20), dp(10), dp(20), dp(2)) })
         col.addView(settingNote("A faster, direct connection to your own server. Coming later."))
         col.addView(gap(8))

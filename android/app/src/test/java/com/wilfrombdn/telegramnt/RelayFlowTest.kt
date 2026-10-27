@@ -534,6 +534,23 @@ class RelayFlowTest {
         assertTrue("B did not receive A's message over Tor", b.contact(au)!!.msgs.any { it.text == "hello over tor" })
     }
 
+    /** Reproduces the account-switch bug: logging back in (as when switching accounts on one phone)
+     *  must not discard the prekeys a pending friend request was encrypted to. */
+    @Test fun reloginKeepsInflightRequest() {
+        assumeTrue(Relay(server).ping())
+        val a = Core(server); val b = Core(server)
+        val au = "rla_$tag"; val bu = "rlb_$tag"
+        a.signup(au, "a solid long password", "A")
+        b.signup(bu, "b solid long password", "B")        // B publishes prekeys P_B1
+        val kept = SignalStore.fromJson(b.me!!.signal.toJson())   // what logOut archives on this phone
+        a.addFriend(bu)                                    // A sends a request to B, encrypted to P_B1
+        // B "switches away and back" on the same phone: a fresh client logs in, keeping B's archived keys
+        val b2 = Core(server)
+        b2.login(bu, "b solid long password", kept)        // same-phone switch: keys preserved
+        b2.poll(8)
+        assertTrue("B should still receive A's pending request after logging back in", b2.contact(au) != null)
+    }
+
     @Test fun lockoutAfterFiveWrongPasswords() {
         assumeTrue(Relay(server).ping())
         val u = "carol_$tag"

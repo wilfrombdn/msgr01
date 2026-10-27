@@ -210,6 +210,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     /** Friend whose chat is on screen (no unread count for it). */
     @Volatile var openChat: String? = null
     @Volatile var backupDirty = false
+    @Volatile var unreadable = 0   // diagnostic: messages fetched but not decryptable (dropped). Shown in Settings.
+    @Volatile var lastDrop = ""    // diagnostic: why the last fetched message was dropped (which step). Shown in Settings.
+    private fun drop(reason: String) { lastDrop = reason }
     var readReceipts = true   // tell friends when I've read their messages (and so see theirs)
     var onChange: () -> Unit = {}
     var onNew: (Contact) -> Unit = {}
@@ -242,7 +245,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         onChange()
     }
 
-    fun login(user: String, password: String) {
+    /**
+     * [keepStore] is this account's full Signal store, kept from a log-out on THIS phone. When present we
+     * reuse it (same prekeys + sessions) and only top up one-time keys — so a friend request another
+     * account already encrypted to our old prekeys can still be read after we log back in. Without it
+     * (a genuine new phone) we start a fresh store with new prekeys, as before.
+     */
+    fun login(user: String, password: String, keepStore: SignalStore? = null) {
         checkUsername(user)
         val keys = Crypto.passwordKeys(user, password)
         val (device, locked) = try {
@@ -257,9 +266,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val sig = Crypto.parsePrivate(unb64(o.getString("sig")), Crypto.SIG_TEMPLATE) ?: throw UserError("Backup damaged")
         val m = Me(user, o.optString("name", user), device, enc, sig, o.getString("inbox"), keys.backup,
             o.optString("avatar").takeIf { it.isNotEmpty() }?.let { unb64(it) })
-        // Same Signal identity as before (so safety codes don't change), but fresh prekeys and sessions.
-        o.optString("sident").takeIf { it.isNotEmpty() }?.let { m.signal = SignalStore(IdentityKeyPair(unb64(it)), o.getInt("sreg")) }
-        publishKeys(m, replace = true)
+        if (keepStore != null) {
+            m.signal = keepStore                     // same phone: keep prekeys/sessions so in-flight messages still decrypt
+        } else {
+            // Same Signal identity as before (so safety codes don't change), but fresh prekeys and sessions.
+            o.optString("sident").takeIf { it.isNotEmpty() }?.let { m.signal = SignalStore(IdentityKeyPair(unb64(it)), o.getInt("sreg")) }
+        }
+        publishKeys(m, replace = keepStore == null)  // rotate keys only on a genuine new-phone login
         val list = o.optJSONArray("contacts") ?: JSONArray()
         synchronized(this) {
             me = m
@@ -1053,19 +1066,20 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     }
 
     private fun onRequest(m: Me, blob: ByteArray) {
-        val o = Crypto.open(m.enc, m.inboxAddr, blob) ?: return
-        val env = parse(o) ?: return
+        val o = Crypto.open(m.enc, m.inboxAddr, blob) ?: run { unreadable++; drop("req:hpke"); return }
+        val env = parse(o) ?: run { drop("req:parse"); return }
         val user = env.optString("u")
-        if (!USERNAME.matches(user) || user == m.user) return
+        if (!USERNAME.matches(user) || user == m.user) { drop("req:user?$user"); return }
         // The sender's keys come from the directory, so nobody can pretend to be @user.
-        val p = relay.lookup(user) ?: return
-        val sigKey = Crypto.parsePublic(unb64(p.sig), Crypto.SIG_TEMPLATE) ?: return
-        if (!Crypto.verify(sigKey, o)) return
-        val inner = openSignal(m, user, p.ident, env) ?: return
+        val p = relay.lookup(user) ?: run { drop("req:lookup-null"); return }
+        val sigKey = Crypto.parsePublic(unb64(p.sig), Crypto.SIG_TEMPLATE) ?: run { drop("req:sigkey"); return }
+        if (!Crypto.verify(sigKey, o)) { drop("req:verify"); return }
+        val inner = openSignal(m, user, p.ident, env) ?: run { unreadable++; drop("req:signal"); return }
         val kind = inner.optString("t")
-        if (kind != "request" && kind != "rmsg") return
+        if (kind != "request" && kind != "rmsg") { drop("req:kind?$kind"); return }
         val addr = inner.optString("a")
-        if (inner.optString("u") != user || (kind == "request" && !isAddr(addr))) return
+        if (inner.optString("u") != user || (kind == "request" && !isAddr(addr))) { drop("req:addr"); return }
+        drop("req:OK->$kind")
         if (kind == "rmsg") {
             val c = contact(user) ?: return
             if (c.theirSig != p.sig || c.status == Contact.ASKED) return
@@ -1099,12 +1113,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     }
 
     private fun onChat(m: Me, c: Contact, blob: ByteArray) {
-        val o = Crypto.open(m.enc, c.myAddr, blob) ?: return
-        val sigKey = Crypto.parsePublic(unb64(c.theirSig), Crypto.SIG_TEMPLATE) ?: return
-        if (!Crypto.verify(sigKey, o)) return
-        val env = parse(o) ?: return
+        val o = Crypto.open(m.enc, c.myAddr, blob) ?: run { unreadable++; drop("chat:hpke"); return }
+        val sigKey = Crypto.parsePublic(unb64(c.theirSig), Crypto.SIG_TEMPLATE) ?: run { drop("chat:sigkey"); return }
+        if (!Crypto.verify(sigKey, o)) { drop("chat:verify"); return }
+        val env = parse(o) ?: run { drop("chat:parse"); return }
         if (c.theirIdent == null) c.theirIdent = relay.lookup(c.user)?.ident?.ifEmpty { null }
-        val inner = openSignal(m, c.user, c.theirIdent, env) ?: return
+        val inner = openSignal(m, c.user, c.theirIdent, env) ?: run { unreadable++; drop("chat:signal"); return }
+        drop("chat:OK->${inner.optString("t")}")
         when (inner.optString("t")) {
             "accept" -> {
                 val addr = inner.optString("a")
