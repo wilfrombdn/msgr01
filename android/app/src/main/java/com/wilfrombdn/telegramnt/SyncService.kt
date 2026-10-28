@@ -79,6 +79,7 @@ class SyncService : Service() {
                 .setVisibility(Notification.VISIBILITY_PRIVATE)
                 .setContentIntent(open)
                 .setAutoCancel(true)
+                .apply { if (c.canChat && c.status != Contact.SAVED) addAction(ReplyReceiver.action(ctx, c)) }
                 .build()
             ctx.getSystemService(NotificationManager::class.java).notify(c.user.hashCode(), n)
         }

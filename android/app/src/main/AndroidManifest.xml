@@ -50,6 +50,7 @@
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <service android:name=".CallService" android:exported="false"
             android:foregroundServiceType="microphone" />
+        <receiver android:name=".ReplyReceiver" android:exported="false" />
         <receiver android:name=".UpdateReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
