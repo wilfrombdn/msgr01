@@ -909,6 +909,7 @@ class MainActivity : Activity() {
         private const val MIC_FOR_CALL = 14
         private const val MIC_FOR_VOICE = 15
         private const val LOCATION_FOR_SHARE = 16
+        private const val SCAN_QR = 17
 
         /** Fixed reactions, then the most-used emoji not already in the bar, padded with [filler]. */
         fun quickReactions(use: Map<String, Int>, fixed: List<String>, filler: List<String>): List<String> {
@@ -2088,6 +2089,39 @@ class MainActivity : Activity() {
             opts.map { it.first }.toTypedArray()) { i -> done(opts[i].second) }
     }
 
+    // ---------- QR codes ----------
+
+    /** My code (friends scan it to add me) and a button to scan theirs. */
+    private fun myQr() {
+        val me = Messenger.core.me ?: return
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            addView(ImageView(context).apply {
+                setImageBitmap(QrActivity.codeFor(me.user, 512))
+                background = round(Color.WHITE, 12); setPadding(dp(10), dp(10), dp(10), dp(10))
+            }, LinearLayout.LayoutParams(dp(230), dp(230)))
+            addView(tv("@${me.user}", 17f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(12), 0, 0) })
+        }
+        popup("My QR code", "A friend scans this in MSNGR (side menu > My QR code > Scan) to add you.", col, "Close" to dim, "Scan a code" to white) { i ->
+            if (i == 1) @Suppress("DEPRECATION") startActivityForResult(Intent(this, QrActivity::class.java), SCAN_QR)
+        }
+    }
+
+    /** A scanned code: a friend (add them) or a group invite (join it). */
+    private fun scanned(text: String) {
+        if (text.startsWith("msgr01://group")) {
+            Messenger.run({ val g = Messenger.core.joinGroupLink(text); Messenger.kick(); groupToOpen = g.id }, { groupToOpen?.let { showGroup(it) } }) { e -> toast(errorText(e)) }
+            return
+        }
+        val user = text.removePrefix(QrActivity.ADD).trim().lowercase()
+        if (!Core.USERNAME.matches(user)) return toast("That isn't an MSNGR code")
+        if (user == Messenger.core.me?.user) return toast("That's your own code")
+        Messenger.core.contact(user)?.let { return showChat(it.user) }
+        popup("Add @$user?", "Sends them a friend request.", null, "Cancel" to dim, "Add" to white) { i ->
+            if (i == 1) Messenger.run({ Messenger.core.addFriend(user); Messenger.kick() }, { showChat(user) }) { e -> toast(errorText(e)) }
+        }
+    }
+
     // ---------- polls ----------
 
     /** Attach > Poll (groups): a question and 2-10 options. */
@@ -2590,6 +2624,7 @@ class MainActivity : Activity() {
         item(R.drawable.ic_search, "Join Group", "with an invite link") { joinGroupPrompt() }
         item(R.drawable.ic_folder, "New Folder", "group chats, e.g. Family") { newFolder() }
         item(R.drawable.ic_bookmark, "Saved Messages", "notes to yourself, on this phone") { showChat(Messenger.core.savedChat().user) }
+        item(R.drawable.ic_qr, "My QR code", "or scan a friend's") { myQr() }
         divider()
         item(R.drawable.ic_palette, "Appearance", "colours, text size, bubbles") { showAppearance() }
         item(R.drawable.ic_menu, "Settings") { showSettings() }
@@ -3410,6 +3445,7 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == SCAN_QR && resultCode == RESULT_OK) return data?.getStringExtra("qr")?.let { scanned(it) } ?: Unit
         val uri = data?.data
         if (resultCode != RESULT_OK || uri == null) return
         if (requestCode == CREATE_RECOVERY) return setupRecovery(uri)

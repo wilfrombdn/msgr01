@@ -75,6 +75,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("androidx.camera:camera-video:1.4.1")
+    implementation("com.google.zxing:core:3.5.3") // QR codes: show yours, scan a friend's
     implementation("org.signal:libsignal-android:0.105.0") // Signal's encryption (Double Ratchet, sender keys) // FileProvider, to open attachments in other apps
     // Embedded Tor: the app reaches the relay's .onion through Tor, so there's no middleman that sees IPs.
     implementation("io.matthewnelson.kmp-tor:runtime:2.6.0")

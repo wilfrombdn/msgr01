@@ -46,6 +46,8 @@
         <activity android:name=".CameraActivity" android:exported="false"
             android:screenOrientation="portrait"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name=".QrActivity" android:exported="false" android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <activity android:name=".CallActivity" android:exported="false"
             android:launchMode="singleTask" android:screenOrientation="portrait"
             android:showWhenLocked="true" android:turnScreenOn="true"
