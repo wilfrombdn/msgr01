@@ -457,9 +457,19 @@ class Handler(BaseHTTPRequestHandler):
         room = self.headers.get("X-Room", "")
         if not ROOM.match(room):
             return self.reply(400, {"error": "bad request"})
-        me = {"sock": self.connection, "paired": threading.Event(), "done": threading.Event()}
+        side = self.headers.get("X-Side", "")[:8]   # "caller" / "callee"; older apps send nothing
+        me = {"sock": self.connection, "paired": threading.Event(), "done": threading.Event(), "side": side}
         with srv.pipe_lock:
             partner = srv.pipe_wait.pop(room, None)
+            if partner is not None and side and partner.get("side") == side:
+                # the same phone trying again (its earlier attempt dropped): retire that one, wait afresh
+                try:
+                    partner["sock"].shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                partner["paired"].set()
+                partner["done"].set()
+                partner = None
             if partner is None:
                 if len(srv.pipe_wait) + srv.pipe_active >= PIPE_MAX_ACTIVE:
                     return self.reply(503, {"error": "busy"})

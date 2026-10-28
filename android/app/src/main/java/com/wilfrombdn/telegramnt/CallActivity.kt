@@ -47,7 +47,8 @@ class CallActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_SECURE)
         window.statusBarColor = BG; window.navigationBarColor = BG
-        val k = Messenger.core.call ?: return finish()
+        // even if the call already ended (it couldn't start), show the screen and say so
+        val k = Messenger.core.call ?: Messenger.lastCall ?: return finish()
         shown = k
         val c = Messenger.core.contact(k.user)
         val name = c?.name ?: "@${k.user}"
@@ -139,7 +140,7 @@ class CallActivity : Activity() {
     private fun updateStatus() {
         val k = Messenger.core.call ?: return
         status.text = when (k.phase) {
-            Core.Call.DIALING -> "Calling…"
+            Core.Call.DIALING -> if (Messenger.connected) "Calling…" else "Connecting…"
             Core.Call.RINGING -> "Ringing…"
             Core.Call.INCOMING -> "Incoming call"
             Core.Call.CONNECTING -> "Connecting…"

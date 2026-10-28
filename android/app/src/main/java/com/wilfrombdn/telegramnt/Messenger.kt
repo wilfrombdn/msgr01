@@ -207,6 +207,8 @@ object Messenger {
     // ---------- calls ----------
 
     val callListeners = java.util.concurrent.CopyOnWriteArrayList<(Core.Call) -> Unit>()
+    /** The latest call, kept after it ends so the call screen can still show how it ended. */
+    @Volatile var lastCall: Core.Call? = null
     private var ringtone: android.media.Ringtone? = null
     private var ringback: android.media.ToneGenerator? = null
     private const val INCOMING_NOTE = 90
@@ -214,6 +216,7 @@ object Messenger {
     /** Reacts to every call change: rings, shows the call screen or alert, stops sound, and times out. */
     private fun callChanged(k: Core.Call) {
         if (!::app.isInitialized) return
+        lastCall = k
         val nm = app.getSystemService(android.app.NotificationManager::class.java)
         if (k.phase == Core.Call.INCOMING) {
             startRinging()
@@ -255,10 +258,16 @@ object Messenger {
     /** The call screen opens at once ("Calling…"); the invite goes out through Tor meanwhile. */
     fun startCall(ctx: Context, c: Contact, fail: (Exception) -> Unit, problem: (Exception) -> String) {
         val k = try { core.prepareCall(c) } catch (e: Exception) { fail(e); return }
+        lastCall = k
         ctx.startActivity(Intent(ctx, CallActivity::class.java))
         runCatching { ctx.startForegroundService(Intent(ctx, CallService::class.java)) }
         CallAudio.start(ctx, k)
-        ui.postDelayed({ if (core.call === k && k.phase <= Core.Call.RINGING) io.execute { core.hangUp("noanswer") } }, 60_000)
+        ui.postDelayed({
+            if (core.call === k && k.phase <= Core.Call.RINGING) {
+                if (!connected) k.problem = "Couldn't connect. Check your internet and try again."
+                io.execute { core.hangUp("noanswer") }
+            }
+        }, 60_000)
         io.execute {
             // still connecting (e.g. Tor warming up): keep trying for a while instead of failing at once;
             // the call screen says "Calling…" meanwhile

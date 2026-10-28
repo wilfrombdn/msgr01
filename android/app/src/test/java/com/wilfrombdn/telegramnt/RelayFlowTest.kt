@@ -522,6 +522,25 @@ class RelayFlowTest {
     }
 
     /** 5.0 call room: two phones join with the same room id, get paired, and bytes flow both ways. */
+    /** The caller's phone rejoins the call room (its first try dropped): it replaces that try instead of pairing with it. */
+    @Test fun callRoomRejoinReplacesOldTry() {
+        assumeTrue(Relay(server).ping())
+        val room = Crypto.randomHex(32)
+        val first = Relay(server).pipe(room, "caller")
+        Thread.sleep(300)
+        val again = Relay(server).pipe(room, "caller")      // same phone, again
+        assertEquals(-1, first.getInputStream().read())      // the old try is closed, not paired
+        var b: java.net.Socket? = null
+        val t = Thread { b = Relay(server).pipe(room, "callee") }.apply { start() }
+        assertEquals(1, again.getInputStream().read())
+        t.join(10_000)
+        assertEquals(1, b!!.getInputStream().read())
+        again.getOutputStream().apply { write("hi".toByteArray()); flush() }
+        val got = ByteArray(2); java.io.DataInputStream(b!!.getInputStream()).readFully(got)
+        assertEquals("hi", String(got))
+        again.close(); b!!.close()
+    }
+
     @Test fun callRoomPairsTwoPhones() {
         assumeTrue(Relay(server).ping())
         val room = Crypto.randomHex(32)

@@ -80,7 +80,7 @@ class ScreenshotTest {
     private fun testJpeg(a: Int, b: Int): ByteArray =
         java.io.ByteArrayOutputStream().also { testBitmap(a, b).compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
 
-    private fun shoot(a: MainActivity, name: String) {
+    private fun shoot(a: android.app.Activity, name: String) {
         shadowOf(Looper.getMainLooper()).idle()
         val v = a.window.decorView
         val bmp = Bitmap.createBitmap(1080, 2340, Bitmap.Config.ARGB_8888)
@@ -303,6 +303,14 @@ class ScreenshotTest {
         val next = shadowOf(a).nextStartedActivity
         println("callButton: core.call=${Messenger.core.call?.phase} next=${next?.component?.className}")
         assert(next?.component?.className == CallActivity::class.java.name) { "call screen should open, got $next" }
+        // the call fails straight away (no connection): the screen still opens and says why, instead of vanishing
+        val k = Messenger.core.call!!
+        k.problem = "Couldn't connect. Check your internet and try again."
+        Messenger.core.endCall(k, "failed")
+        shadowOf(Looper.getMainLooper()).idle()
+        val callScreen = Robolectric.buildActivity(CallActivity::class.java).setup().get()
+        assert(!callScreen.isFinishing) { "call screen closed before it was seen" }
+        shoot(callScreen, "59-call-failed")
     }
 
     /** Pinned chats sit above folders (and friend requests), with a pin mark. */

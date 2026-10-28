@@ -59,11 +59,23 @@ object CallAudio {
         var rec: AudioRecord? = null
         var track: AudioTrack? = null
         try {
-            val s = core.relay.pipe(k.room)
-            sock = s
-            val inp = DataInputStream(s.getInputStream())
-            if (inp.read() != 1) throw IOException("the other phone didn't join")   // 0x01 = both phones are here
-            if (!running || k.phase == Core.Call.ENDED) return
+            // Join the call room, and keep trying until the other phone is there too (0x01) or the call ends:
+            // Tor may still be warming up, or a connection may drop while it rings. A failed try never
+            // hangs up by itself; only the ring timeout, the other side, or you end the call.
+            var s: java.net.Socket? = null
+            var inp: DataInputStream? = null
+            while (running && k.phase != Core.Call.ENDED) {
+                try {
+                    val x = core.relay.pipe(k.room, if (k.outgoing) "caller" else "callee")
+                    sock = x
+                    val i = DataInputStream(x.getInputStream())
+                    if (i.read() == 1) { s = x; inp = i; break }   // both phones are here
+                    runCatching { x.close() }
+                } catch (e: Exception) { }
+                if (!running || k.phase == Core.Call.ENDED) return
+                Thread.sleep(2_000)
+            }
+            if (s == null || inp == null || !running || k.phase == Core.Call.ENDED) return
             s.soTimeout = 45_000
             s.tcpNoDelay = true
             core.callConnected()
