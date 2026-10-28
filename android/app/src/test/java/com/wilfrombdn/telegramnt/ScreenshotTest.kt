@@ -292,6 +292,29 @@ class ScreenshotTest {
         File("build/shots/48-forward-picker.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** Tapping call opens the call screen at once (even before the invite is out). */
+    @Test fun callButtonOpensCallScreen() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        shadowOf(org.robolectric.RuntimeEnvironment.getApplication()).grantPermissions(android.Manifest.permission.RECORD_AUDIO)
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChat", "sam_r"); shadowOf(Looper.getMainLooper()).idle()
+        call(a, "callFriend", Messenger.core.contact("sam_r")!!)
+        val next = shadowOf(a).nextStartedActivity
+        println("callButton: core.call=${Messenger.core.call?.phase} next=${next?.component?.className}")
+        assert(next?.component?.className == CallActivity::class.java.name) { "call screen should open, got $next" }
+    }
+
+    /** Pinned chats sit above folders (and friend requests), with a pin mark. */
+    @Test fun pinned() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val jo = Messenger.core.contacts.first { it.user != "sam_r" && it.status == Contact.FRIENDS }
+        Messenger.folders.clear(); Messenger.folders.add(Folder("f1", "Work", true, mutableListOf("u:sam_r")))
+        Messenger.pins.clear(); Messenger.pins.addAll(listOf("g:g1", "u:${jo.user}"))
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChats"); shoot(a, "49-pinned")
+        Messenger.pins.clear(); Messenger.folders.clear()
+    }
+
     /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */
     @Test fun composerWraps() {
         Messenger.initForPreview(fakeCore(signedIn = true))

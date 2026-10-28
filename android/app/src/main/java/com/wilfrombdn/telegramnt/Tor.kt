@@ -63,10 +63,26 @@ object Tor {
                 required(TorEvent.NOTICE)
             }
             runtime = rt
-            rt.enqueue(Action.StartDaemon, OnFailure { t -> err = "start: ${(t.message ?: t.toString()).take(130)}" }, OnSuccess.noOp())
+            startDaemon(rt, 0)
         } catch (t: Throwable) {
             err = "init: ${(t.message ?: t.toString()).take(130)}"
         }
+    }
+
+    /**
+     * Starts the daemon, and keeps retrying if it fails. Right after an in-app update the old copy's
+     * Tor can still be shutting down for a few seconds and holds its folder, so the first start fails;
+     * before, that left the app on "Connecting…" until it was force-closed.
+     */
+    private fun startDaemon(rt: TorRuntime, attempt: Int) {
+        rt.enqueue(Action.StartDaemon, OnFailure { t ->
+            err = "start: ${(t.message ?: t.toString()).take(130)}"
+            val wait = minOf(3_000L shl minOf(attempt, 3), 20_000L)   // 3, 6, 12, then every 20 s
+            Thread({
+                try { Thread.sleep(wait) } catch (e: InterruptedException) { return@Thread }
+                if (socks == null) { err = null; startDaemon(rt, attempt + 1) }
+            }, "tor-retry").apply { isDaemon = true; start() }
+        }, OnSuccess { err = null })
     }
 
     private fun note(line: String) {

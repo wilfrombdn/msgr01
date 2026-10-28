@@ -172,6 +172,13 @@ class CallActivity : Activity() {
         private val GREEN = Color.parseColor("#34C759")
         const val CH_CALL = "calls"
 
+        const val CH_ONGOING = "call_ongoing"
+
+        fun quietChannel(ctx: Context) {
+            val ch = NotificationChannel(CH_ONGOING, "Ongoing call", NotificationManager.IMPORTANCE_MIN).apply { setSound(null, null); setShowBadge(false) }
+            ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
+        }
+
         fun channels(ctx: Context) {
             val ch = NotificationChannel(CH_CALL, "Calls", NotificationManager.IMPORTANCE_HIGH).apply { setSound(null, null) }
             ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
@@ -206,8 +213,11 @@ class CallService : Service() {
         CallActivity.channels(this)
         val name = Messenger.core.contact(k.user)?.name ?: "@${k.user}"
         val open = PendingIntent.getActivity(this, 23, Intent(this, CallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
-        val n = Notification.Builder(this, CallActivity.CH_CALL).setSmallIcon(R.drawable.ic_call)
-            .setContentTitle("Call with $name").setContentText("Tap to return to the call").setOngoing(true)
+        // Android requires a notification while a call uses the mic; keep it silent and out of the way
+        // (no pop-up, no status-bar icon), it only shows in the pulled-down shade
+        CallActivity.quietChannel(this)
+        val n = Notification.Builder(this, CallActivity.CH_ONGOING).setSmallIcon(R.drawable.ic_call)
+            .setContentTitle("Call with $name").setOngoing(true)
             .setCategory(Notification.CATEGORY_CALL).setContentIntent(open).build()
         if (Build.VERSION.SDK_INT >= 30) startForeground(NOTE, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) else startForeground(NOTE, n)
         return START_NOT_STICKY

@@ -621,16 +621,20 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     fun deliverGroup(g: Group, msg: Msg) {
         val m = me ?: return
         if (!g.canPost(m.user)) { msg.state = Msg.FAILED; onChange(); return }   // read-only: only leaders post
+        var editedMeanwhile = false
         msg.state = try {
             if (!g.distSent) postMyDist(m, g)
-            val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, msg.text.toByteArray()) }
+            val sentText = msg.text
+            val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, sentText.toByteArray()) }
             relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gmsg").put("u", m.user).put("id", msg.id).put("c", b64(ct.serialize()))
                 .apply { msg.reply?.let { put("r", it) }; msg.fwd?.let { put("fw", it) } }))
+            synchronized(this) { msg.state = Msg.SENT; editedMeanwhile = msg.text != sentText; if (editedMeanwhile) msg.edited = true }
             Msg.SENT
         } catch (e: Exception) {
             Msg.FAILED
         }
         onChange()
+        if (editedMeanwhile) runCatching { gctl(g, m, JSONObject().put("t", "edit").put("id", msg.id).put("x", msg.text)) }
     }
 
     /** Posts my sender-key distribution message, signed with my identity so nobody can post as me. */
@@ -950,10 +954,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     /** Sends the call invite for [k] to [c]. Network: call off the main thread. */
     fun offerCall(c: Contact, k: Call, why: (Exception) -> String? = { null }) {
-        try {
-            callCtl(c, JSONObject().put("t", "call").put("id", k.id).put("k", k.key).put("r", k.room)
-                .put("ts", System.currentTimeMillis()).put("n", netMode))
-        } catch (e: Exception) { k.problem = why(e); endCall(k, "failed"); throw e }
+        try { sendOffer(c, k) } catch (e: Exception) { k.problem = why(e); endCall(k, "failed"); throw e }
+    }
+
+    /** Just sends the invite (throws if it can't); the receiver ignores repeats of the same call id. */
+    fun sendOffer(c: Contact, k: Call) {
+        callCtl(c, JSONObject().put("t", "call").put("id", k.id).put("k", k.key).put("r", k.room)
+            .put("ts", System.currentTimeMillis()).put("n", netMode))
     }
 
     fun answerCall() { val k = call ?: return; if (k.phase == Call.INCOMING) { k.phase = Call.CONNECTING; onCall(k) } }
@@ -1126,8 +1133,10 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val m = me ?: return
         if (c.status == Contact.ASKING) return
         msg.state = Msg.SENDING
+        var editedMeanwhile = false
         msg.state = try {
-            val body = JSONObject().put("id", msg.id).put("x", msg.text)
+            val sentText = msg.text
+            val body = JSONObject().put("id", msg.id).put("x", sentText)
             msg.reply?.let { body.put("r", it) }
             msg.fwd?.let { body.put("fw", it) }
             msg.file?.let { f ->
@@ -1145,30 +1154,34 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 val inbox = c.theirInbox ?: relay.lookup(c.user)?.inbox?.also { c.theirInbox = it } ?: throw IOException("no inbox")
                 sealSignal(m, c, inbox, body.put("t", "rmsg").put("u", m.user))
             }
+            // edited while it was on its way: send the new text right behind it
+            synchronized(this) { msg.state = Msg.SENT; editedMeanwhile = msg.text != sentText; if (editedMeanwhile) msg.edited = true }
             Msg.SENT
         } catch (e: Exception) {
             Msg.FAILED
         }
         onChange()
+        if (editedMeanwhile && c.canChat) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "edit").put("id", msg.id).put("x", msg.text)) }
     }
 
     /** Changes the text of my sent message here and on their phone. Network: off the main thread. */
     fun editMessage(c: Contact, msg: Msg, text: String) {
         val t = text.trim().take(MAX_TEXT)
         if (!msg.mine || t.isEmpty() || t == msg.text) return
-        synchronized(this) { msg.text = t; msg.edited = true }
+        // not out yet: the new text simply goes instead (deliver sends an edit if it was mid-way)
+        val sent = synchronized(this) { msg.text = t; if (msg.state == Msg.SENT) msg.edited = true; msg.state == Msg.SENT }
         onChange()
         val m = me ?: return
-        if (c.canChat) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "edit").put("id", msg.id).put("x", t)) }
+        if (sent && c.canChat) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "edit").put("id", msg.id).put("x", t)) }
     }
 
     fun editGroupMessage(g: Group, msg: Msg, text: String) {
         val t = text.trim().take(MAX_TEXT)
         if (!msg.mine || t.isEmpty() || t == msg.text) return
-        synchronized(this) { msg.text = t; msg.edited = true }
+        val sent = synchronized(this) { msg.text = t; if (msg.state == Msg.SENT) msg.edited = true; msg.state == Msg.SENT }
         onChange()
         val m = me ?: return
-        runCatching { gctl(g, m, JSONObject().put("t", "edit").put("id", msg.id).put("x", t)) }
+        if (sent) runCatching { gctl(g, m, JSONObject().put("t", "edit").put("id", msg.id).put("x", t)) }
     }
 
     /** Removes a message here; [forEveryone] also tells the other side to erase it. */

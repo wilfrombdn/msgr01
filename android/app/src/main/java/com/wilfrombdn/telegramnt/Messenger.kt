@@ -33,6 +33,9 @@ object Messenger {
     /** Chat folders per account on this phone (not in any backup). */
     val allFolders = HashMap<String, MutableList<Folder>>()
     val folders: MutableList<Folder> get() = synchronized(allFolders) { allFolders.getOrPut(core.me?.user ?: "") { mutableListOf() } }
+    /** Pinned chats ("u:<user>" / "g:<group>"), shown above everything in this order. Per account, this phone only. */
+    val allPins = HashMap<String, MutableList<String>>()
+    val pins: MutableList<String> get() = synchronized(allPins) { allPins.getOrPut(core.me?.user ?: "") { mutableListOf() } }
     /** Where you were when the app last went to the background, so reopening puts you back there. */
     var spot = Spot()
     /** Auto-delete photos/videos/files older than this many days from this phone (0 = never). */
@@ -221,7 +224,18 @@ object Messenger {
         CallAudio.start(ctx, k)
         ui.postDelayed({ if (core.call === k && k.phase <= Core.Call.RINGING) io.execute { core.hangUp("noanswer") } }, 60_000)
         io.execute {
-            runCatching { core.offerCall(c, k, problem) }
+            // still connecting (e.g. Tor warming up): keep trying for a while instead of failing at once;
+            // the call screen says "Calling…" meanwhile
+            val until = System.currentTimeMillis() + 45_000
+            while (true) {
+                if (core.call !== k || k.phase == Core.Call.ENDED) return@execute   // hung up meanwhile
+                try { core.sendOffer(c, k); return@execute } catch (e: Exception) {
+                    if (e is UserError || System.currentTimeMillis() > until) {
+                        k.problem = problem(e); core.endCall(k, "failed"); return@execute
+                    }
+                }
+                try { Thread.sleep(3_000) } catch (e: InterruptedException) { return@execute }
+            }
         }
     }
 
@@ -294,6 +308,7 @@ object Messenger {
         o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
         o.put("keepMediaDays", keepMediaDays)
+        o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
         return o.put("spot", spot.json())
     }
 
@@ -302,6 +317,10 @@ object Messenger {
         o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
         o.optJSONObject("spot")?.let { spot = Spot.from(it) }
         keepMediaDays = o.optInt("keepMediaDays", 0)
+        o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->
+            val a = j.optJSONArray(u) ?: return@forEach
+            allPins[u] = MutableList(a.length()) { a.getString(it) }
+        } } }
     }
 
     fun settingsChanged() {

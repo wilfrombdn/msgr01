@@ -652,18 +652,24 @@ class MainActivity : Activity() {
         val all = core.sorted().filter { q.isEmpty() || it.name.lowercase().contains(q) || it.user.contains(q) }
         val grps = synchronized(core) { core.groups.toList() }.filter { q.isEmpty() || it.name.lowercase().contains(q) }
         val requests = all.filter { it.status == Contact.ASKING }
-        for (c in requests) list.addView(chatRow(c))
         // everything else, keyed "u:<user>" / "g:<group>" so folders can hold either
         val rows = (all - requests.toSet()).map { Triple("u:${it.user}", it.lastTs, it as Any) } + grps.map { Triple("g:${it.id}", it.lastTs, it as Any) }
         fun rowFor(t: Triple<String, Long, Any>, bg: Int = listBg) = (t.third as? Contact)?.let { chatRow(it, t.first, bg) } ?: groupRow(t.third as Group, t.first, bg)
         val nested = nestedBg   // chats inside an open folder sit on a slightly different strip
         val byKey = rows.associateBy { it.first }
         val inFolder = HashSet<String>()
+        // pinned chats: at the very top, above folders, in the order you pinned them
+        val pins = Messenger.pins
+        pins.retainAll { it in byKey || it.startsWith("u:") && core.contact(it.drop(2)) != null }   // forget deleted chats
+        pinnedKeys = pins.toSet()
+        for (k in pins) byKey[k]?.let { list.addView(rowFor(it)) }
+        inFolder += pins
+        for (c in requests) list.addView(chatRow(c))   // friend requests right under the pins
         if (q.isEmpty()) {
             val fs = Messenger.folders
             fs.forEach { f -> f.items.retainAll { it in byKey || it.startsWith("u:") && core.contact(it.drop(2)) != null } }   // forget deleted chats
             for (f in fs) {
-                val members = f.items.mapNotNull { byKey[it] }.sortedByDescending { it.second }
+                val members = f.items.filter { it !in pinnedKeys }.mapNotNull { byKey[it] }.sortedByDescending { it.second }
                 inFolder += f.items
                 list.addView(folderRow(f, members.sumOf { (it.third as? Contact)?.unread ?: (it.third as Group).unread }, members.size))
                 if (f.open) for (t in members) list.addView(rowFor(t, nested).apply {
@@ -786,10 +792,19 @@ class MainActivity : Activity() {
     }
 
     /** Long-press a chat row to pick it up. */
+    private var dragRow: View? = null
+
     private fun startChatDrag(row: View, key: String) {
         row.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         dragging = true
+        dragRow = row
         if (!row.startDragAndDrop(ClipData.newPlainText("chat", key), View.DragShadowBuilder(row), key, 0)) dragging = false
+    }
+
+    private fun isInside(v: View, g: ViewGroup): Boolean {
+        var p = v.parent
+        while (p != null) { if (p === g) return true; p = p.parent }
+        return false
     }
 
     /** Drop a dragged chat on a folder (or a chat inside one) to file it there; anywhere else takes it out. */
@@ -828,6 +843,9 @@ class MainActivity : Activity() {
                 android.view.DragEvent.ACTION_DRAG_EXITED -> { light(null); true }
                 android.view.DragEvent.ACTION_DROP -> {
                     val key = e.localState as? String ?: return@setOnDragListener false
+                    // let go on the same chat (didn't really drag it): show its menu instead of moving it
+                    val self = dragRow?.let { r -> (0 until list.childCount).map { list.getChildAt(it) }.firstOrNull { v -> v === r || (v as? ViewGroup)?.let { g -> isInside(r, g) } == true } }
+                    if (self != null && e.y >= self.top && e.y < self.bottom) { dragging = false; list.post { chatRowMenu(key) }; return@setOnDragListener true }
                     val target = folderAt(e.y).first
                     val fs = Messenger.folders
                     fs.forEach { it.items.remove(key) }
@@ -887,6 +905,23 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Chats pinned to the top (shown with a pin). */
+    private var pinnedKeys = emptySet<String>()
+
+    private fun pinMark() = tv("📌", 12f, dim).apply { setPadding(dp(4), 0, 0, 0) }
+
+    /** Long-press a chat and let go without dragging it: pin / unpin. */
+    private fun chatRowMenu(key: String) {
+        val pinned = key in Messenger.pins
+        longPressMenu(null, null, listOf(
+            (if (pinned) "Unpin" else "Pin to top") to {
+                val ps = Messenger.pins
+                if (pinned) ps.remove(key) else { ps.remove(key); ps.add(0, key) }
+                Messenger.settingsChanged(); showChats()
+            },
+        ))
+    }
+
     private fun chatRow(c: Contact, key: String? = null, bg: Int = listBg): View {
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -900,6 +935,7 @@ class MainActivity : Activity() {
         line1.addView(tv(c.name, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
         val last = c.msgs.lastOrNull()
         if (last?.mine == true && last.state == Msg.SENT) line1.addView(icon(R.drawable.ic_check, blue, 16, 2))
+        if (key in pinnedKeys) line1.addView(pinMark())
         line1.addView(tv(time(c.lastTs), 13f, dim).apply { setPadding(dp(4), 0, 0, 0) })
         mid.addView(line1)
         val line2 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
@@ -952,6 +988,7 @@ class MainActivity : Activity() {
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
         val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         line1.addView(tv(g.name, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (key in pinnedKeys) line1.addView(pinMark())
         line1.addView(tv(time(g.lastTs), 13f, dim).apply { setPadding(dp(4), 0, 0, 0) })
         mid.addView(line1)
         val last = g.msgs.lastOrNull { it.state != Msg.NOTE }
@@ -1164,7 +1201,7 @@ class MainActivity : Activity() {
         })
         opts.addAll(imageActions(m, if (m.text.isNotEmpty()) "Copy photo" else "Copy"))
         if (canForward(m)) opts.add("Forward" to { forwardPicker(m, authorOf(m)) })
-        if (m.mine && m.state == Msg.SENT && m.text.isNotEmpty() && g.canPost(me ?: "")) opts.add("Edit" to { startEdit(m, groupBox) })
+        if (m.mine && m.text.isNotEmpty() && g.canPost(me ?: "")) opts.add("Edit" to { startEdit(m, groupBox) })
         if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
             Messenger.io.execute { Messenger.core.deleteGroupMessage(g, m, forEveryone = true) }
         })
@@ -1973,7 +2010,7 @@ class MainActivity : Activity() {
         })
         opts.addAll(imageActions(m, if (m.text.isNotEmpty()) "Copy photo" else "Copy"))
         if (canForward(m)) opts.add("Forward" to { forwardPicker(m, authorOf(m)) })
-        if (m.mine && m.state == Msg.SENT && m.text.isNotEmpty() && c.canChat) opts.add("Edit" to { startEdit(m, chatBox) })
+        if (m.mine && m.text.isNotEmpty() && c.canChat) opts.add("Edit" to { startEdit(m, chatBox) })
         if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
             Messenger.run({ Messenger.core.deleteMessage(c, m, forEveryone = true) }, { fillChat() })
         })
