@@ -356,6 +356,47 @@ class RelayFlowTest {
         assertArrayEquals(data, ci.openFile(mc))
     }
 
+    /** Edits change the text on the other phone (only the writer can); forwarded messages say who first wrote them. */
+    @Test fun editAndForward() {
+        assumeTrue(Relay(server).ping())
+        val al = withDisk(Core(server)); val bo = withDisk(Core(server)); val ci = withDisk(Core(server))
+        val au = "efa_$tag"; val bu = "efb_$tag"; val cu = "efc_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo"); ci.signup(cu, "cis long password", "Ci")
+        fun befriend(a: Core, aun: String, b: Core, bun: String) { a.addFriend(bun); b.poll(5); b.accept(b.contact(aun)!!, friend = true); a.poll(5) }
+        befriend(al, au, bo, bu); befriend(al, au, ci, cu)
+
+        // 1:1 edit
+        val toBo = al.contact(bu)!!
+        val sent = al.queue(toBo, "see you at 6").also { al.deliver(toBo, it) }
+        bo.poll(5)
+        al.editMessage(toBo, sent, "see you at 7"); bo.poll(5)
+        val got = bo.contact(au)!!.msgs.first { it.id == sent.id }
+        assertEquals("see you at 7", got.text); assertTrue(got.edited)
+        assertTrue(Msg.from(got.json()).edited)   // kept
+
+        // forward Bo's text to Ci as al: Ci sees "forwarded from bo"
+        val fw = al.queue(al.contact(cu)!!, "hello from bo").also { it.fwd = bu; al.deliver(al.contact(cu)!!, it) }
+        ci.poll(5)
+        assertEquals(bu, ci.contact(au)!!.msgs.first { it.id == fw.id }.fwd)
+
+        // group: forwarded file + edit; a member can't edit someone else's message
+        val g = al.createGroup("Crew", public = false, invite = listOf(bu, cu))
+        bo.poll(5); ci.poll(5); al.poll(5); bo.poll(5); ci.poll(5)
+        val data = ByteArray(5_000) { it.toByte() }
+        val gf = al.queueGroupFile(g, Voice.NAME, Voice.MIME, data, null).also { it.fwd = cu; al.deliverGroupFile(g, it) }
+        val gm = al.sendGroup(g, "6am start", fwd = null)
+        bo.poll(8)
+        val bg = bo.groups.first { it.secret == g.secret }
+        assertEquals(cu, bg.msgs.first { it.id == gf.id }.fwd)
+        al.editGroupMessage(g, gm, "7am start"); bo.poll(8)
+        assertEquals("7am start", bg.msgs.first { it.id == gm.id }.text)
+        // ci forges an edit of al's message: ignored (the gctl proves ci sent it)
+        val cg = ci.groups.first { it.secret == g.secret }; ci.poll(8)
+        val fake = Msg(gm.id, true, "cancelled", 0, Msg.SENT)
+        ci.editGroupMessage(cg, fake, "no work today"); bo.poll(8)
+        assertEquals("7am start", bg.msgs.first { it.id == gm.id }.text)
+    }
+
     /** A reaction reaches the other side and survives a save/load. */
     @Test fun reactionsPropagateAndPersist() {
         assumeTrue(Relay(server).ping())

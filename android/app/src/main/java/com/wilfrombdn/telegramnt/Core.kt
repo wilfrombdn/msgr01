@@ -23,7 +23,7 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.Base64
 
-class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var state: Int) {
+class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var state: Int) {
     /** Attachment: id (on server), k (key), n (name), m (type), s (size), th (preview), local (saved here). */
     var file: JSONObject? = null
     /** Disappearing messages: epoch ms when this is wiped from both phones, or 0 = never. */
@@ -36,10 +36,15 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
     var reply: JSONObject? = null
     /** A call summary instead of a message: d = "out"/"in", s = ok/missed/declined/cancelled/busy/noanswer/failed, dur = seconds. */
     var call: JSONObject? = null
+    /** The sender changed the text after sending. */
+    var edited = false
+    /** Forwarded: the @username of whoever first wrote it. */
+    var fwd: String? = null
 
     fun json(): JSONObject = JSONObject().put("id", id).put("mine", mine).put("text", text).put("ts", ts).put("state", state)
         .put("file", file).put("expires", expires).put("sender", sender)
         .put("reactions", JSONObject(reactions as Map<*, *>)).put("reply", reply).put("call", call)
+        .put("edited", edited).put("fwd", fwd)
 
     companion object {
         const val SENDING = 0
@@ -60,7 +65,10 @@ class Msg(val id: String, val mine: Boolean, val text: String, val ts: Long, var
                 o.optJSONObject("reactions")?.let { r -> for (k in r.keys()) it.reactions[k] = r.getString(k) }
                 it.reply = o.optJSONObject("reply")
                 it.call = o.optJSONObject("call")
+                it.edited = o.optBoolean("edited"); it.fwd = o.optString("fwd").ifEmpty { null }
             }
+        /** A forwarded-from name off the wire: only a well-formed @username is kept. */
+        fun fwdOf(o: JSONObject?) = o?.optString("fw")?.takeIf { Core.USERNAME.matches(it) }
     }
 }
 
@@ -583,9 +591,10 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         changed()
     }
 
-    fun sendGroup(g: Group, text: String, reply: JSONObject? = null): Msg {
+    fun sendGroup(g: Group, text: String, reply: JSONObject? = null, fwd: String? = null): Msg {
         val msg = Msg(Crypto.randomHex(16), true, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.SENDING)
         msg.reply = Msg.replyRef(reply)
+        msg.fwd = fwd
         synchronized(this) { g.msgs.add(msg) }
         onChange()
         deliverGroup(g, msg)
@@ -616,7 +625,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             if (!g.distSent) postMyDist(m, g)
             val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, msg.text.toByteArray()) }
             relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gmsg").put("u", m.user).put("id", msg.id).put("c", b64(ct.serialize()))
-                .apply { msg.reply?.let { put("r", it) } }))
+                .apply { msg.reply?.let { put("r", it) }; msg.fwd?.let { put("fw", it) } }))
             Msg.SENT
         } catch (e: Exception) {
             Msg.FAILED
@@ -675,7 +684,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             val out = JSONObject().put("id", f.getString("id")).put("k", f.getString("k")).put("n", f.optString("n"))
                 .put("m", f.optString("m")).put("s", f.optInt("s")).put("grp", true)
             if (f.has("th")) out.put("th", f.getString("th"))
-            gctl(g, m, JSONObject().put("t", "file").put("id", msg.id).put("f", out))
+            gctl(g, m, JSONObject().put("t", "file").put("id", msg.id).put("f", out).apply { msg.fwd?.let { put("fw", it) } })
             Msg.SENT
         } catch (e: Exception) {
             Msg.FAILED
@@ -741,7 +750,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     return
                 }
                 if (!g.canPost(u)) return   // read-only: ignore posts from non-leaders
-                addGroupMsg(g, u, id, String(text), Msg.replyRef(inner.optJSONObject("r")))
+                addGroupMsg(g, u, id, String(text), Msg.replyRef(inner.optJSONObject("r")), Msg.fwdOf(inner))
             }
             "gdel" -> {
                 val id = inner.optString("id")
@@ -775,9 +784,15 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 val id = p.optString("id")
                 val f = p.optJSONObject("f")?.let { checkFile(it) } ?: return
                 if (id.isEmpty() || synchronized(this) { g.msgs.any { it.id == id } }) return
-                val msg = Msg(id, false, "", System.currentTimeMillis(), Msg.RECEIVED).also { it.sender = u; it.file = f }
+                val msg = Msg(id, false, "", System.currentTimeMillis(), Msg.RECEIVED).also { it.sender = u; it.file = f; it.fwd = Msg.fwdOf(p) }
                 synchronized(this) { g.msgs.add(msg); if (openChat != "g:${g.id}") g.unread++ }
                 toFetch.add(msg)   // poll() downloads it; fetchFile skips doneWith for group files
+            }
+            "edit" -> {   // only the original sender (proven by the gctl decrypt) may change a message
+                val id = p.optString("id"); val x = p.optString("x").take(MAX_TEXT)
+                if (x.isBlank()) return
+                synchronized(this) { g.msgs.firstOrNull { it.id == id && it.sender == u && !it.mine }?.let { it.text = x; it.edited = true } }
+                onChange()
             }
             "react" -> {   // reactions are allowed even in read-only groups
                 val id = p.optString("id"); val e = p.optString("e").take(16)
@@ -842,12 +857,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         }
     }
 
-    private fun addGroupMsg(g: Group, u: String, id: String, text: String, reply: JSONObject? = null) {
+    private fun addGroupMsg(g: Group, u: String, id: String, text: String, reply: JSONObject? = null, fwd: String? = null) {
         synchronized(this) {
             g.members.add(u)
             val msg = Msg(id, false, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.RECEIVED)
             msg.sender = u
             msg.reply = reply
+            msg.fwd = fwd
             g.msgs.add(msg)
             if (openChat != "g:${g.id}") g.unread++
         }
@@ -1113,6 +1129,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         msg.state = try {
             val body = JSONObject().put("id", msg.id).put("x", msg.text)
             msg.reply?.let { body.put("r", it) }
+            msg.fwd?.let { body.put("fw", it) }
             msg.file?.let { f ->
                 if (!f.has("id")) {
                     val blob = loadBlob(f.getString("local")) ?: throw IOException("attachment missing")
@@ -1133,6 +1150,25 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             Msg.FAILED
         }
         onChange()
+    }
+
+    /** Changes the text of my sent message here and on their phone. Network: off the main thread. */
+    fun editMessage(c: Contact, msg: Msg, text: String) {
+        val t = text.trim().take(MAX_TEXT)
+        if (!msg.mine || t.isEmpty() || t == msg.text) return
+        synchronized(this) { msg.text = t; msg.edited = true }
+        onChange()
+        val m = me ?: return
+        if (c.canChat) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "edit").put("id", msg.id).put("x", t)) }
+    }
+
+    fun editGroupMessage(g: Group, msg: Msg, text: String) {
+        val t = text.trim().take(MAX_TEXT)
+        if (!msg.mine || t.isEmpty() || t == msg.text) return
+        synchronized(this) { msg.text = t; msg.edited = true }
+        onChange()
+        val m = me ?: return
+        runCatching { gctl(g, m, JSONObject().put("t", "edit").put("id", msg.id).put("x", t)) }
     }
 
     /** Removes a message here; [forEveryone] also tells the other side to erase it. */
@@ -1372,6 +1408,12 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     synchronized(this) { g.members.add(c.user) }
                 }
             }
+            "edit" -> {
+                val id = inner.optString("id"); val x = inner.optString("x").take(MAX_TEXT)
+                if (x.isBlank()) return
+                synchronized(this) { c.msgs.firstOrNull { it.id == id && !it.mine }?.let { it.text = x; it.edited = true } } // only their own
+                onChange()
+            }
             "del" -> {
                 val id = inner.optString("id")
                 synchronized(this) { c.msgs.removeAll { it.id == id && !it.mine } } // only lets them erase their own
@@ -1436,6 +1478,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val msg = Msg(id, false, inner.optString("x").take(MAX_TEXT), System.currentTimeMillis(), Msg.RECEIVED)
         msg.file = inner.optJSONObject("f")?.let { checkFile(it) }
         msg.reply = Msg.replyRef(inner.optJSONObject("r"))
+        msg.fwd = Msg.fwdOf(inner)
         if (ttl > 0) msg.expires = System.currentTimeMillis() + ttl * 1000L
         if (msg.file != null) toFetch.add(msg)
         return msg

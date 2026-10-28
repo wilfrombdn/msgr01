@@ -164,7 +164,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when {
             emojiPopup != null -> { emojiPopup?.dismiss(); emojiPopup = null }
-            replyTo != null && (screen == "chat" || screen == "group") -> cancelReply()
+            (replyTo != null || editing != null) && (screen == "chat" || screen == "group") -> cancelReply()
             drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
             !Messenger.signedIn && screen != "welcome" -> showWelcome()
             screen == "viewer" -> leaveViewer()
@@ -1076,6 +1076,12 @@ class MainActivity : Activity() {
         fun doSend() {
             val t = box.text.toString().trim(); if (t.isEmpty()) return
             if (t.length > Core.MAX_TEXT) { toast("Too long"); return }
+            editing?.let { e ->
+                val g2 = Messenger.core.group(id) ?: return
+                cancelReply(); box.setText("")
+                Messenger.io.execute { Messenger.core.editGroupMessage(g2, e, t) }
+                return
+            }
             box.setText(""); box.requestFocus(); stick = true
             val g2 = Messenger.core.group(id) ?: return
             val r = replyTo?.let { replyRef(it) }; cancelReply()
@@ -1130,12 +1136,13 @@ class MainActivity : Activity() {
         if (!m.mine) m.sender?.let { su ->
             b.addView(tv("@$su", 13f, avatarColors[Math.floorMod(su.hashCode(), avatarColors.size)], true))
         }
+        m.fwd?.let { b.addView(fwdLabel(it, tcol)) }
         m.reply?.let { b.addView(quoteView(it, g.msgs, tcol, groupBubbles, groupScroller)) }
         m.file?.let { b.addView(attachmentView(m, tcol) { groupMessageMenu(g, m) }) }
         if (m.text.isNotEmpty()) b.addView(tv(m.text, 16f, tcol).apply { textSize = look.msg })
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val mc = (tcol and 0x00FFFFFF) or (0x99 shl 24)
-        meta.addView(tv(time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
+        meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
         if (m.mine) when (m.state) {
             Msg.SENT -> meta.addView(icon(R.drawable.ic_check, mc, 14, 1))
             Msg.SENDING -> meta.addView(tv("🕓", 11f, mc))
@@ -1156,6 +1163,8 @@ class MainActivity : Activity() {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
         })
         opts.addAll(imageActions(m, if (m.text.isNotEmpty()) "Copy photo" else "Copy"))
+        if (canForward(m)) opts.add("Forward" to { forwardPicker(m, authorOf(m)) })
+        if (m.mine && m.state == Msg.SENT && m.text.isNotEmpty() && g.canPost(me ?: "")) opts.add("Edit" to { startEdit(m, groupBox) })
         if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
             Messenger.io.execute { Messenger.core.deleteGroupMessage(g, m, forEveryone = true) }
         })
@@ -1329,6 +1338,11 @@ class MainActivity : Activity() {
             val t = box.text.toString().trim()
             if (t.isEmpty()) return
             if (t.length > Core.MAX_TEXT) { toast("Too long (max ${Core.MAX_TEXT} characters)"); return }
+            editing?.let { e ->
+                cancelReply(); box.setText("")
+                Messenger.io.execute { Messenger.core.editMessage(c, e, t) }
+                return
+            }
             box.setText("")
             Messenger.typingDone(c)
             box.requestFocus()                 // stay in the field so you can keep typing
@@ -1423,6 +1437,8 @@ class MainActivity : Activity() {
 
     /** The message you're replying to (shown above the message box until you send or tap ✕). */
     private var replyTo: Msg? = null
+    /** My message being edited in the message box (instead of writing a new one). */
+    private var editing: Msg? = null
     private var chatBox: EditText? = null
     private var groupBox: EditText? = null
     private var replyBar: LinearLayout? = null
@@ -1443,13 +1459,26 @@ class MainActivity : Activity() {
     }
 
     private fun startReply(m: Msg, box: EditText?) {
+        if (editing != null) { editing = null; box?.setText("") }
         replyTo = m
+        showBar("Reply to ${displayName(authorOf(m))}", m, box)
+    }
+
+    /** Puts my message back in the box to change it; sending then edits it on both phones. */
+    private fun startEdit(m: Msg, box: EditText?) {
+        replyTo = null
+        editing = m
+        showBar("Edit message", m, box)
+        box?.setText(m.text); box?.setSelection(box.text.length)
+    }
+
+    private fun showBar(title: String, m: Msg, box: EditText?) {
         val bar = replyBar ?: return
         bar.removeAllViews()
         bar.addView(View(this).apply { setBackgroundColor(white) }, LinearLayout.LayoutParams(dp(3), dp(36)))
         bar.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
-            addView(tv("Reply to ${displayName(authorOf(m))}", 14f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+            addView(tv(title, 14f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
             addView(tv(preview(m), 14f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         }, LinearLayout.LayoutParams(0, -2, 1f))
         bar.addView(tv("✕", 18f, dim).apply { setPadding(dp(14), dp(6), dp(14), dp(6)); setOnClickListener { cancelReply() } })
@@ -1460,7 +1489,10 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun cancelReply() { replyTo = null; replyBar?.visibility = View.GONE }
+    private fun cancelReply() {
+        if (editing != null) { editing = null; (if (screen == "group") groupBox else chatBox)?.setText("") }
+        replyTo = null; replyBar?.visibility = View.GONE
+    }
 
     /** The quote at the top of a reply bubble; tap it to jump to the original message. */
     private fun quoteView(r: org.json.JSONObject, all: List<Msg>, ink: Int, list: LinearLayout?, sc: ScrollView?): View {
@@ -1665,12 +1697,13 @@ class MainActivity : Activity() {
             background = round(fill, if (look.square) 0 else 14)
             setPadding(dp(10), dp(6), dp(10), dp(5))
         }
+        m.fwd?.let { b.addView(fwdLabel(it, ink)) }
         m.reply?.let { b.addView(quoteView(it, c.msgs, ink, bubbles, scroller)) }
         m.file?.let { b.addView(attachmentView(m, ink) { messageMenu(c, m) }) }
         if (m.text.isNotEmpty()) b.addView(tv(m.text, 16f, ink).apply { textSize = look.msg })
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val metaColor = (ink and 0x00FFFFFF) or (0x99 shl 24)
-        meta.addView(tv(time(m.ts), 12f, metaColor).apply { setPadding(0, 0, dp(6), 0) }) // gap before the tick
+        meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, metaColor).apply { setPadding(0, 0, dp(6), 0) }) // gap before the tick
         if (m.mine) when (m.state) {
             Msg.SENT -> {
                 val read = m.ts <= c.theirReadUpto
@@ -1884,6 +1917,53 @@ class MainActivity : Activity() {
         b.addView(row)
     }
 
+    // ---------- forwarding ----------
+
+    /** "Forwarded from Sam" at the top of a bubble. */
+    private fun fwdLabel(user: String, ink: Int) = tv("Forwarded from ${displayName(user)}", 13.5f, (ink and 0x00FFFFFF) or (0xCC shl 24)).apply {
+        setTypeface(typeface, android.graphics.Typeface.ITALIC); setPadding(0, 0, 0, dp(3))
+    }
+
+    /** Text, or an attachment that's on this phone (not one still downloading or cleared). */
+    private fun canForward(m: Msg) = m.call == null && m.state != Msg.NOTE &&
+        (m.file?.has("local") ?: m.text.isNotEmpty())
+
+    /** Pick a chat to forward [m] to; it keeps who first wrote it. Then opens that chat. */
+    private fun forwardPicker(m: Msg, author: String) {
+        val from = m.fwd ?: author
+        val core = Messenger.core
+        val me = core.me?.user ?: ""
+        val targets = synchronized(core) {
+            core.contacts.filter { it.canChat }.map { Triple(it.name, it.lastTs, it as Any) } +
+                core.groups.filter { it.canPost(me) }.map { Triple(it.name, it.lastTs, it as Any) }
+        }.sortedByDescending { it.second }
+        if (targets.isEmpty()) { toast("No chats to forward to yet"); return }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val d = android.app.Dialog(this)
+        for ((name, _, t) in targets) col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)); background = pressable()
+            addView(avatar(name, 40, (t as? Contact)?.avatar))
+            addView(tv(name, 16f, white).apply { setPadding(dp(14), 0, 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+            setOnClickListener {
+                d.dismiss()
+                Messenger.run({ Messenger.forward(m, from, t as? Contact, t as? Group) }, {
+                    stick = true
+                    if (t is Contact) showChat(t.user) else showGroup((t as Group).id)
+                }) { e -> toast(errorText(e)) }
+            }
+        })
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; background = round(bar, 4); setPadding(0, dp(14), 0, dp(6))
+            addView(tv("Forward to…", 17.5f, white, true).apply { setPadding(dp(20), 0, dp(20), dp(8)) })
+            addView(col)
+        }
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        d.setContentView(ScrollView(this).apply { addView(wrap) })
+        d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.86).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
+        d.show()
+    }
+
     private fun messageMenu(c: Contact, m: Msg) {
         val me = Messenger.core.me?.user
         val opts = mutableListOf<Pair<String, () -> Unit>>()
@@ -1892,6 +1972,8 @@ class MainActivity : Activity() {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
         })
         opts.addAll(imageActions(m, if (m.text.isNotEmpty()) "Copy photo" else "Copy"))
+        if (canForward(m)) opts.add("Forward" to { forwardPicker(m, authorOf(m)) })
+        if (m.mine && m.state == Msg.SENT && m.text.isNotEmpty() && c.canChat) opts.add("Edit" to { startEdit(m, chatBox) })
         if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
             Messenger.run({ Messenger.core.deleteMessage(c, m, forEveryone = true) }, { fillChat() })
         })

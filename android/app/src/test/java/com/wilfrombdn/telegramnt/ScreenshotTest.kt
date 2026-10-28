@@ -269,6 +269,29 @@ class ScreenshotTest {
         call(a, "showSettings"); shoot(a, "46-privacy-switches")
     }
 
+    /** Forwarded + edited bubbles, the edit strip above the box, and the forward picker. */
+    @Test fun editForward() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val sam = Messenger.core.contact("sam_r")!!
+        val now = System.currentTimeMillis()
+        sam.msgs += Msg("f1", false, "brake chamber part # is 3030T", now, Msg.RECEIVED).also { it.fwd = "jordan_k" }
+        val mine = Msg("e1", true, "running 10 min late", now, Msg.SENT).also { it.edited = true }
+        sam.msgs += mine
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChat", "sam_r"); shadowOf(Looper.getMainLooper()).idle()
+        call(a, "startEdit", mine, a.javaClass.getDeclaredField("chatBox").apply { isAccessible = true }.get(a))
+        shoot(a, "47-edit-forwarded")
+        call(a, "cancelReply")
+        call(a, "forwardPicker", mine, "wil_p"); shadowOf(Looper.getMainLooper()).idle()
+        val dlg = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+        val v = dlg.window!!.decorView
+        v.measure(android.view.View.MeasureSpec.makeMeasureSpec(900, android.view.View.MeasureSpec.EXACTLY), android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED))
+        v.layout(0, 0, v.measuredWidth, v.measuredHeight)
+        val bmp = Bitmap.createBitmap(v.measuredWidth, v.measuredHeight, Bitmap.Config.ARGB_8888)
+        v.draw(Canvas(bmp))
+        File("build/shots/48-forward-picker.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
     /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */
     @Test fun composerWraps() {
         Messenger.initForPreview(fakeCore(signedIn = true))

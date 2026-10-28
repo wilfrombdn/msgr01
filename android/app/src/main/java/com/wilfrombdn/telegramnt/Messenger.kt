@@ -426,6 +426,26 @@ object Messenger {
         io.execute { core.deliverGroupFile(g, m) }
     }
 
+    /** Sends a copy of [m] to a friend or group, marked "Forwarded from [from]". Network: off the main thread. */
+    fun forward(m: Msg, from: String, c: Contact?, g: Group?) {
+        val f = m.file
+        if (f != null) {
+            val data = core.openFile(m) ?: throw UserError("That isn't on this phone")
+            val th = f.optString("th").takeIf { it.isNotEmpty() }?.let { java.util.Base64.getDecoder().decode(it) }
+            if (g != null) {
+                val msg = core.queueGroupFile(g, f.optString("n"), f.optString("m"), data, th)
+                msg.fwd = from
+                core.deliverGroupFile(g, msg)
+                if (m.text.isNotEmpty()) core.sendGroup(g, m.text, null, from)   // group files carry no caption
+            } else if (c != null) {
+                val msg = core.queueFile(c, f.optString("n"), f.optString("m"), data, th)
+                msg.fwd = from; msg.text = m.text
+                core.deliver(c, msg)
+            }
+        } else if (g != null) core.sendGroup(g, m.text, null, from)
+        else if (c != null) { val msg = core.queue(c, m.text); msg.fwd = from; core.deliver(c, msg) }
+    }
+
     fun react(c: Contact, msg: Msg, emoji: String) { useEmoji(emoji); io.execute { core.react(c, msg, emoji) } }
     fun reactGroup(g: Group, msg: Msg, emoji: String) { useEmoji(emoji); io.execute { core.reactGroup(g, msg, emoji) } }
 
