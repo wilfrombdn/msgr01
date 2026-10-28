@@ -2414,7 +2414,7 @@ class MainActivity : Activity() {
 
     /**
      * The button at the end of the message box: send when there's text, otherwise a mic.
-     * Hold the mic to record, let go to send, slide left to cancel (like Telegram).
+     * Hold the mic to record, let go to send, slide left to cancel, slide up to lock and talk hands-free (like Telegram).
      */
     private fun sendOrMic(row: LinearLayout, box: EditText, send: () -> Unit, sendVoice: (ByteArray, ByteArray) -> Unit): View {
         val btn = icon(R.drawable.ic_mic, white)
@@ -2436,21 +2436,39 @@ class MainActivity : Activity() {
             addView(slide, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(16) })
             slide.gravity = Gravity.CENTER
         }
+        // the lock that sits above the mic while you hold it; slide up onto it to keep recording hands-free
+        val lockPill = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(8), dp(10), dp(8), dp(10)); background = round(listBg, 22)
+            elevation = dp(4).toFloat()
+            addView(icon(R.drawable.ic_lock, dim, 20, 0))
+            addView(tv("⌃", 16f, dim).apply { gravity = Gravity.CENTER })
+        }
+        val lockPop = android.widget.PopupWindow(lockPill, dp(44), -2, false).apply { isClippingEnabled = false; isTouchable = false }
+        var startX = 0f
+        var startY = 0f
+        var active = false
+        var locked = false
+        var lockTouch = false   // the touch that locked it: lifting that finger must not send
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
         val tick = object : Runnable {
             override fun run() {
                 if (!Voice.recording) return
+                // left the chat while recording (back button, another screen): throw it away
+                if (!strip.isAttachedToWindow) { lockPop.dismiss(); active = false; locked = false; Voice.cancel(); return }
                 val ms = Voice.elapsed()
                 timer.text = Voice.clock((ms / 1000).toInt())
                 dot.alpha = if ((ms / 500) % 2 == 0L) 1f else 0.25f
-                strip.postDelayed(this, 100)
+                h.postDelayed(this, 100)
             }
         }
-        var startX = 0f
-        var active = false
         fun end(sendIt: Boolean) {
             if (!active) return
-            active = false
-            strip.removeCallbacks(tick)
+            active = false; locked = false
+            lockPop.dismiss(); lockPill.translationY = 0f
+            slide.setOnClickListener(null); slide.text = "‹  Slide to cancel"; slide.setTextColor(dim)
+            btn.setImageResource(R.drawable.ic_mic)
+            h.removeCallbacks(tick)
             row.removeView(strip)
             for (i in 0 until row.childCount) row.getChildAt(i).visibility = View.VISIBLE
             btn.scaleX = 1f; btn.scaleY = 1f; btn.background = null; btn.setColorFilter(white)
@@ -2462,7 +2480,21 @@ class MainActivity : Activity() {
             val (audio, th) = got
             Messenger.io.execute { runCatching { sendVoice(audio, th) } }
         }
+        fun lock() {
+            locked = true; lockTouch = true
+            lockPop.dismiss()
+            runCatching { getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createOneShot(25, 120)) }
+            slide.translationX = 0f; slide.alpha = 1f
+            slide.text = "Cancel"; slide.setTextColor(red)
+            slide.setOnClickListener { end(false) }
+            btn.setImageResource(R.drawable.ic_send); btn.scaleX = 1f; btn.scaleY = 1f
+        }
         btn.setOnTouchListener { _, e ->
+            if (locked) {   // hands-free: a tap on the button sends
+                if (e.action == MotionEvent.ACTION_DOWN) lockTouch = false
+                if (e.action == MotionEvent.ACTION_UP && !lockTouch) end(true)
+                return@setOnTouchListener true
+            }
             if (!box.text.isNullOrBlank()) {
                 if (e.action == MotionEvent.ACTION_UP) send()
                 return@setOnTouchListener true
@@ -2474,7 +2506,7 @@ class MainActivity : Activity() {
                         return@setOnTouchListener true
                     }
                     if (!Voice.start(this)) { toast("Couldn't use the microphone"); return@setOnTouchListener true }
-                    active = true; startX = e.rawX
+                    active = true; startX = e.rawX; startY = e.rawY
                     btn.parent?.requestDisallowInterceptTouchEvent(true)
                     runCatching { getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createOneShot(25, 120)) }
                     for (i in 0 until row.childCount) row.getChildAt(i).let { if (it !== btn) it.visibility = View.GONE }
@@ -2482,16 +2514,25 @@ class MainActivity : Activity() {
                     slide.translationX = 0f; timer.text = "0:00"
                     btn.background = circle(white); btn.setColorFilter(listBg); btn.scaleX = 1.25f; btn.scaleY = 1.25f
                     Voice.onLimit = { end(true) }
-                    strip.post(tick)
+                    h.post(tick)
+                    btn.post { if (active && !locked) runCatching { lockPop.showAsDropDown(btn, (btn.width - dp(44)) / 2, -btn.height - dp(110)) } }
                 }
                 MotionEvent.ACTION_MOVE -> if (active) {
                     val dx = (startX - e.rawX).coerceAtLeast(0f)
-                    slide.translationX = -dx / 2
-                    slide.alpha = (1f - dx / dp(130)).coerceIn(0.2f, 1f)
-                    if (dx > dp(130)) end(false)
+                    val dy = (startY - e.rawY).coerceAtLeast(0f)
+                    if (dy > dx) {           // going up, toward the lock
+                        slide.translationX = 0f; slide.alpha = 1f
+                        lockPill.translationY = -dy.coerceAtMost(dp(40).toFloat()) / 2
+                        if (dy > dp(90)) lock()
+                    } else {
+                        lockPill.translationY = 0f
+                        slide.translationX = -dx / 2
+                        slide.alpha = (1f - dx / dp(130)).coerceIn(0.2f, 1f)
+                        if (dx > dp(130)) end(false)
+                    }
                 }
-                MotionEvent.ACTION_UP -> end(true)
-                MotionEvent.ACTION_CANCEL -> end(false)
+                MotionEvent.ACTION_UP -> if (!locked) end(true)
+                MotionEvent.ACTION_CANCEL -> if (!locked) end(false)
             }
             true
         }

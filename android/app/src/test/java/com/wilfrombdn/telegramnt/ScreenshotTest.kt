@@ -228,6 +228,30 @@ class ScreenshotTest {
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         call(a, "showChat", "sam_r"); shoot(a, "40-voice")
         call(a, "showChats"); shoot(a, "41-voice-preview")
+
+        // hold the mic, slide up onto the lock, let go: still recording, mic is now send, "Cancel" shows
+        shadowOf(org.robolectric.RuntimeEnvironment.getApplication()).grantPermissions(android.Manifest.permission.RECORD_AUDIO)
+        call(a, "showChat", "sam_r")
+        shadowOf(Looper.getMainLooper()).idle()
+        val mic = findView(a.window.decorView) { it is android.widget.ImageView && it.parent === findEditText(a.window.decorView) { b -> b.hint?.toString() == "Message" }!!.parent && (it.parent as android.view.ViewGroup).indexOfChild(it) == (it.parent as android.view.ViewGroup).childCount - 1 }!!
+        val d = a.resources.displayMetrics.density
+        fun touch(action: Int, y: Float) = mic.dispatchTouchEvent(android.view.MotionEvent.obtain(0, 0, action, 10f, y, 0))
+        touch(android.view.MotionEvent.ACTION_DOWN, 500f)
+        if (!Voice.recording) { println("voice: MediaRecorder not available under Robolectric; lock gesture not exercised"); return }
+        touch(android.view.MotionEvent.ACTION_MOVE, 500f - 100 * d)
+        touch(android.view.MotionEvent.ACTION_UP, 500f - 100 * d)
+        assert(Voice.recording) { "letting go after locking must keep recording" }
+        val cancel = findView(a.window.decorView) { it is android.widget.TextView && it.text.toString() == "Cancel" }
+        assert(cancel != null) { "locked: Cancel shows" }
+        shoot(a, "42-voice-locked")
+        cancel!!.performClick()
+        assert(!Voice.recording) { "Cancel stops the recording" }
+    }
+
+    private fun findView(v: android.view.View, match: (android.view.View) -> Boolean): android.view.View? {
+        if (match(v)) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findView(v.getChildAt(i), match)?.let { return it }
+        return null
     }
 
     /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */
