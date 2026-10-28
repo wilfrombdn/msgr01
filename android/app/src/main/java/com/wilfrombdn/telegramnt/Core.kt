@@ -42,11 +42,15 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
     var fwd: String? = null
     /** Link preview card made by the sender: u, s (site), t (title), d (description). */
     var lp: JSONObject? = null
+    /** Sent without sound: the other phone doesn't notify. */
+    var silent = false
+    /** SCHEDULED messages go out at this time (epoch ms). */
+    var sendAt = 0L
 
     fun json(): JSONObject = JSONObject().put("id", id).put("mine", mine).put("text", text).put("ts", ts).put("state", state)
         .put("file", file).put("expires", expires).put("sender", sender)
         .put("reactions", JSONObject(reactions as Map<*, *>)).put("reply", reply).put("call", call)
-        .put("edited", edited).put("fwd", fwd).put("lp", lp)
+        .put("edited", edited).put("fwd", fwd).put("lp", lp).put("sil", silent).put("at", sendAt)
 
     companion object {
         const val SENDING = 0
@@ -54,6 +58,7 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
         const val RECEIVED = 2
         const val FAILED = 3
         const val NOTE = 4 // grey line in the middle, e.g. "You are now friends"
+        const val SCHEDULED = 5 // mine, waiting on this phone until [sendAt]
         /** A reply reference built by us, or received (then only well-formed, short fields are kept). */
         fun replyRef(r: JSONObject?): JSONObject? {
             r ?: return null
@@ -69,6 +74,7 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
                 it.call = o.optJSONObject("call")
                 it.edited = o.optBoolean("edited"); it.fwd = o.optString("fwd").ifEmpty { null }
                 it.lp = o.optJSONObject("lp")
+                it.silent = o.optBoolean("sil"); it.sendAt = o.optLong("at")
             }
         /** A forwarded-from name off the wire: only a well-formed @username is kept. */
         fun fwdOf(o: JSONObject?) = o?.optString("fw")?.takeIf { Core.USERNAME.matches(it) }
@@ -606,16 +612,46 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         changed()
     }
 
-    fun sendGroup(g: Group, text: String, reply: JSONObject? = null, fwd: String? = null, lp: JSONObject? = null): Msg {
+    fun sendGroup(g: Group, text: String, reply: JSONObject? = null, fwd: String? = null, lp: JSONObject? = null): Msg =
+        queueGroup(g, text, reply, fwd, lp).also { deliverGroup(g, it) }
+
+    fun queueGroup(g: Group, text: String, reply: JSONObject? = null, fwd: String? = null, lp: JSONObject? = null): Msg {
         val msg = Msg(Crypto.randomHex(16), true, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.SENDING)
         msg.reply = Msg.replyRef(reply)
         msg.fwd = fwd
         msg.lp = lp
         synchronized(this) { g.msgs.add(msg) }
         onChange()
-        deliverGroup(g, msg)
         return msg
     }
+
+    // ---------- scheduled messages ----------
+
+    /** Turns a queued message into a scheduled one (kept here until [at]). */
+    fun schedule(msg: Msg, at: Long) {
+        synchronized(this) { msg.state = Msg.SCHEDULED; msg.sendAt = at }
+        onChange()
+    }
+
+    /**
+     * Scheduled messages whose time has come: each moves to the end of its chat with the current time
+     * and is returned for sending. [now] = send them all regardless (Send now).
+     */
+    fun dueScheduled(now: Long = System.currentTimeMillis(), only: Msg? = null): List<Pair<Any, Msg>> {
+        val out = ArrayList<Pair<Any, Msg>>()
+        fun take(list: MutableList<Msg>, owner: Any) {
+            for (old in list.filter { it.state == Msg.SCHEDULED && (if (only != null) it === only else it.sendAt <= now) }) {
+                val m = Msg(old.id, true, old.text, System.currentTimeMillis(), Msg.SENDING)
+                m.reply = old.reply; m.fwd = old.fwd; m.lp = old.lp; m.file = old.file; m.silent = old.silent; m.expires = old.expires
+                list.remove(old); list.add(m)
+                out.add(owner to m)
+            }
+        }
+        synchronized(this) { contacts.forEach { take(it.msgs, it) }; groups.forEach { take(it.msgs, it) } }
+        if (out.isNotEmpty()) onChange()
+        return out
+    }
+
 
     /** A leader changes the group's name / read-only / leader list; broadcast as an authenticated set. */
     fun setGroup(g: Group, name: String, readOnly: Boolean, leaders: Set<String>) {
@@ -1180,6 +1216,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             msg.reply?.let { body.put("r", it) }
             msg.fwd?.let { body.put("fw", it) }
             msg.lp?.let { body.put("lp", it) }
+            if (msg.silent) body.put("sil", true)
             msg.file?.let { f ->
                 if (!f.has("id")) {
                     val blob = loadBlob(f.getString("local")) ?: throw IOException("attachment missing")
@@ -1571,7 +1608,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     if (openChat != c.user) c.unread++
                 }
                 c.theirTypingUntil = 0   // the message they were typing has arrived
-                if (openChat != c.user) onNew(c)
+                if (openChat != c.user && !inner.optBoolean("sil")) onNew(c)   // sent "without sound": no notification
             }
         }
     }

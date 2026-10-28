@@ -1126,7 +1126,7 @@ class MainActivity : Activity() {
             imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
             setHorizontallyScrolling(false); maxLines = 5   // after inputType, so the box still wraps
         }
-        fun doSend() {
+        fun sendWith(silent: Boolean, at: Long) {
             val t = box.text.toString().trim(); if (t.isEmpty()) return
             if (t.length > Core.MAX_TEXT) { toast("Too long"); return }
             editing?.let { e ->
@@ -1138,9 +1138,10 @@ class MainActivity : Activity() {
             box.setText(""); box.requestFocus(); stick = true
             val g2 = Messenger.core.group(id) ?: return
             val r = replyTo?.let { replyRef(it) }; cancelReply()
-            val lp = links.ready(t)
-            Messenger.io.execute { Messenger.core.sendGroup(g2, t, r, lp = lp) }
+            Messenger.sendGroup(g2, t, r, links.ready(t), silent, at)
+            if (at > 0) toast("Scheduled for ${whenText(at)}")
         }
+        fun doSend() = sendWith(false, 0)
         box.setText(Messenger.drafts["g:$id"] ?: "")
         box.setOnEditorActionListener { _, aid, _ -> if (aid == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         keepDraft(box, "g:$id")
@@ -1155,7 +1156,7 @@ class MainActivity : Activity() {
         bar2.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         bar2.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box, g) } })
         bar2.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachGroupId = id; attachTo = null; attachMenu(v) } })
-        bar2.addView(sendOrMic(bar2, box, ::doSend) { a, th -> Messenger.core.group(id)?.let { Messenger.sendGroupFile(it, Voice.NAME, Voice.MIME, a, th) } })
+        bar2.addView(sendOrMic(bar2, box, ::doSend, { sil, at -> sendWith(sil, at) }) { a, th -> Messenger.core.group(id)?.let { Messenger.sendGroupFile(it, Voice.NAME, Voice.MIME, a, th) } })
         // read-only group: non-admins see a notice instead of the composer
         val canPost = g.canPost(Messenger.core.me?.user ?: "")
         replyTo = null; replyBar = makeReplyBar(); groupBox = box
@@ -1215,6 +1216,7 @@ class MainActivity : Activity() {
         if (m.mine) when (m.state) {
             Msg.SENT -> meta.addView(icon(R.drawable.ic_check, mc, 14, 1))
             Msg.SENDING -> meta.addView(tv("🕓", 11f, mc))
+            Msg.SCHEDULED -> meta.addView(tv("🕓 ${whenText(m.sendAt)}", 12f, mc))
             Msg.FAILED -> meta.addView(tv("  not sent · tap", 12f, red).apply { setOnClickListener { Messenger.io.execute { Messenger.core.deliverGroup(g, m) } } })
         }
         b.addView(meta, LinearLayout.LayoutParams(-1, -2))
@@ -1227,6 +1229,7 @@ class MainActivity : Activity() {
     private fun groupMessageMenu(g: Group, m: Msg) {
         val me = Messenger.core.me?.user
         val opts = mutableListOf<Pair<String, () -> Unit>>()
+        if (m.state == Msg.SCHEDULED) opts.add("Send now" to { Messenger.sendScheduled(m) })
         if (g.canPost(me ?: "")) opts.add("Reply" to { startReply(m, groupBox) })
         if (m.text.isNotEmpty()) opts.add((if (m.file != null) "Copy text" else "Copy") to {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
@@ -1237,7 +1240,7 @@ class MainActivity : Activity() {
             Messenger.run({ Messenger.core.pinGroupMessage(g, if (g.pinned == m.id) null else m) }) { e -> toast(errorText(e)) }
         })
         if (m.mine && m.text.isNotEmpty() && g.canPost(me ?: "")) opts.add("Edit" to { startEdit(m, groupBox) })
-        if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
+        if (m.mine && m.state != Msg.FAILED && m.state != Msg.SCHEDULED) opts.add("Delete for everyone" to {
             Messenger.io.execute { Messenger.core.deleteGroupMessage(g, m, forEveryone = true) }
         })
         opts.add("Delete for me" to { Messenger.core.deleteGroupMessage(g, m, forEveryone = false); fillGroup() })
@@ -1408,7 +1411,7 @@ class MainActivity : Activity() {
             setHorizontallyScrolling(false)
             maxLines = 5
         }
-        fun doSend() {
+        fun sendWith(silent: Boolean, at: Long) {
             val t = box.text.toString().trim()
             if (t.isEmpty()) return
             if (t.length > Core.MAX_TEXT) { toast("Too long (max ${Core.MAX_TEXT} characters)"); return }
@@ -1422,8 +1425,10 @@ class MainActivity : Activity() {
             box.requestFocus()                 // stay in the field so you can keep typing
             stick = true                       // your own message always brings you to the bottom
             val r = replyTo?.let { replyRef(it) }; cancelReply()
-            Messenger.send(c, t, r, links.ready(t))
+            Messenger.send(c, t, r, links.ready(t), silent, at)
+            if (at > 0) toast("Scheduled for ${whenText(at)}")
         }
+        fun doSend() = sendWith(false, 0)
         box.setText(Messenger.drafts["u:${c.user}"] ?: "")   // what you left unsent last time
         box.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         keepDraft(box, "u:${c.user}")
@@ -1436,7 +1441,7 @@ class MainActivity : Activity() {
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         input.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box, c) } })
         input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachTo = c.user; attachGroupId = null; attachMenu(v) } })
-        input.addView(sendOrMic(input, box, ::doSend) { a, th -> Messenger.sendFile(c, Voice.NAME, Voice.MIME, a, th) })
+        input.addView(sendOrMic(input, box, ::doSend, { sil, at -> sendWith(sil, at) }) { a, th -> Messenger.sendFile(c, Voice.NAME, Voice.MIME, a, th) })
         replyTo = null; replyBar = makeReplyBar(); chatBox = box
         val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(links.bar); addView(replyBar); addView(input) }
         composer = compose
@@ -1788,6 +1793,7 @@ class MainActivity : Activity() {
                 })
             }
             Msg.SENDING -> meta.addView(tv("🕓", 11f, metaColor))
+            Msg.SCHEDULED -> meta.addView(tv("🕓 ${whenText(m.sendAt)}", 12f, metaColor))
             Msg.FAILED -> meta.addView(tv("  not sent · tap to retry", 12f, red).apply { setOnClickListener { Messenger.retry(c, m) } })
         }
         b.addView(meta, LinearLayout.LayoutParams(-1, -2))
@@ -2011,6 +2017,31 @@ class MainActivity : Activity() {
         }
     }
 
+    /** "today at 14:30" / "tomorrow at 08:00" / "Oct 30 at 09:00". */
+    private fun whenText(at: Long): String {
+        val day = { t: Long -> Calendar.getInstance().apply { timeInMillis = t }.let { it.get(Calendar.YEAR) * 400 + it.get(Calendar.DAY_OF_YEAR) } }
+        val now = System.currentTimeMillis()
+        val clock = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(at))
+        return when (day(at)) {
+            day(now) -> "today at $clock"
+            day(now + 86_400_000) -> "tomorrow at $clock"
+            else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(at)) + " at $clock"
+        }
+    }
+
+    /** When to send a scheduled message: a few easy choices. */
+    private fun pickSendTime(done: (Long) -> Unit) {
+        val now = System.currentTimeMillis()
+        fun at(daysAhead: Int, hour: Int) = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, daysAhead); set(Calendar.HOUR_OF_DAY, hour); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val opts = mutableListOf("In 30 minutes" to now + 30 * 60_000L, "In 1 hour" to now + 3_600_000L, "In 3 hours" to now + 3 * 3_600_000L)
+        if (at(0, 21) > now + 30 * 60_000L) opts.add("Tonight at 21:00" to at(0, 21))
+        opts.add("Tomorrow at 08:00" to at(1, 8)); opts.add("Tomorrow at 18:00" to at(1, 18))
+        pickList("Schedule message", "It waits on this phone and goes out at that time (MSNGR needs to be running in the background).",
+            opts.map { it.first }.toTypedArray()) { i -> done(opts[i].second) }
+    }
+
     /** The link card under a message: site, title, a little description. Tap opens the link. */
     private fun linkCard(lp: org.json.JSONObject, ink: Int): View = LinearLayout(this).apply {
         val faded = (ink and 0x00FFFFFF) or (0xB0 shl 24)
@@ -2132,6 +2163,7 @@ class MainActivity : Activity() {
     private fun messageMenu(c: Contact, m: Msg) {
         val me = Messenger.core.me?.user
         val opts = mutableListOf<Pair<String, () -> Unit>>()
+        if (m.state == Msg.SCHEDULED) opts.add("Send now" to { Messenger.sendScheduled(m) })
         if (c.status != Contact.ASKING) opts.add("Reply" to { startReply(m, chatBox) })
         if (m.text.isNotEmpty()) opts.add((if (m.file != null) "Copy text" else "Copy") to {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
@@ -2142,7 +2174,7 @@ class MainActivity : Activity() {
             Messenger.run({ Messenger.core.pinMessage(c, if (c.pinned == m.id) null else m) })
         })
         if (m.mine && m.text.isNotEmpty() && c.canChat) opts.add("Edit" to { startEdit(m, chatBox) })
-        if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
+        if (m.mine && m.state != Msg.FAILED && m.state != Msg.SCHEDULED) opts.add("Delete for everyone" to {
             Messenger.run({ Messenger.core.deleteMessage(c, m, forEveryone = true) }, { fillChat() })
         })
         opts.add("Delete for me" to { Messenger.core.deleteMessage(c, m, forEveryone = false); fillChat() })
@@ -2860,7 +2892,7 @@ class MainActivity : Activity() {
      * The button at the end of the message box: send when there's text, otherwise a mic.
      * Hold the mic to record, let go to send, slide left to cancel, slide up to lock and talk hands-free (like Telegram).
      */
-    private fun sendOrMic(row: LinearLayout, box: EditText, send: () -> Unit, sendVoice: (ByteArray, ByteArray) -> Unit): View {
+    private fun sendOrMic(row: LinearLayout, box: EditText, send: () -> Unit, special: (Boolean, Long) -> Unit, sendVoice: (ByteArray, ByteArray) -> Unit): View {
         val btn = icon(R.drawable.ic_mic, white)
         fun showIcon() = btn.setImageResource(if (box.text.isNullOrBlank()) R.drawable.ic_mic else R.drawable.ic_send)
         showIcon()
@@ -2889,6 +2921,15 @@ class MainActivity : Activity() {
             addView(tv("⌃", 16f, dim).apply { gravity = Gravity.CENTER })
         }
         val lockPop = android.widget.PopupWindow(lockPill, dp(44), -2, false).apply { isClippingEnabled = false; isTouchable = false }
+        var held = false
+        val holdSend = Runnable {
+            held = true
+            btn.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            longPressMenu(null, null, listOf(
+                "Send without sound" to { special(true, 0) },
+                "Schedule message" to { pickSendTime { at -> special(false, at) } },
+            ))
+        }
         var startX = 0f
         var startY = 0f
         var active = false
@@ -2940,7 +2981,12 @@ class MainActivity : Activity() {
                 return@setOnTouchListener true
             }
             if (!box.text.isNullOrBlank()) {
-                if (e.action == MotionEvent.ACTION_UP) send()
+                // tap = send; hold = "Send without sound" / "Schedule message"
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { held = false; btn.postDelayed(holdSend, 450) }
+                    MotionEvent.ACTION_UP -> { btn.removeCallbacks(holdSend); if (!held) send() }
+                    MotionEvent.ACTION_CANCEL -> btn.removeCallbacks(holdSend)
+                }
                 return@setOnTouchListener true
             }
             when (e.actionMasked) {

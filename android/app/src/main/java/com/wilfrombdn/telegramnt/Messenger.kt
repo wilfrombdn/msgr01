@@ -462,9 +462,26 @@ object Messenger {
         }
     }
 
-    fun send(c: Contact, text: String, reply: JSONObject? = null, lp: JSONObject? = null) {
+    /** [at] > 0 schedules it instead (it waits on this phone until then). */
+    fun send(c: Contact, text: String, reply: JSONObject? = null, lp: JSONObject? = null, silent: Boolean = false, at: Long = 0) {
         val m = core.queue(c, text, reply, lp)
+        m.silent = silent
+        if (at > 0) { core.schedule(m, at); return }
         io.execute { core.deliver(c, m) }
+    }
+
+    fun sendGroup(g: Group, text: String, reply: JSONObject? = null, lp: JSONObject? = null, silent: Boolean = false, at: Long = 0) {
+        val m = core.queueGroup(g, text, reply, lp = lp)
+        m.silent = silent
+        if (at > 0) { core.schedule(m, at); return }
+        io.execute { core.deliverGroup(g, m) }
+    }
+
+    /** Sends scheduled messages that are due (or [only] that one, right now). */
+    fun sendScheduled(only: Msg? = null) {
+        for ((owner, m) in core.dueScheduled(only = only)) io.execute {
+            if (owner is Contact) core.deliver(owner, m) else if (owner is Group) core.deliverGroup(owner, m)
+        }
     }
 
     fun sendGroupFile(g: Group, name: String, mime: String, data: ByteArray, thumb: ByteArray?) {
@@ -531,6 +548,7 @@ object Messenger {
                     }
                     if (core.backupDirty) runCatching { core.uploadBackup() }
                     if (!connected && !findServer()) throw java.io.IOException("offline")
+                    sendScheduled()
                     core.poll(25)
                     core.purgeExpired()
                     sweepMedia()
