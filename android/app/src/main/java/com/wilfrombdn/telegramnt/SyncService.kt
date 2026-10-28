@@ -34,6 +34,10 @@ class SyncService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Messenger.startLoop()
+        // woken by a ping while "get messages when closed" is off: stay just long enough to pick up the mail / ring
+        if (intent?.getBooleanExtra(WAKE, false) == true && !Messenger.background) {
+            android.os.Handler(mainLooper).postDelayed({ if (!Messenger.visible && Messenger.core.call == null && !Messenger.background) stopSelf() }, 120_000)
+        }
         return START_STICKY
     }
 
@@ -45,6 +49,7 @@ class SyncService : Service() {
     }
 
     companion object {
+        const val WAKE = "wake"
         const val CH_CONN = "connection"
         const val CH_MSG = "messages"
 

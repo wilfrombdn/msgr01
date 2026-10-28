@@ -19,8 +19,8 @@ android {
         applicationId = "com.wilfrombdn.telegramnt"
         minSdk = 26
         targetSdk = 34
-        versionCode = 42
-        versionName = "5.4"
+        versionCode = 43
+        versionName = "5.5"
     }
     signingConfigs {
         create("release") {
@@ -76,6 +76,8 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("androidx.camera:camera-video:1.4.1")
     implementation("com.google.zxing:core:3.5.3") // QR codes: show yours, scan a friend's
+    implementation("com.google.firebase:firebase-messaging:24.1.0") // empty wake-up pings so calls ring a closed app
+    implementation("androidx.fragment:fragment:1.8.5") // Firebase pulls an old one in; the camera screens' permission prompts need >= 1.3
     implementation("org.signal:libsignal-android:0.105.0") // Signal's encryption (Double Ratchet, sender keys) // FileProvider, to open attachments in other apps
     // Embedded Tor: the app reaches the relay's .onion through Tor, so there's no middleman that sees IPs.
     implementation("io.matthewnelson.kmp-tor:runtime:2.6.0")

@@ -1106,6 +1106,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             .put("ts", System.currentTimeMillis()).put("n", netMode))
     }
 
+    /** The invite reached the server: the caller now sees "Ringing…" (like Telegram), until answered or timed out. */
+    fun offerDelivered(k: Call) { if (k.phase == Call.DIALING) { k.phase = Call.RINGING; onCall(k) } }
+
     fun answerCall() { val k = call ?: return; if (k.phase == Call.INCOMING) { k.phase = Call.CONNECTING; onCall(k) } }
 
     /** The audio connected (both phones are in the call room). */
@@ -1156,7 +1159,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 if (c.status != Contact.FRIENDS) return                        // only friends can call
                 val incoming = Call(id, c.user, false, key, room)
                 // picked up late (phone was offline): it's a missed call, don't ring now
-                if (System.currentTimeMillis() - o.optLong("ts", 0) > 60_000) { endCall(incoming, "missed"); return }
+                if (System.currentTimeMillis() - o.optLong("ts", 0) > RING_MS) { endCall(incoming, "missed"); return }
                 if (k != null && k.phase != Call.ENDED) {
                     // both called each other at once: the call from the alphabetically-first username wins
                     if (k.outgoing && k.user == c.user && k.phase <= Call.RINGING && m.user > c.user) {
@@ -1484,7 +1487,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         // The friend-request inbox is listed under my @username, so it's checked in its own request:
         // the server never sees it fetched together with my chat mailboxes.
         val got = fetchFrom(listOf(m.inboxToken), inboxAcks, if (byToken.isEmpty()) wait else 0) +
-            if (byToken.isEmpty()) emptyList() else fetchFrom(byToken.keys.toList(), acks, wait)
+            if (byToken.isEmpty()) emptyList() else fetchFrom(byToken.keys.toList(), acks, wait, withPush = true)
         for (inc in got) {
             if (me !== m) return
             try {
@@ -1510,9 +1513,17 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     private val inboxAcks = mutableSetOf<String>()
 
-    private fun fetchFrom(tokens: List<String>, ackSet: MutableSet<String>, wait: Int): List<Relay.Incoming> {
+    /** This phone's wake-up ping address ("" = pings off, null = not known yet). Registered for chat mailboxes only. */
+    @Volatile var pushToken: String? = null
+    private var pushSent = ""   // token + mailbox list last registered, so it's only sent when something changed
+    private var pushSentAt = 0L
+
+    private fun fetchFrom(tokens: List<String>, ackSet: MutableSet<String>, wait: Int, withPush: Boolean = false): List<Relay.Incoming> {
         val sent = synchronized(this) { ackSet.toList() }
-        val got = relay.fetch(tokens, sent, wait)
+        val key = "$pushToken|${tokens.hashCode()}"
+        val push = pushToken?.takeIf { withPush && (key != pushSent || System.currentTimeMillis() - pushSentAt > 6 * 3_600_000L) }
+        val got = relay.fetch(tokens, sent, wait, push)
+        if (push != null) { pushSent = key; pushSentAt = System.currentTimeMillis() }
         synchronized(this) { ackSet.removeAll(sent.toSet()) }
         return got
     }
@@ -1828,6 +1839,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         const val MAX_AVATAR = 8000 // bytes of JPEG; fits in one sealed message
         const val MAX_FILE = 25 * 1024 * 1024
         const val TYPING_MS = 6_000L
+        const val RING_MS = 75_000L         // a call rings this long (time for a sleeping phone to be woken and connect)
         const val ONLINE_MS = 5 * 60_000L   // "online" lasts this long unless refreshed (the app re-sends every 4 min)
         const val NET_TOR = "tor"
         const val NET_DIRECT = "direct"

@@ -22,6 +22,7 @@ Python 3.9+ standard library only. Run:  python3 relay.py --port 8080 --db teleg
 import argparse
 import concurrent.futures
 import urllib.parse
+import urllib.error
 import urllib.request
 import base64
 import hashlib
@@ -58,6 +59,9 @@ ROOM = re.compile(r"^[0-9a-f]{64}$")
 GIF_MAX = 8 * 1024 * 1024       # a single GIF we'll pass on
 GIPHY_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "giphy.key")
 NEW_BOXES_PER_MIN = 20          # new mailboxes per minute from one address
+PUSH_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fcm.json")   # Firebase service account (gitignored)
+PUSH_QUIET = 40                 # a mailbox checked this recently belongs to a connected phone: no ping needed
+PUSH_GAP = 4                    # at most one wake-up ping per phone this often
 SIGNUPS_PER_HOUR = 5            # new accounts per hour from one address
 MAX_CONNECTIONS = 2000
 MAX_FILE = 25 * 1024 * 1024     # biggest attachment (already encrypted by the phone)
@@ -140,6 +144,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS otpk(user TEXT, id INTEGER, pub BLOB, PRIMARY KEY(user, id));
             CREATE TABLE IF NOT EXISTS gmsgs(seq INTEGER PRIMARY KEY AUTOINCREMENT, addr TEXT, ts REAL, blob BLOB);
             CREATE INDEX IF NOT EXISTS gmsgs_addr ON gmsgs(addr, seq);
+            CREATE TABLE IF NOT EXISTS push(addr TEXT PRIMARY KEY, token TEXT);
         """)
         # per-file retention hint (group files ask for a shorter life than 1:1); added live, so migrate in place
         try:
@@ -155,6 +160,8 @@ class Store:
         self.bundle_limit = 30
         self.lock = threading.RLock()
         self.cond = threading.Condition(self.lock)
+        self.checked = {}        # mailbox -> when a phone last checked it (memory only, never saved)
+        self.pusher = None       # set in main() when fcm.json exists
 
     def q(self, sql, *args):
         with self.lock:
@@ -185,7 +192,24 @@ class Store:
                 return "mailbox full"
             self.db.execute("INSERT INTO msgs VALUES(?,?,?,?)", (secrets.token_hex(16), address, hour(), blob))
             self.cond.notify_all()
+            # the phone isn't connected: wake it with an empty ping (no content, nothing about the sender)
+            if self.pusher and time.time() - self.checked.get(address, 0) > PUSH_QUIET:
+                row = self.db.execute("SELECT token FROM push WHERE addr=?", (address,)).fetchone()
+                if row:
+                    self.pusher.wake(row[0])
             return None
+
+    def set_push(self, addresses, token):
+        """Which phone to wake for these chat mailboxes ("" = stop waking it)."""
+        with self.lock:
+            if token:
+                self.db.executemany("INSERT OR REPLACE INTO push VALUES(?,?)", [(a, token) for a in addresses])
+            else:
+                self.db.executemany("DELETE FROM push WHERE addr=?", [(a,) for a in addresses])
+
+    def forget_push_token(self, token):
+        with self.lock:
+            self.db.execute("DELETE FROM push WHERE token=?", (token,))
 
     def take(self, addresses, acks, wait, who, new_boxes):
         deadline = time.time() + wait
@@ -199,6 +223,9 @@ class Store:
                                 % (",".join("?" * len(acks)), marks), list(acks) + addresses)
             index = {a: i for i, a in enumerate(addresses)}
             while True:
+                now = time.time()
+                for a in addresses:
+                    self.checked[a] = now   # this phone is connected right now
                 rows = self.db.execute("SELECT id, addr, blob FROM msgs WHERE addr IN (%s) ORDER BY rowid LIMIT 200"
                                        % marks, addresses).fetchall()
                 left = deadline - time.time()
@@ -235,6 +262,8 @@ class Store:
             self.db.execute("DELETE FROM boxes WHERE seen < ? AND addr NOT IN (SELECT inbox FROM accounts)",
                             (now - BOX_TTL,))
             self.db.execute("DELETE FROM msgs WHERE addr NOT IN (SELECT addr FROM boxes)")
+            self.db.execute("DELETE FROM push WHERE addr NOT IN (SELECT addr FROM boxes)")
+            self.checked = {a: t for a, t in self.checked.items() if now - t < 3600}
             # each file lives for its own hint (group files ask for less), capped at MSG_TTL
             old = [r[0] for r in self.db.execute("SELECT id FROM files WHERE ? - ts > COALESCE(ttl, ?)", (now, MSG_TTL))]
         for fid in old:
@@ -377,6 +406,9 @@ class Handler(BaseHTTPRequestHandler):
                 or not all(isinstance(a, str) and len(a) == 32 for a in acks)):
             return self.reply(400, {"error": "bad request"})
         addresses = [hashlib.sha256(bytes.fromhex(t)).hexdigest() for t in tokens]
+        push = req.get("push")
+        if isinstance(push, str) and len(push) <= 400 and re.match(r"^[A-Za-z0-9_:\-]*$", push):
+            self.server.store.set_push(addresses, push)
         msgs = self.server.store.take(addresses, acks, wait, who, self.server.new_boxes)
         if isinstance(msgs, str):
             return self.reply(429 if msgs == "slow down" else 507, {"error": msgs})
@@ -834,6 +866,80 @@ class Server(ThreadingHTTPServer):
         pass  # no tracebacks with client addresses in them
 
 
+class Pusher:
+    """Sends empty wake-up pings through Google's push service (Firebase Cloud Messaging), so a phone
+    whose app is closed wakes up, connects (through Tor as usual) and picks up its mail. The ping
+    carries nothing: no sender, no chat, no text. Needs fcm.json (a Firebase service account key)."""
+
+    def __init__(self, key_file):
+        with open(key_file) as f:
+            k = json.load(f)
+        self.project = k["project_id"]
+        self.email = k["client_email"]
+        self.key_pem = k["private_key"].encode()
+        self.token = None
+        self.token_until = 0
+        self.last = {}
+        self.queue = []
+        self.cv = threading.Condition()
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def wake(self, device):
+        with self.cv:
+            if time.time() - self.last.get(device, 0) < PUSH_GAP or device in self.queue:
+                return
+            self.last[device] = time.time()
+            self.queue.append(device)
+            self.cv.notify()
+
+    def access_token(self):
+        if self.token and time.time() < self.token_until:
+            return self.token
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        def b64u(b):
+            return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+        now = int(time.time())
+        head = b64u(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
+        claims = b64u(json.dumps({"iss": self.email, "scope": "https://www.googleapis.com/auth/firebase.messaging",
+                                  "aud": "https://oauth2.googleapis.com/token", "iat": now, "exp": now + 3600}).encode())
+        key = serialization.load_pem_private_key(self.key_pem, password=None)
+        sig = key.sign((head + "." + claims).encode(), padding.PKCS1v15(), hashes.SHA256())
+        body = urllib.parse.urlencode({"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                                       "assertion": head + "." + claims + "." + b64u(sig)}).encode()
+        with urllib.request.urlopen(urllib.request.Request("https://oauth2.googleapis.com/token", body), timeout=20) as r:
+            got = json.loads(r.read())
+        self.token = got["access_token"]
+        self.token_until = time.time() + int(got.get("expires_in", 3600)) - 300
+        return self.token
+
+    def send(self, device):
+        msg = {"message": {"token": device, "data": {"w": "1"},
+                           "android": {"priority": "HIGH", "ttl": "60s", "collapse_key": "wake"}}}
+        req = urllib.request.Request("https://fcm.googleapis.com/v1/projects/%s/messages:send" % self.project,
+                                     json.dumps(msg).encode(), {"Content-Type": "application/json",
+                                                                "Authorization": "Bearer " + self.access_token()})
+        try:
+            urllib.request.urlopen(req, timeout=20).read()
+            return True
+        except urllib.error.HTTPError as e:
+            return e.code not in (400, 404)   # the phone uninstalled / token gone: stop pinging it
+
+    def run(self):
+        while True:
+            with self.cv:
+                while not self.queue:
+                    self.cv.wait()
+                device = self.queue.pop(0)
+            try:
+                if not self.send(device) and self.on_gone:
+                    self.on_gone(device)
+            except Exception:
+                pass   # Google unreachable: the phone still gets its mail next time it connects
+
+    on_gone = None
+
+
 def main():
     p = argparse.ArgumentParser(description="Telegramn't server (keeps no logs)")
     p.add_argument("--host", default="0.0.0.0")
@@ -855,6 +961,13 @@ def main():
             store.sweep()
 
     threading.Thread(target=sweeper, daemon=True).start()
+    if os.path.exists(PUSH_KEY_FILE):
+        try:
+            store.pusher = Pusher(PUSH_KEY_FILE)
+            store.pusher.on_gone = store.forget_push_token
+            print("Wake-up pings on (Firebase project %s)" % store.pusher.project, flush=True)
+        except Exception as e:
+            print("Wake-up pings off: %s" % e, flush=True)
     srv = Server((a.host, a.port), store, a.behind_proxy)
     srv.signups_per_hour = a.signups_per_hour
     if a.test_limits:

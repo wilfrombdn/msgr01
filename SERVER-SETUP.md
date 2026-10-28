@@ -10,6 +10,10 @@ The server is one file, `server/relay.py`, and only needs Python (no installs).
 
 **What it never keeps:** message text, logs, internet addresses, or who talks to whom.
 
+**Wake-up pings** (`server/fcm.json`, gitignored): when a phone has mail waiting but hasn't checked in for
+40 seconds, the server sends an empty ping through Google's push service (Firebase project `msngr-push-d69a71`,
+owner's Google account) so the closed app wakes and connects. The ping has no content. The key can only send pings.
+
 ---
 
 ## Now: on the laptop (temporary)
@@ -59,7 +63,8 @@ a few minutes down, nothing else changes.
 1. Install `python3`, `tor` and `cloudflared` on the server, and set up a firewall
    (only SSH open; Tor and Cloudflare connect outward, so no web ports are needed).
 2. Stop the laptop server: `systemctl --user stop telegramnt`, so nothing changes mid-copy.
-3. Copy over: `server/relay.py`, `server/telegramnt.db`, `server/files/`, `server/giphy.key`,
+3. Copy over: `server/relay.py`, `server/telegramnt.db`, `server/files/`, `server/giphy.key`, `server/fcm.json`
+   (the wake-up ping key; the server needs `python3-cryptography` for it),
    and the onion key folder `~/.telegramnt-onion/hs/` (it must keep `chmod 700`).
 4. Run it as a system service (relay + Tor onion service with the same key, + Cloudflare tunnel for Direct).
    For Direct, the server needs to publish its tunnel address to `server.json`: give it a GitHub

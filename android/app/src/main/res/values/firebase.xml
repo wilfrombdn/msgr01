@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Firebase settings for wake-up pings (normally generated from google-services.json; written by hand so no
+     Google build plugin is needed). These identify the app to Google's push service; they are not secrets. -->
+<resources>
+    <string name="google_app_id" translatable="false">1:834495943970:android:b96564b72ecc14802b417b</string>
+    <string name="gcm_defaultSenderId" translatable="false">834495943970</string>
+    <string name="google_api_key" translatable="false">AIzaSyAUtegeYK0p2B5E1TaiQaB6OKaf0s5sDV4</string>
+    <string name="project_id" translatable="false">msngr-push-d69a71</string>
+</resources>

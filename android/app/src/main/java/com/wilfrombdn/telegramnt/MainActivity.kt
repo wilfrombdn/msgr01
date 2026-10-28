@@ -3865,6 +3865,8 @@ class MainActivity : Activity() {
         col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged(); showSettings() })
         // Calls when closed: each missing phone setting, tap to fix
         col.addView(tv("Calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+        col.addView(settingSwitch("Wake-up pings", Messenger.pushOn) { on -> Messenger.pushOn = on; Messenger.settingsChanged(); PushService.register(this) })
+        col.addView(settingNote("Lets calls and messages wake MSNGR when it's closed, like Telegram, through Google's push service. The ping is empty: Google never sees who it's from or what it says."))
         val fixes = ringFixes()
         if (fixes.isEmpty()) col.addView(tv("✓ Calls will ring this phone even when MSNGR is closed", 15f, green).apply { setPadding(dp(20), dp(6), dp(20), dp(6)) })
         else {

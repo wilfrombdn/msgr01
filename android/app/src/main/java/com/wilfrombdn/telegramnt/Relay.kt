@@ -62,8 +62,10 @@ class Relay(server: String, private val socks: () -> Int? = { null }) {
     }
 
     /** Returns waiting messages for these mailboxes; also creates them on the server. */
-    fun fetch(tokens: List<String>, acks: Collection<String>, waitSec: Int): List<Incoming> {
+    /** [push]: this phone's wake-up ping address to register for these mailboxes ("" = stop), or null to leave as is. */
+    fun fetch(tokens: List<String>, acks: Collection<String>, waitSec: Int, push: String? = null): List<Incoming> {
         val body = JSONObject().put("tokens", JSONArray(tokens)).put("ack", JSONArray(acks)).put("wait", waitSec)
+        push?.let { body.put("push", it) }
         val arr = post("/fetch", body, waitSec + 20, track = waitSec > 0).optJSONArray("msgs") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { i ->
             val m = arr.getJSONObject(i)

@@ -58,6 +58,11 @@
         <service android:name=".CallService" android:exported="false"
             android:foregroundServiceType="microphone" />
         <receiver android:name=".ReplyReceiver" android:exported="false" />
+        <service android:name=".PushService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <receiver android:name=".UpdateReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
