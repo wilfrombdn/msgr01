@@ -101,6 +101,7 @@ class MainActivity : Activity() {
         Messenger.init(this)
         SyncService.channels(this)
         File(cacheDir, "open").deleteRecursively() // unlocked copies of opened attachments
+        Voice.cleanup(this)                          // a recording cut off when the app was closed
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
@@ -148,6 +149,7 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        Voice.cancel()
         saveSpot()
         if (Messenger.signedIn) Messenger.io.execute { Messenger.save() }
         Messenger.visible = false
@@ -824,6 +826,7 @@ class MainActivity : Activity() {
         private const val OPEN_RECOVERY = 11
         private const val SAVE_IMAGE = 13
         private const val MIC_FOR_CALL = 14
+        private const val MIC_FOR_VOICE = 15
 
         /** Fixed reactions, then the most-used emoji not already in the bar, padded with [filler]. */
         fun quickReactions(use: Map<String, Int>, fixed: List<String>, filler: List<String>): List<String> {
@@ -1053,7 +1056,7 @@ class MainActivity : Activity() {
         bar2.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         bar2.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box, g) } })
         bar2.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachGroupId = id; attachTo = null; attachMenu(v) } })
-        bar2.addView(icon(R.drawable.ic_send, white) { doSend() })
+        bar2.addView(sendOrMic(bar2, box, ::doSend) { a, th -> Messenger.core.group(id)?.let { Messenger.sendGroupFile(it, Voice.NAME, Voice.MIME, a, th) } })
         // read-only group: non-admins see a notice instead of the composer
         val canPost = g.canPost(Messenger.core.me?.user ?: "")
         replyTo = null; replyBar = makeReplyBar(); groupBox = box
@@ -1307,7 +1310,7 @@ class MainActivity : Activity() {
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         input.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box, c) } })
         input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachTo = c.user; attachGroupId = null; attachMenu(v) } })
-        input.addView(icon(R.drawable.ic_send, white) { doSend() })
+        input.addView(sendOrMic(input, box, ::doSend) { a, th -> Messenger.sendFile(c, Voice.NAME, Voice.MIME, a, th) })
         replyTo = null; replyBar = makeReplyBar(); chatBox = box
         val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(replyBar); addView(input) }
         composer = compose
@@ -1550,6 +1553,11 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == MIC_FOR_VOICE) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toast("Hold the mic to record, let go to send")
+            else toast("MSNGR needs the microphone for voice messages")
+            return
+        }
         if (requestCode != MIC_FOR_CALL) return
         val c = callAfterMic; callAfterMic = null
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) c?.let { callFriend(it) }
@@ -2034,6 +2042,7 @@ class MainActivity : Activity() {
     private fun preview(m: Msg): String {
         m.call?.let { return callTitle(it) + if (it.optString("s") == "ok") " (${callDuration(it.optInt("dur"))})" else "" }
         val f = m.file ?: return m.text
+        if (Voice.isVoice(f)) return "🎤 Voice message" + (Voice.unpack(f.optString("th"))?.let { " (${Voice.clock(it.first)})" } ?: "")
         return if (f.optString("m") == "image/gif") "GIF" else if (f.optString("m") == "image/webp") "Sticker" else if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
     }
 
@@ -2401,9 +2410,155 @@ class MainActivity : Activity() {
         else -> "$n B"
     }
 
+    // ---------- voice messages ----------
+
+    /**
+     * The button at the end of the message box: send when there's text, otherwise a mic.
+     * Hold the mic to record, let go to send, slide left to cancel (like Telegram).
+     */
+    private fun sendOrMic(row: LinearLayout, box: EditText, send: () -> Unit, sendVoice: (ByteArray, ByteArray) -> Unit): View {
+        val btn = icon(R.drawable.ic_mic, white)
+        fun showIcon() = btn.setImageResource(if (box.text.isNullOrBlank()) R.drawable.ic_mic else R.drawable.ic_send)
+        showIcon()
+        box.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: android.text.Editable?) { showIcon() }
+        })
+        // while recording, the rest of the row is swapped for: red dot, timer, "slide to cancel"
+        val timer = tv("0:00", 16f, white)
+        val slide = tv("‹  Slide to cancel", 15f, dim)
+        val dot = View(this).apply { background = circle(red) }
+        val strip = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(12), 0, dp(12))
+            addView(dot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { rightMargin = dp(10) })
+            addView(timer)
+            addView(slide, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(16) })
+            slide.gravity = Gravity.CENTER
+        }
+        val tick = object : Runnable {
+            override fun run() {
+                if (!Voice.recording) return
+                val ms = Voice.elapsed()
+                timer.text = Voice.clock((ms / 1000).toInt())
+                dot.alpha = if ((ms / 500) % 2 == 0L) 1f else 0.25f
+                strip.postDelayed(this, 100)
+            }
+        }
+        var startX = 0f
+        var active = false
+        fun end(sendIt: Boolean) {
+            if (!active) return
+            active = false
+            strip.removeCallbacks(tick)
+            row.removeView(strip)
+            for (i in 0 until row.childCount) row.getChildAt(i).visibility = View.VISIBLE
+            btn.scaleX = 1f; btn.scaleY = 1f; btn.background = null; btn.setColorFilter(white)
+            Voice.onLimit = null
+            if (!sendIt) { Voice.cancel(); return }
+            val got = Voice.finish()
+            if (got == null) { toast("Hold the mic to record, let go to send"); return }
+            stick = true
+            val (audio, th) = got
+            Messenger.io.execute { runCatching { sendVoice(audio, th) } }
+        }
+        btn.setOnTouchListener { _, e ->
+            if (!box.text.isNullOrBlank()) {
+                if (e.action == MotionEvent.ACTION_UP) send()
+                return@setOnTouchListener true
+            }
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC_FOR_VOICE)
+                        return@setOnTouchListener true
+                    }
+                    if (!Voice.start(this)) { toast("Couldn't use the microphone"); return@setOnTouchListener true }
+                    active = true; startX = e.rawX
+                    btn.parent?.requestDisallowInterceptTouchEvent(true)
+                    runCatching { getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createOneShot(25, 120)) }
+                    for (i in 0 until row.childCount) row.getChildAt(i).let { if (it !== btn) it.visibility = View.GONE }
+                    row.addView(strip, 0, LinearLayout.LayoutParams(0, -2, 1f))
+                    slide.translationX = 0f; timer.text = "0:00"
+                    btn.background = circle(white); btn.setColorFilter(listBg); btn.scaleX = 1.25f; btn.scaleY = 1.25f
+                    Voice.onLimit = { end(true) }
+                    strip.post(tick)
+                }
+                MotionEvent.ACTION_MOVE -> if (active) {
+                    val dx = (startX - e.rawX).coerceAtLeast(0f)
+                    slide.translationX = -dx / 2
+                    slide.alpha = (1f - dx / dp(130)).coerceIn(0.2f, 1f)
+                    if (dx > dp(130)) end(false)
+                }
+                MotionEvent.ACTION_UP -> end(true)
+                MotionEvent.ACTION_CANCEL -> end(false)
+            }
+            true
+        }
+        return btn
+    }
+
+    /** A voice message: play/pause, waveform (tap to jump), and the length or how far in you are. */
+    private fun voiceView(m: Msg, ink: Int, onLong: () -> Unit): View {
+        val f = m.file!!
+        val here = f.has("local")
+        val (secs, bars) = Voice.unpack(f.optString("th")) ?: (0 to FloatArray(Voice.BARS) { 0.15f })
+        val faded = (ink and 0x00FFFFFF) or (0x55 shl 24)
+        val play = ImageView(this).apply {
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = circle(ink)
+            setColorFilter((ink.inv() and 0x00FFFFFF) or (0xFF shl 24))   // icon in the bubble's own colour
+        }
+        val wave = WaveView(this, bars, ink, faded)
+        val label = tv(Voice.clock(secs), 12.5f, (ink and 0x00FFFFFF) or (0x99 shl 24))
+        val cleared = f.optBoolean("cleared")
+        fun load(): ByteArray? = Messenger.core.openFile(m)
+        fun refresh() {
+            val on = Voice.isPlaying(m.id)
+            play.setImageResource(if (on) R.drawable.ic_pause else R.drawable.ic_play)
+            wave.progress = Voice.progress(m.id)
+            label.text = when {
+                !here -> if (cleared) "Removed to save space" else if (m.mine) Voice.clock(secs) else "Downloading…"
+                Voice.playingId == m.id -> Voice.clock(Voice.position(m.id))
+                else -> Voice.clock(secs)
+            }
+        }
+        fun tap(at: Float?) {
+            when {
+                here -> Voice.toggle(m.id, ::load, at)
+                cleared -> toast("This was removed from your phone to save space")
+                else -> retryFetch(m)
+            }
+            refresh()
+        }
+        play.setOnClickListener { tap(null) }
+        wave.onSeek = { tap(it) }
+        val tick = object : Runnable {
+            override fun run() { refresh(); if (play.isAttachedToWindow) play.postDelayed(this, if (Voice.playingId == m.id) 50 else 500) }
+        }
+        refresh()
+        return LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2), dp(4), dp(2))
+            addView(play, LinearLayout.LayoutParams(dp(44), dp(44)))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), 0, 0, 0)
+                addView(wave, LinearLayout.LayoutParams(dp(170), dp(26)))
+                addView(label.apply { setPadding(0, dp(3), 0, 0) })
+            })
+            setOnLongClickListener { onLong(); true }
+            addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) { play.post(tick) }
+                override fun onViewDetachedFromWindow(v: View) { play.removeCallbacks(tick) }
+            })
+        }
+    }
+
     private fun attachmentView(m: Msg, ink: Int, onLong: () -> Unit = {}): View {
         val f = m.file!!
         val here = f.has("local")
+        if (Voice.isVoice(f)) return voiceView(m, ink, onLong)
         if (f.optString("m").startsWith("image/")) {
             val bmp = pictures[m.id] ?: run {
                 val full = if (here) Messenger.core.openFile(m)?.let { decodeSmall(it, 720) } else null

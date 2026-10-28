@@ -207,6 +207,29 @@ class ScreenshotTest {
         Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second
     }
 
+    /** Voice messages: waveform packs/unpacks, bubbles (mine + theirs), mic shows when the box is empty. */
+    @Test fun voice() {
+        val levels = List(83) { (Math.abs(Math.sin(it / 4.0)) * 9000 + (it * 37 % 11) * 300).toInt() }
+        val th = Voice.pack(14, levels)
+        val (secs, bars) = Voice.unpack(java.util.Base64.getEncoder().encodeToString(th))!!
+        assert(secs == 14 && bars.size == Voice.BARS && bars.max() == 1f) { "waveform round trip" }
+        assert(Voice.unpack(java.util.Base64.getEncoder().encodeToString(testJpeg(0, 0))) == null) { "a photo thumb is not a waveform" }
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val sam = Messenger.core.contact("sam_r")!!
+        val now = System.currentTimeMillis()
+        fun voice(id: String, mine: Boolean, secs: Int, local: Boolean) = Msg(id, mine, "", now, if (mine) Msg.SENT else Msg.RECEIVED).also {
+            it.file = org.json.JSONObject().put("id", id.repeat(32).take(32)).put("k", "0".repeat(64)).put("n", Voice.NAME).put("m", Voice.MIME)
+                .put("s", 60_000).put("th", java.util.Base64.getEncoder().encodeToString(Voice.pack(secs, levels.shuffled(java.util.Random(secs.toLong())))))
+                .apply { if (local) put("local", "x") }
+        }
+        sam.msgs += voice("a", false, 14, true)
+        sam.msgs += voice("b", true, 72, true)
+        sam.msgs += voice("c", false, 5, false)
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChat", "sam_r"); shoot(a, "40-voice")
+        call(a, "showChats"); shoot(a, "41-voice-preview")
+    }
+
     /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */
     @Test fun composerWraps() {
         Messenger.initForPreview(fakeCore(signedIn = true))
