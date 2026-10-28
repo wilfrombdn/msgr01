@@ -1138,11 +1138,13 @@ class MainActivity : Activity() {
             box.setText(""); box.requestFocus(); stick = true
             val g2 = Messenger.core.group(id) ?: return
             val r = replyTo?.let { replyRef(it) }; cancelReply()
-            Messenger.io.execute { Messenger.core.sendGroup(g2, t, r) }
+            val lp = links.ready(t)
+            Messenger.io.execute { Messenger.core.sendGroup(g2, t, r, lp = lp) }
         }
         box.setText(Messenger.drafts["g:$id"] ?: "")
         box.setOnEditorActionListener { _, aid, _ -> if (aid == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         keepDraft(box, "g:$id")
+        links.watch(box)
         box.addTextChangedListener(object : TextWatcher {   // the group sees "you are typing…" (unless switched off)
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {
@@ -1158,7 +1160,7 @@ class MainActivity : Activity() {
         val canPost = g.canPost(Messenger.core.me?.user ?: "")
         replyTo = null; replyBar = makeReplyBar(); groupBox = box
         val picker = mentionPicker(box, g)
-        val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(picker); addView(replyBar); addView(bar2) }
+        val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(picker); addView(links.bar); addView(replyBar); addView(bar2) }
         composer = compose
         val bottom: View = if (canPost) compose else tv("🔒  Only admins can post in this group", 14f, dim).apply {
             gravity = Gravity.CENTER; setBackgroundColor(listBg); setPadding(dp(16), dp(16), dp(16), dp(16))
@@ -1206,6 +1208,7 @@ class MainActivity : Activity() {
         m.reply?.let { b.addView(quoteView(it, g.msgs, tcol, groupBubbles, groupScroller)) }
         m.file?.let { b.addView(attachmentView(m, tcol) { groupMessageMenu(g, m) }) }
         if (m.text.isNotEmpty()) b.addView(msgText(m, tcol, g.members) { groupMessageMenu(g, m) })
+        m.lp?.let { b.addView(linkCard(it, tcol)) }
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val mc = (tcol and 0x00FFFFFF) or (0x99 shl 24)
         meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
@@ -1419,11 +1422,12 @@ class MainActivity : Activity() {
             box.requestFocus()                 // stay in the field so you can keep typing
             stick = true                       // your own message always brings you to the bottom
             val r = replyTo?.let { replyRef(it) }; cancelReply()
-            Messenger.send(c, t, r)
+            Messenger.send(c, t, r, links.ready(t))
         }
         box.setText(Messenger.drafts["u:${c.user}"] ?: "")   // what you left unsent last time
         box.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
         keepDraft(box, "u:${c.user}")
+        links.watch(box)
         box.addTextChangedListener(object : TextWatcher {   // friends see "typing…" (unless switched off in Settings)
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) { if (!s.isNullOrBlank() && n > 0) Messenger.typing(c) }
@@ -1434,7 +1438,7 @@ class MainActivity : Activity() {
         input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachTo = c.user; attachGroupId = null; attachMenu(v) } })
         input.addView(sendOrMic(input, box, ::doSend) { a, th -> Messenger.sendFile(c, Voice.NAME, Voice.MIME, a, th) })
         replyTo = null; replyBar = makeReplyBar(); chatBox = box
-        val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(replyBar); addView(input) }
+        val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(links.bar); addView(replyBar); addView(input) }
         composer = compose
         // blocked: no message box, just a way back
         val bottom: View = if (c.user in Messenger.core.blocked && c.status != Contact.SAVED) tv("Unblock", 16f, blue, true).apply {
@@ -1770,6 +1774,7 @@ class MainActivity : Activity() {
         m.reply?.let { b.addView(quoteView(it, c.msgs, ink, bubbles, scroller)) }
         m.file?.let { b.addView(attachmentView(m, ink) { messageMenu(c, m) }) }
         if (m.text.isNotEmpty()) b.addView(msgText(m, ink, setOf(c.user)) { messageMenu(c, m) })
+        m.lp?.let { b.addView(linkCard(it, ink)) }
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val metaColor = (ink and 0x00FFFFFF) or (0x99 shl 24)
         meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, metaColor).apply { setPadding(0, 0, dp(6), 0) }) // gap before the tick
@@ -2005,6 +2010,80 @@ class MainActivity : Activity() {
             setOnLongClickListener { onLong(); true }   // tappable text would otherwise swallow the hold
         }
     }
+
+    /** The link card under a message: site, title, a little description. Tap opens the link. */
+    private fun linkCard(lp: org.json.JSONObject, ink: Int): View = LinearLayout(this).apply {
+        val faded = (ink and 0x00FFFFFF) or (0xB0 shl 24)
+        setPadding(0, dp(4), 0, dp(2))
+        addView(View(context).apply { setBackgroundColor(blue) }, LinearLayout.LayoutParams(dp(3), -1))
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(8), 0, 0, 0)
+            lp.optString("s").takeIf { it.isNotEmpty() }?.let { addView(tv(it, 13.5f, blue, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }) }
+            addView(tv(lp.optString("t"), 14.5f, ink, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
+            lp.optString("d").takeIf { it.isNotEmpty() }?.let { addView(tv(it, 13.5f, faded).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }) }
+        }, LinearLayout.LayoutParams(-2, -2))
+        layoutParams = LinearLayout.LayoutParams(dp(250), -2).apply { bottomMargin = dp(2) }
+        setOnClickListener { runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(lp.optString("u")))) } }
+    }
+
+    /**
+     * The link preview above the message box: when you type a link, the page's title is fetched through
+     * Tor and shown here; it goes with the message if it's ready when you send. ✕ drops it.
+     */
+    private inner class LinkWatch {
+        val bar = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(listBg); setPadding(dp(14), dp(6), dp(4), 0); visibility = View.GONE }
+        private var url: String? = null
+        private var card: org.json.JSONObject? = null
+        private var dropped: String? = null
+        private val h = android.os.Handler(android.os.Looper.getMainLooper())
+
+        fun watch(box: EditText) {
+            url = null; card = null; dropped = null; bar.visibility = View.GONE
+            (bar.parent as? ViewGroup)?.removeView(bar)   // one bar, moved to whichever chat is open
+            box.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
+                override fun afterTextChanged(e: android.text.Editable?) {
+                    val u = LinkPreview.firstUrl(e?.toString().orEmpty())
+                    if (u == url) return
+                    url = u; card = null; h.removeCallbacksAndMessages(null)
+                    if (u == null || u == dropped) { bar.visibility = View.GONE; return }
+                    show("Getting link preview…", null)
+                    h.postDelayed({
+                        Messenger.io.execute {
+                            val got = runCatching { LinkPreview.fetch(u) }.getOrNull()
+                            runOnUiThread {
+                                if (url != u) return@runOnUiThread
+                                card = got
+                                if (got == null) bar.visibility = View.GONE else show(got.optString("t"), got.optString("s"))
+                            }
+                        }
+                    }, 700)
+                }
+            })
+        }
+
+        private fun show(title: String, site: String?) {
+            bar.removeAllViews()
+            bar.addView(View(this@MainActivity).apply { setBackgroundColor(blue) }, LinearLayout.LayoutParams(dp(3), dp(34)))
+            bar.addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
+                addView(tv(site ?: "Link", 13.5f, blue, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                addView(tv(title, 14f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            bar.addView(tv("✕", 17f, dim).apply { setPadding(dp(14), dp(6), dp(14), dp(6)); setOnClickListener { dropped = url; card = null; bar.visibility = View.GONE } })
+            bar.visibility = View.VISIBLE
+        }
+
+        /** The card for [text] if it's been fetched (and not dropped); clears the bar. */
+        fun ready(text: String): org.json.JSONObject? {
+            val c = card?.takeIf { url != null && LinkPreview.firstUrl(text) == url && url != dropped }
+            url = null; card = null; bar.visibility = View.GONE; h.removeCallbacksAndMessages(null)
+            return c
+        }
+    }
+
+    private val links by lazy { LinkWatch() }
 
     private fun fwdLabel(user: String, ink: Int) = tv("Forwarded from ${displayName(user)}", 13.5f, (ink and 0x00FFFFFF) or (0xCC shl 24)).apply {
         setTypeface(typeface, android.graphics.Typeface.ITALIC); setPadding(0, 0, 0, dp(3))

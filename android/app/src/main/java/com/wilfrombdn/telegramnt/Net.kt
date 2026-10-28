@@ -131,6 +131,38 @@ object Net {
         }
     }
 
+    class Peek(val code: Int, val location: String?, val body: ByteArray)
+
+    /**
+     * GETs a web page, keeping at most [max] bytes of it (enough to find its title). Used for link
+     * previews, always through Tor. Chunk markers may be left in the body; that's fine for reading tags.
+     */
+    fun peek(route: Route, path: String, max: Int): Peek {
+        val s = connect(route.host, route.port, route.tls, route.socksPort, 15_000)
+        try {
+            s.soTimeout = 30_000
+            s.getOutputStream().apply {
+                write(("GET $path HTTP/1.1\r\nHost: ${route.host}\r\nUser-Agent: Mozilla/5.0 (compatible; link preview)\r\n" +
+                    "Accept: text/html\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n").toByteArray(Charsets.ISO_8859_1))
+                flush()
+            }
+            val inp = java.io.BufferedInputStream(s.getInputStream(), 64 * 1024)
+            val code = readLine(inp)?.split(" ")?.getOrNull(1)?.toIntOrNull() ?: throw IOException("bad status")
+            var location: String? = null
+            while (true) {
+                val line = readLine(inp) ?: break
+                if (line.isEmpty()) break
+                if (line.startsWith("Location:", true)) location = line.substringAfter(':').trim()
+            }
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(16 * 1024)
+            while (out.size() < max) { val r = inp.read(buf); if (r == -1) break; out.write(buf, 0, r) }
+            return Peek(code, location, out.toByteArray())
+        } finally {
+            runCatching { s.close() }
+        }
+    }
+
     /**
      * Opens a long-lived two-way stream (the voice-call room): sends a POST with [headers], checks for
      * 200, and hands back the socket positioned right after the response headers.

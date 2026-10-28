@@ -462,8 +462,8 @@ object Messenger {
         }
     }
 
-    fun send(c: Contact, text: String, reply: JSONObject? = null) {
-        val m = core.queue(c, text, reply)
+    fun send(c: Contact, text: String, reply: JSONObject? = null, lp: JSONObject? = null) {
+        val m = core.queue(c, text, reply, lp)
         io.execute { core.deliver(c, m) }
     }
 

@@ -40,11 +40,13 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
     var edited = false
     /** Forwarded: the @username of whoever first wrote it. */
     var fwd: String? = null
+    /** Link preview card made by the sender: u, s (site), t (title), d (description). */
+    var lp: JSONObject? = null
 
     fun json(): JSONObject = JSONObject().put("id", id).put("mine", mine).put("text", text).put("ts", ts).put("state", state)
         .put("file", file).put("expires", expires).put("sender", sender)
         .put("reactions", JSONObject(reactions as Map<*, *>)).put("reply", reply).put("call", call)
-        .put("edited", edited).put("fwd", fwd)
+        .put("edited", edited).put("fwd", fwd).put("lp", lp)
 
     companion object {
         const val SENDING = 0
@@ -66,6 +68,7 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
                 it.reply = o.optJSONObject("reply")
                 it.call = o.optJSONObject("call")
                 it.edited = o.optBoolean("edited"); it.fwd = o.optString("fwd").ifEmpty { null }
+                it.lp = o.optJSONObject("lp")
             }
         /** A forwarded-from name off the wire: only a well-formed @username is kept. */
         fun fwdOf(o: JSONObject?) = o?.optString("fw")?.takeIf { Core.USERNAME.matches(it) }
@@ -603,10 +606,11 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         changed()
     }
 
-    fun sendGroup(g: Group, text: String, reply: JSONObject? = null, fwd: String? = null): Msg {
+    fun sendGroup(g: Group, text: String, reply: JSONObject? = null, fwd: String? = null, lp: JSONObject? = null): Msg {
         val msg = Msg(Crypto.randomHex(16), true, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.SENDING)
         msg.reply = Msg.replyRef(reply)
         msg.fwd = fwd
+        msg.lp = lp
         synchronized(this) { g.msgs.add(msg) }
         onChange()
         deliverGroup(g, msg)
@@ -639,7 +643,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             val sentText = msg.text
             val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, sentText.toByteArray()) }
             relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gmsg").put("u", m.user).put("id", msg.id).put("c", b64(ct.serialize()))
-                .apply { msg.reply?.let { put("r", it) }; msg.fwd?.let { put("fw", it) } }))
+                .apply { msg.reply?.let { put("r", it) }; msg.fwd?.let { put("fw", it) }; msg.lp?.let { put("lp", it) } }))
             synchronized(this) { msg.state = Msg.SENT; editedMeanwhile = msg.text != sentText; if (editedMeanwhile) msg.edited = true }
             Msg.SENT
         } catch (e: Exception) {
@@ -767,7 +771,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 }
                 if (!g.canPost(u)) return   // read-only: ignore posts from non-leaders
                 g.typing.remove(u)
-                addGroupMsg(g, u, id, String(text), Msg.replyRef(inner.optJSONObject("r")), Msg.fwdOf(inner))
+                addGroupMsg(g, u, id, String(text), Msg.replyRef(inner.optJSONObject("r")), Msg.fwdOf(inner), LinkPreview.clean(inner.optJSONObject("lp")))
             }
             "gdel" -> {
                 val id = inner.optString("id")
@@ -885,13 +889,14 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         }
     }
 
-    private fun addGroupMsg(g: Group, u: String, id: String, text: String, reply: JSONObject? = null, fwd: String? = null) {
+    private fun addGroupMsg(g: Group, u: String, id: String, text: String, reply: JSONObject? = null, fwd: String? = null, lp: JSONObject? = null) {
         synchronized(this) {
             g.members.add(u)
             val msg = Msg(id, false, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.RECEIVED)
             msg.sender = u
             msg.reply = reply
             msg.fwd = fwd
+            msg.lp = lp
             g.msgs.add(msg)
             if (openChat != "g:${g.id}") g.unread++
         }
@@ -1127,9 +1132,10 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     // ---------- messages ----------
 
-    fun queue(c: Contact, text: String, reply: JSONObject? = null): Msg {
+    fun queue(c: Contact, text: String, reply: JSONObject? = null, lp: JSONObject? = null): Msg {
         val msg = Msg(Crypto.randomHex(16), true, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.SENDING)
         msg.reply = Msg.replyRef(reply)
+        msg.lp = lp
         if (c.ttl > 0) msg.expires = System.currentTimeMillis() + c.ttl * 1000L
         synchronized(this) { c.msgs.add(msg) }
         onChange()
@@ -1173,6 +1179,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             val body = JSONObject().put("id", msg.id).put("x", sentText)
             msg.reply?.let { body.put("r", it) }
             msg.fwd?.let { body.put("fw", it) }
+            msg.lp?.let { body.put("lp", it) }
             msg.file?.let { f ->
                 if (!f.has("id")) {
                     val blob = loadBlob(f.getString("local")) ?: throw IOException("attachment missing")
@@ -1574,6 +1581,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         msg.file = inner.optJSONObject("f")?.let { checkFile(it) }
         msg.reply = Msg.replyRef(inner.optJSONObject("r"))
         msg.fwd = Msg.fwdOf(inner)
+        msg.lp = LinkPreview.clean(inner.optJSONObject("lp"))
         if (ttl > 0) msg.expires = System.currentTimeMillis() + ttl * 1000L
         if (msg.file != null) toFetch.add(msg)
         return msg
