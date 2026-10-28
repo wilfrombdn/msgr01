@@ -11,3 +11,4 @@
 - The server runs on the owner's laptop (`systemctl --user restart telegramnt` after `relay.py` changes),
   reached only through its Tor .onion address. Never add a route that bypasses Tor or exposes users' IPs
   without asking the owner first.
+- **Next server step:** move it off the laptop to a Hetzner cloud server. The checklist is in `SERVER-SETUP.md` (section "NEXT STEP").
