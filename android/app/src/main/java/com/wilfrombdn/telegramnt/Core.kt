@@ -42,6 +42,9 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
     var fwd: String? = null
     /** Link preview card made by the sender: u, s (site), t (title), d (description). */
     var lp: JSONObject? = null
+    /** A group poll: q (question), o (options). Votes: @username -> option index. */
+    var poll: JSONObject? = null
+    val votes: MutableMap<String, Int> = mutableMapOf()
     /** A shared location: la, lo (degrees), acc (metres). */
     var loc: JSONObject? = null
     /** Sent without sound: the other phone doesn't notify. */
@@ -53,6 +56,7 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
         .put("file", file).put("expires", expires).put("sender", sender)
         .put("reactions", JSONObject(reactions as Map<*, *>)).put("reply", reply).put("call", call)
         .put("edited", edited).put("fwd", fwd).put("lp", lp).put("sil", silent).put("at", sendAt).put("loc", loc)
+        .put("poll", poll).put("votes", JSONObject(votes as Map<*, *>))
 
     companion object {
         const val SENDING = 0
@@ -78,7 +82,18 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
                 it.lp = o.optJSONObject("lp")
                 it.silent = o.optBoolean("sil"); it.sendAt = o.optLong("at")
                 it.loc = o.optJSONObject("loc")
+                it.poll = o.optJSONObject("poll")
+                o.optJSONObject("votes")?.let { v -> for (k in v.keys()) it.votes[k] = v.optInt(k) }
             }
+        /** A poll off the wire: a short question and 2-10 short options. */
+        fun pollOf(o: JSONObject?): JSONObject? {
+            o ?: return null
+            val q = o.optString("q").trim().take(300).ifEmpty { return null }
+            val arr = o.optJSONArray("o") ?: return null
+            val opts = (0 until minOf(arr.length(), 10)).map { arr.optString(it).trim().take(100) }.filter { it.isNotEmpty() }
+            if (opts.size < 2) return null
+            return JSONObject().put("q", q).put("o", JSONArray(opts))
+        }
         /** A location off the wire: only real coordinates are kept. */
         fun locOf(o: JSONObject?): JSONObject? {
             o ?: return null
@@ -635,6 +650,27 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         return msg
     }
 
+    // ---------- polls (groups) ----------
+
+    fun sendPoll(g: Group, question: String, options: List<String>): Msg {
+        val m = me ?: throw UserError("Not signed in")
+        val poll = Msg.pollOf(JSONObject().put("q", question).put("o", JSONArray(options))) ?: throw UserError("A poll needs a question and at least 2 options")
+        if (!g.canPost(m.user)) throw UserError("Only admins can post in this group")
+        val msg = Msg(Crypto.randomHex(16), true, "", System.currentTimeMillis(), Msg.SENDING).also { it.poll = poll; it.sender = m.user }
+        synchronized(this) { g.msgs.add(msg) }
+        onChange()
+        deliverGroup(g, msg)
+        return msg
+    }
+
+    /** Votes for option [i] (-1 takes the vote back). */
+    fun vote(g: Group, msg: Msg, i: Int) {
+        val m = me ?: return
+        synchronized(this) { if (i < 0) msg.votes.remove(m.user) else msg.votes[m.user] = i }
+        onChange()
+        runCatching { gctl(g, m, JSONObject().put("t", "vote").put("id", msg.id).put("i", i)) }
+    }
+
     // ---------- scheduled messages ----------
 
     /** Turns a queued message into a scheduled one (kept here until [at]). */
@@ -683,6 +719,10 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     fun deliverGroup(g: Group, msg: Msg) {
         val m = me ?: return
         if (!g.canPost(m.user)) { msg.state = Msg.FAILED; onChange(); return }   // read-only: only leaders post
+        msg.poll?.let { poll ->   // polls go on the authenticated control channel
+            msg.state = try { gctl(g, m, JSONObject().put("t", "poll").put("id", msg.id).put("poll", poll)); Msg.SENT } catch (e: Exception) { Msg.FAILED }
+            onChange(); return
+        }
         var editedMeanwhile = false
         msg.state = try {
             if (!g.distSent) postMyDist(m, g)
@@ -864,6 +904,24 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 if (g.owner.isNotEmpty() && !g.isLeader(u)) return
                 val id = p.optString("id")
                 synchronized(this) { g.pinned = if (id.isEmpty() || g.msgs.none { it.id == id }) null else id }
+                onChange()
+            }
+            "poll" -> {
+                if (!g.canPost(u)) return
+                val id = p.optString("id")
+                val poll = Msg.pollOf(p.optJSONObject("poll")) ?: return
+                if (id.isEmpty() || synchronized(this) { g.msgs.any { it.id == id } }) return
+                val msg = Msg(id, false, "", System.currentTimeMillis(), Msg.RECEIVED).also { it.sender = u; it.poll = poll }
+                synchronized(this) { g.msgs.add(msg); if (openChat != "g:${g.id}") g.unread++ }
+                onChange()
+            }
+            "vote" -> {   // the gctl proves who voted, so nobody can vote for someone else
+                val id = p.optString("id"); val i = p.optInt("i", -1)
+                synchronized(this) {
+                    val msg = g.msgs.firstOrNull { it.id == id && it.poll != null } ?: return
+                    val n = msg.poll!!.optJSONArray("o")?.length() ?: 0
+                    if (i in 0 until n) msg.votes[u] = i else if (i == -1) msg.votes.remove(u)
+                }
                 onChange()
             }
             "edit" -> {   // only the original sender (proven by the gctl decrypt) may change a message

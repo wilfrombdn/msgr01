@@ -1250,6 +1250,7 @@ class MainActivity : Activity() {
         if (m.text.isNotEmpty()) b.addView(msgText(m, tcol, g.members) { groupMessageMenu(g, m) })
         m.lp?.let { b.addView(linkCard(it, tcol)) }
         m.loc?.let { b.addView(locationCard(it, tcol)) }
+        if (m.poll != null) b.addView(pollView(g, m, tcol))
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val mc = (tcol and 0x00FFFFFF) or (0x99 shl 24)
         meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
@@ -2087,6 +2088,63 @@ class MainActivity : Activity() {
             opts.map { it.first }.toTypedArray()) { i -> done(opts[i].second) }
     }
 
+    // ---------- polls ----------
+
+    /** Attach > Poll (groups): a question and 2-10 options. */
+    private fun createPoll(g: Group) {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val q = field("Ask a question", "")
+        col.addView(q)
+        val opts = mutableListOf<EditText>()
+        val optCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun addOpt() { if (opts.size < 10) field("Option ${opts.size + 1}", "").also { opts.add(it); optCol.addView(it) } }
+        addOpt(); addOpt()
+        col.addView(optCol)
+        col.addView(tv("+ Add an option", 15f, blue, true).apply { setPadding(dp(4), dp(10), dp(4), dp(4)); setOnClickListener { addOpt() } })
+        popup("New poll", null, ScrollView(this).apply { addView(col) }, "Cancel" to dim, "Create" to white) { i ->
+            if (i != 1) return@popup
+            val options = opts.map { it.text.toString().trim() }.filter { it.isNotEmpty() }
+            stick = true
+            Messenger.run({ Messenger.core.sendPoll(g, q.text.toString(), options) }, {}) { e -> toast(errorText(e)) }
+        }
+    }
+
+    /** A poll in a group: tap an option to vote (tap your vote again to take it back); bars show results once you've voted. */
+    private fun pollView(g: Group, m: Msg, ink: Int): View {
+        val poll = m.poll!!
+        val me = Messenger.core.me?.user ?: ""
+        val options = poll.optJSONArray("o") ?: org.json.JSONArray()
+        val mine = m.votes[me]
+        val total = m.votes.size
+        val faded = (ink and 0x00FFFFFF) or (0x99 shl 24)
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(dp(250), -2)
+            addView(tv(poll.optString("q"), 16f, ink, true).apply { setPadding(0, dp(2), 0, dp(2)) })
+            addView(tv("Poll", 12.5f, faded).apply { setPadding(0, 0, 0, dp(6)) })
+            for (i in 0 until options.length()) {
+                val count = m.votes.values.count { it == i }
+                val pct = if (total > 0) count * 100 / total else 0
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL; setPadding(0, dp(5), 0, dp(5)); background = pressable()
+                    addView(LinearLayout(context).apply {
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(tv(if (mine == null) "○" else if (mine == i) "✓" else "", 15f, if (mine == i) blue else faded).apply { minWidth = dp(22) })
+                        addView(tv(options.optString(i), 15f, ink), LinearLayout.LayoutParams(0, -2, 1f))
+                        if (mine != null) addView(tv("$pct%", 13.5f, faded, true))
+                    })
+                    if (mine != null) addView(FrameLayout(context).apply {
+                        addView(View(context).apply { background = round((ink and 0x00FFFFFF) or (0x22 shl 24), 3) }, FrameLayout.LayoutParams(-1, dp(5)))
+                        addView(View(context).apply { background = round(blue, 3) }, FrameLayout.LayoutParams(maxOf(dp(5), dp(228) * pct / 100), dp(5)))
+                    }, LinearLayout.LayoutParams(-1, dp(5)).apply { topMargin = dp(4); leftMargin = dp(22) })
+                    setOnClickListener { Messenger.run({ Messenger.core.vote(g, m, if (mine == i) -1 else i) }) }
+                    setOnLongClickListener { groupMessageMenu(g, m); true }
+                })
+            }
+            addView(tv(if (total == 1) "1 vote" else "$total votes", 13f, faded).apply { setPadding(0, dp(6), 0, 0) })
+        }
+    }
+
     // ---------- location ----------
 
     /** Attach > Location: asks first, then finds where you are once and sends it. Nothing is tracked. */
@@ -2616,6 +2674,7 @@ class MainActivity : Activity() {
 
     private fun previewRaw(m: Msg): String {
         if (m.loc != null) return "📍 Location"
+        m.poll?.let { return "📊 " + it.optString("q") }
         m.call?.let { return callTitle(it) + if (it.optString("s") == "ok") " (${callDuration(it.optInt("dur"))})" else "" }
         val f = m.file ?: return m.text
         if (Voice.isVoice(f)) return "🎤 Voice message" + (Voice.unpack(f.optString("th"))?.let { " (${Voice.clock(it.first)})" } ?: "")
@@ -2652,6 +2711,7 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_FILE)
         }
         row(R.drawable.ic_location, "Location") { shareLocation() }
+        attachGroupId?.let { gid -> row(R.drawable.ic_poll, "Poll") { Messenger.core.group(gid)?.let { createPoll(it) } } }
         pw.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         pw.isOutsideTouchable = true
         // expand upward, just above the clip
