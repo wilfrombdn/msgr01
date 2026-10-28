@@ -908,6 +908,7 @@ class MainActivity : Activity() {
         private const val SAVE_IMAGE = 13
         private const val MIC_FOR_CALL = 14
         private const val MIC_FOR_VOICE = 15
+        private const val LOCATION_FOR_SHARE = 16
 
         /** Fixed reactions, then the most-used emoji not already in the bar, padded with [filler]. */
         fun quickReactions(use: Map<String, Int>, fixed: List<String>, filler: List<String>): List<String> {
@@ -1248,6 +1249,7 @@ class MainActivity : Activity() {
         m.file?.let { b.addView(attachmentView(m, tcol) { groupMessageMenu(g, m) }) }
         if (m.text.isNotEmpty()) b.addView(msgText(m, tcol, g.members) { groupMessageMenu(g, m) })
         m.lp?.let { b.addView(linkCard(it, tcol)) }
+        m.loc?.let { b.addView(locationCard(it, tcol)) }
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val mc = (tcol and 0x00FFFFFF) or (0x99 shl 24)
         meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
@@ -1738,6 +1740,10 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == LOCATION_FOR_SHARE) {
+            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) shareLocation() else toast("MSNGR needs location access to share where you are")
+            return
+        }
         if (requestCode == MIC_FOR_VOICE) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toast("Hold the mic to record, let go to send")
             else toast("MSNGR needs the microphone for voice messages")
@@ -1818,6 +1824,7 @@ class MainActivity : Activity() {
         m.file?.let { b.addView(attachmentView(m, ink) { messageMenu(c, m) }) }
         if (m.text.isNotEmpty()) b.addView(msgText(m, ink, setOf(c.user)) { messageMenu(c, m) })
         m.lp?.let { b.addView(linkCard(it, ink)) }
+        m.loc?.let { b.addView(locationCard(it, ink)) }
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val metaColor = (ink and 0x00FFFFFF) or (0x99 shl 24)
         meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, metaColor).apply { setPadding(0, 0, dp(6), 0) }) // gap before the tick
@@ -2078,6 +2085,60 @@ class MainActivity : Activity() {
         opts.add("Tomorrow at 08:00" to at(1, 8)); opts.add("Tomorrow at 18:00" to at(1, 18))
         pickList("Schedule message", "It waits on this phone and goes out at that time (MSNGR needs to be running in the background).",
             opts.map { it.first }.toTypedArray()) { i -> done(opts[i].second) }
+    }
+
+    // ---------- location ----------
+
+    /** Attach > Location: asks first, then finds where you are once and sends it. Nothing is tracked. */
+    private fun shareLocation() {
+        val c = attachTo?.let { Messenger.core.contact(it) }
+        val g = attachGroupId?.let { Messenger.core.group(it) }
+        if (c == null && g == null) return
+        val fine = Manifest.permission.ACCESS_FINE_LOCATION; val coarse = Manifest.permission.ACCESS_COARSE_LOCATION
+        if (checkSelfPermission(fine) != PackageManager.PERMISSION_GRANTED && checkSelfPermission(coarse) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(fine, coarse), LOCATION_FOR_SHARE); return
+        }
+        popup("Send your location?", "Sends where you are right now to ${c?.name ?: g!!.name}. Just this once: it isn't tracked or updated.",
+            null, "Cancel" to dim, "Send" to white) { i -> if (i == 1) locateAndSend(c, g) }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")   // checked in shareLocation
+    private fun locateAndSend(c: Contact?, g: Group?) {
+        val lm = getSystemService(android.location.LocationManager::class.java)
+        val provider = listOf(android.location.LocationManager.GPS_PROVIDER, android.location.LocationManager.NETWORK_PROVIDER)
+            .firstOrNull { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+            ?: return toast("Turn on Location in your phone's settings first")
+        toast("Finding your location…")
+        var done = false
+        fun send(l: android.location.Location?) {
+            if (done) return
+            done = true
+            val best = l ?: listOf(android.location.LocationManager.GPS_PROVIDER, android.location.LocationManager.NETWORK_PROVIDER)
+                .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+            if (best == null) { toast("Couldn't find your location. Try again outside or with Wi-Fi on."); return }
+            stick = true
+            Messenger.sendLocation(c, g, org.json.JSONObject().put("la", best.latitude).put("lo", best.longitude).put("acc", best.accuracy.toDouble()))
+        }
+        if (Build.VERSION.SDK_INT >= 30) lm.getCurrentLocation(provider, null, mainExecutor) { send(it) }
+        else @Suppress("DEPRECATION") lm.requestSingleUpdate(provider, { send(it) }, mainLooper)
+        window.decorView.postDelayed({ send(null) }, 25_000)   // GPS can take a while indoors: fall back to the last fix
+    }
+
+    /** A shared location: the place and how exact it is; tap opens it in a maps app. */
+    private fun locationCard(loc: org.json.JSONObject, ink: Int): View = LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), dp(6), dp(4))
+        val la = loc.optDouble("la"); val lo = loc.optDouble("lo")
+        addView(icon(R.drawable.ic_location, ink, 26, 8).apply { background = circle(Color.parseColor("#22FFFFFF")) })
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
+            addView(tv("Location", 15f, ink, true))
+            addView(tv("%.5f, %.5f".format(Locale.US, la, lo) + (loc.optDouble("acc", 0.0).takeIf { it > 0 }?.let { " · ±${it.toInt()} m" } ?: ""), 13f, (ink and 0x00FFFFFF) or (0x99 shl 24)))
+            addView(tv("Open in Maps", 13.5f, blue, true).apply { setPadding(0, dp(2), 0, 0) })
+        })
+        setOnClickListener {
+            val uri = android.net.Uri.parse("geo:$la,$lo?q=$la,$lo")
+            try { startActivity(Intent(Intent.ACTION_VIEW, uri)) } catch (e: Exception) { toast("No maps app on this phone") }
+        }
     }
 
     /** The link card under a message: site, title, a little description. Tap opens the link. */
@@ -2554,6 +2615,7 @@ class MainActivity : Activity() {
     private fun preview(m: Msg): String = Format.plain(previewRaw(m))
 
     private fun previewRaw(m: Msg): String {
+        if (m.loc != null) return "📍 Location"
         m.call?.let { return callTitle(it) + if (it.optString("s") == "ok") " (${callDuration(it.optInt("dur"))})" else "" }
         val f = m.file ?: return m.text
         if (Voice.isVoice(f)) return "🎤 Voice message" + (Voice.unpack(f.optString("th"))?.let { " (${Voice.clock(it.first)})" } ?: "")
@@ -2589,6 +2651,7 @@ class MainActivity : Activity() {
             val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
             @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_FILE)
         }
+        row(R.drawable.ic_location, "Location") { shareLocation() }
         pw.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         pw.isOutsideTouchable = true
         // expand upward, just above the clip

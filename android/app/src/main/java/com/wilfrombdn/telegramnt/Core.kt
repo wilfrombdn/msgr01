@@ -42,6 +42,8 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
     var fwd: String? = null
     /** Link preview card made by the sender: u, s (site), t (title), d (description). */
     var lp: JSONObject? = null
+    /** A shared location: la, lo (degrees), acc (metres). */
+    var loc: JSONObject? = null
     /** Sent without sound: the other phone doesn't notify. */
     var silent = false
     /** SCHEDULED messages go out at this time (epoch ms). */
@@ -50,7 +52,7 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
     fun json(): JSONObject = JSONObject().put("id", id).put("mine", mine).put("text", text).put("ts", ts).put("state", state)
         .put("file", file).put("expires", expires).put("sender", sender)
         .put("reactions", JSONObject(reactions as Map<*, *>)).put("reply", reply).put("call", call)
-        .put("edited", edited).put("fwd", fwd).put("lp", lp).put("sil", silent).put("at", sendAt)
+        .put("edited", edited).put("fwd", fwd).put("lp", lp).put("sil", silent).put("at", sendAt).put("loc", loc)
 
     companion object {
         const val SENDING = 0
@@ -75,7 +77,15 @@ class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var
                 it.edited = o.optBoolean("edited"); it.fwd = o.optString("fwd").ifEmpty { null }
                 it.lp = o.optJSONObject("lp")
                 it.silent = o.optBoolean("sil"); it.sendAt = o.optLong("at")
+                it.loc = o.optJSONObject("loc")
             }
+        /** A location off the wire: only real coordinates are kept. */
+        fun locOf(o: JSONObject?): JSONObject? {
+            o ?: return null
+            val la = o.optDouble("la", Double.NaN); val lo = o.optDouble("lo", Double.NaN)
+            if (la.isNaN() || lo.isNaN() || la !in -90.0..90.0 || lo !in -180.0..180.0) return null
+            return JSONObject().put("la", la).put("lo", lo).put("acc", o.optDouble("acc", 0.0).coerceIn(0.0, 100_000.0))
+        }
         /** A forwarded-from name off the wire: only a well-formed @username is kept. */
         fun fwdOf(o: JSONObject?) = o?.optString("fw")?.takeIf { Core.USERNAME.matches(it) }
     }
@@ -642,7 +652,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         fun take(list: MutableList<Msg>, owner: Any) {
             for (old in list.filter { it.state == Msg.SCHEDULED && (if (only != null) it === only else it.sendAt <= now) }) {
                 val m = Msg(old.id, true, old.text, System.currentTimeMillis(), Msg.SENDING)
-                m.reply = old.reply; m.fwd = old.fwd; m.lp = old.lp; m.file = old.file; m.silent = old.silent; m.expires = old.expires
+                m.reply = old.reply; m.fwd = old.fwd; m.lp = old.lp; m.file = old.file; m.silent = old.silent; m.expires = old.expires; m.loc = old.loc
                 list.remove(old); list.add(m)
                 out.add(owner to m)
             }
@@ -679,7 +689,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             val sentText = msg.text
             val ct = synchronized(m.signal) { GroupCipher(m.signal, m.address).encrypt(g.distId, sentText.toByteArray()) }
             relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gmsg").put("u", m.user).put("id", msg.id).put("c", b64(ct.serialize()))
-                .apply { msg.reply?.let { put("r", it) }; msg.fwd?.let { put("fw", it) }; msg.lp?.let { put("lp", it) } }))
+                .apply { msg.reply?.let { put("r", it) }; msg.fwd?.let { put("fw", it) }; msg.lp?.let { put("lp", it) }; msg.loc?.let { put("loc", it) } }))
             synchronized(this) { msg.state = Msg.SENT; editedMeanwhile = msg.text != sentText; if (editedMeanwhile) msg.edited = true }
             Msg.SENT
         } catch (e: Exception) {
@@ -807,7 +817,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 }
                 if (!g.canPost(u)) return   // read-only: ignore posts from non-leaders
                 g.typing.remove(u)
-                addGroupMsg(g, u, id, String(text), Msg.replyRef(inner.optJSONObject("r")), Msg.fwdOf(inner), LinkPreview.clean(inner.optJSONObject("lp")))
+                addGroupMsg(g, u, id, String(text), Msg.replyRef(inner.optJSONObject("r")), Msg.fwdOf(inner), LinkPreview.clean(inner.optJSONObject("lp")), Msg.locOf(inner.optJSONObject("loc")))
             }
             "gdel" -> {
                 val id = inner.optString("id")
@@ -925,7 +935,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         }
     }
 
-    private fun addGroupMsg(g: Group, u: String, id: String, text: String, reply: JSONObject? = null, fwd: String? = null, lp: JSONObject? = null) {
+    private fun addGroupMsg(g: Group, u: String, id: String, text: String, reply: JSONObject? = null, fwd: String? = null, lp: JSONObject? = null, loc: JSONObject? = null) {
         synchronized(this) {
             g.members.add(u)
             val msg = Msg(id, false, text.take(MAX_TEXT), System.currentTimeMillis(), Msg.RECEIVED)
@@ -933,6 +943,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             msg.reply = reply
             msg.fwd = fwd
             msg.lp = lp
+            msg.loc = loc
             g.msgs.add(msg)
             if (openChat != "g:${g.id}") g.unread++
         }
@@ -1217,6 +1228,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             msg.fwd?.let { body.put("fw", it) }
             msg.lp?.let { body.put("lp", it) }
             if (msg.silent) body.put("sil", true)
+            msg.loc?.let { body.put("loc", it) }
             msg.file?.let { f ->
                 if (!f.has("id")) {
                     val blob = loadBlob(f.getString("local")) ?: throw IOException("attachment missing")
@@ -1619,6 +1631,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         msg.reply = Msg.replyRef(inner.optJSONObject("r"))
         msg.fwd = Msg.fwdOf(inner)
         msg.lp = LinkPreview.clean(inner.optJSONObject("lp"))
+        msg.loc = Msg.locOf(inner.optJSONObject("loc"))
         if (ttl > 0) msg.expires = System.currentTimeMillis() + ttl * 1000L
         if (msg.file != null) toFetch.add(msg)
         return msg

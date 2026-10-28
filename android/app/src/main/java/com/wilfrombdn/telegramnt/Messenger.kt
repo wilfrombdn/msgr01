@@ -485,6 +485,12 @@ object Messenger {
         io.execute { core.deliverGroup(g, m) }
     }
 
+    /** Shares a location ({la, lo, acc}) with a friend or group. */
+    fun sendLocation(c: Contact?, g: Group?, loc: JSONObject) {
+        if (c != null) { val m = core.queue(c, ""); m.loc = loc; io.execute { core.deliver(c, m) } }
+        else if (g != null) { val m = core.queueGroup(g, ""); m.loc = loc; io.execute { core.deliverGroup(g, m) } }
+    }
+
     /** Sends scheduled messages that are due (or [only] that one, right now). */
     fun sendScheduled(only: Msg? = null) {
         for ((owner, m) in core.dueScheduled(only = only)) io.execute {
