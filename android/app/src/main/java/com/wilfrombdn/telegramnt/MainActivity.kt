@@ -281,6 +281,7 @@ class MainActivity : Activity() {
         super.onResume()
         // back from "allow installs from MSNGR": carry on with the update
         pendingApk?.let { f -> if (packageManager.canRequestPackageInstalls()) { pendingApk = null; Messenger.run({ Updater.install(this, f) }) } }
+        if (screen == "settings") showSettings()   // back from a phone setting (battery, full-screen alerts): show what changed
     }
 
     private fun redraw() {
@@ -641,8 +642,47 @@ class MainActivity : Activity() {
 
     // ---------- chat list ----------
 
+    // ---------- ringing when the app is closed ----------
+
+    /**
+     * What the phone still needs so a call rings like a normal phone call when MSNGR is closed:
+     * each item is (what, why, fix). Empty = all set.
+     */
+    private fun ringFixes(): List<Triple<String, String, () -> Unit>> {
+        val out = mutableListOf<Triple<String, String, () -> Unit>>()
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        if (!Messenger.background) out.add(Triple("Get messages when the app is closed", "Without it, nothing can reach this phone while MSNGR is closed.") {
+            Messenger.background = true; Messenger.settingsChanged(); startForegroundService(Intent(this, SyncService::class.java)); showSettings()
+        })
+        if (!nm.areNotificationsEnabled()) out.add(Triple("Notifications", "Calls and messages show as notifications.") {
+            startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
+        })
+        if (!getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)) out.add(Triple("Battery: unrestricted",
+            "Otherwise Android cuts MSNGR's internet when the screen is off, and calls never arrive.") {
+            @android.annotation.SuppressLint("BatteryLife")
+            val i = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:$packageName"))
+            runCatching { startActivity(i) }.onFailure { startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        })
+        if (Build.VERSION.SDK_INT >= 34 && !nm.canUseFullScreenIntent()) out.add(Triple("Full-screen call alerts",
+            "Lets an incoming call take over the screen (even when locked), like a normal phone call.") {
+            startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, android.net.Uri.parse("package:$packageName")))
+        })
+        return out
+    }
+
+    /** Once, after signing in: offer to set the phone up so calls ring when MSNGR is closed. */
+    private fun maybeAskRingSetup() {
+        if (Messenger.ringSetupAsked || !Messenger.signedIn) return
+        val fixes = ringFixes()
+        Messenger.ringSetupAsked = true; Messenger.settingsChanged()
+        if (fixes.isEmpty()) return
+        popup("Ring like a phone call", "So calls ring this phone even when MSNGR is closed, allow: " + fixes.joinToString(", ") { it.first } +
+            ". You can do this later in Settings > Calls.", null, "Later" to dim, "Set up" to white) { i -> if (i == 1) showSettings() }
+    }
+
     private fun showChats() {
         val refreshing = screen == "chats"   // same screen redrawing (new message, reconnect), not arriving from elsewhere
+        if (!refreshing) window.decorView.post { maybeAskRingSetup() }
         emojiPopup?.dismiss(); emojiPopup = null
         if (screen != "chats") Messenger.spot = Spot()
         screen = "chats"
@@ -3822,7 +3862,15 @@ class MainActivity : Activity() {
         if (Messenger.core.unreadable > 0) col.addView(tv("⚠ ${Messenger.core.unreadable} message(s) arrived but couldn't be decrypted — the two accounts' keys are out of sync (usually from reinstalling/restoring). Fresh accounts fix this.", 13.5f, amber).apply { setPadding(dp(20), dp(2), dp(20), dp(10)) })
         if (Messenger.core.lastDrop.isNotEmpty()) col.addView(tv("diag · last fetched message: ${Messenger.core.lastDrop}", 12.5f, dim).apply { setPadding(dp(20), 0, dp(20), dp(10)) })
         col.addView(gap(8))
-        col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged() })
+        col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged(); showSettings() })
+        // Calls when closed: each missing phone setting, tap to fix
+        col.addView(tv("Calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+        val fixes = ringFixes()
+        if (fixes.isEmpty()) col.addView(tv("✓ Calls will ring this phone even when MSNGR is closed", 15f, green).apply { setPadding(dp(20), dp(6), dp(20), dp(6)) })
+        else {
+            col.addView(settingNote("To ring like a normal phone call when MSNGR is closed, tap each one:"))
+            for ((what, why, fix) in fixes) col.addView(settingRow("⚠  $what", why) { fix() })
+        }
         col.addView(settingNote("Keeps a small \"connected\" notification. No Google push service is used."))
         col.addView(settingSwitch("Read receipts", Messenger.core.readReceipts) { on -> Messenger.core.readReceipts = on; Messenger.settingsChanged() })
         col.addView(settingNote("When on, friends see when you've read their messages, and you see when they've read yours."))

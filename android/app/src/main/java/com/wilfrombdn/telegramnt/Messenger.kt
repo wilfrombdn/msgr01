@@ -28,6 +28,8 @@ object Messenger {
     @Volatile var direct = false
     /** The Direct address last read from server.json (it changes whenever the laptop server restarts). */
     @Volatile var directUrl = ""
+    /** Asked once to set the phone up so calls ring when MSNGR is closed. */
+    var ringSetupAsked = false
     val look = Look()
     /** A user-chosen file (via the system picker) we keep an encrypted full backup in, so chats
      *  survive uninstall/reinstall. Empty = off. Nothing goes to the server. */
@@ -358,7 +360,7 @@ object Messenger {
         o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
         o.put("keepMediaDays", keepMediaDays)
-        o.put("direct", direct).put("directUrl", directUrl)
+        o.put("direct", direct).put("directUrl", directUrl).put("ringSetupAsked", ringSetupAsked)
         o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
         o.put("stickers", JSONObject().also { j -> synchronized(allStickers) { allStickers.forEach { (u, ss) -> j.put(u, org.json.JSONArray(ss)) } } })
         o.put("archived", JSONObject().also { j -> synchronized(allArchived) { allArchived.forEach { (u, ms) -> j.put(u, org.json.JSONArray(ms.toList())) } } })
@@ -372,7 +374,7 @@ object Messenger {
         o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
         o.optJSONObject("spot")?.let { spot = Spot.from(it) }
         keepMediaDays = o.optInt("keepMediaDays", 0)
-        direct = o.optBoolean("direct"); directUrl = o.optString("directUrl")
+        direct = o.optBoolean("direct"); directUrl = o.optString("directUrl"); ringSetupAsked = o.optBoolean("ringSetupAsked")
         o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->
             val a = j.optJSONArray(u) ?: return@forEach
             allPins[u] = MutableList(a.length()) { a.getString(it) }

@@ -398,6 +398,15 @@ class ScreenshotTest {
         Messenger.archived.clear()
     }
 
+    /** Settings: Tor / Direct choice and the "Calls" checklist for ringing when the app is closed. */
+    @Test fun connectionAndCalls() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        Messenger.ringSetupAsked = true
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showSettings")
+        shoot(a, "60-settings-connection")
+    }
+
     /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */
     @Test fun composerWraps() {
         Messenger.initForPreview(fakeCore(signedIn = true))
