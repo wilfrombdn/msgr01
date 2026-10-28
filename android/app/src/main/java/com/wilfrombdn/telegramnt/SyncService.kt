@@ -21,6 +21,7 @@ class SyncService : Service() {
         Messenger.init(this)
         channels(this)
         Messenger.onNotify = { c -> notifyMessage(this, c) }
+        Messenger.onNotifyMention = { g -> notifyMention(this, g) }
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, CH_CONN)
             .setSmallIcon(R.drawable.ic_notify)
@@ -39,6 +40,7 @@ class SyncService : Service() {
     override fun onDestroy() {
         Messenger.stopLoop()
         Messenger.onNotify = null
+        Messenger.onNotifyMention = null
         super.onDestroy()
     }
 
@@ -50,6 +52,16 @@ class SyncService : Service() {
             val nm = ctx.getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(NotificationChannel(CH_CONN, "Connection", NotificationManager.IMPORTANCE_MIN))
             nm.createNotificationChannel(NotificationChannel(CH_MSG, "Messages", NotificationManager.IMPORTANCE_HIGH))
+        }
+
+        /** "You were mentioned" in a group (no text, like other notifications). */
+        fun notifyMention(ctx: Context, g: Group) {
+            val open = PendingIntent.getActivity(ctx, g.id.hashCode(), Intent(ctx, MainActivity::class.java).putExtra("group", g.id),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val n = Notification.Builder(ctx, CH_MSG).setSmallIcon(R.drawable.ic_notify)
+                .setContentTitle(g.name).setContentText("You were mentioned")
+                .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open).setAutoCancel(true).build()
+            ctx.getSystemService(NotificationManager::class.java).notify(g.id.hashCode(), n)
         }
 
         /** Shows only who wrote, never the text, so it can't leak onto the lock screen. */

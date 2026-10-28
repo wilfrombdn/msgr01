@@ -15,6 +15,23 @@ import androidx.core.view.inputmethod.InputConnectionCompat
  * "images aren't supported here". [onContent] gets the item and a `done` to call once it's been read.
  */
 class ChatBox(ctx: Context, private val onContent: (Uri, String, () -> Unit) -> Unit) : EditText(ctx) {
+    init {
+        // select some text: Bold / Italic / Strike / Spoiler / Mono join Copy, Paste… in the menu
+        customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
+            override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
+                Format.MARKS.forEachIndexed { i, (_, name) -> menu.add(0, FORMAT_ID + i, 100 + i, name) }
+                return true
+            }
+            override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu) = false
+            override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem): Boolean {
+                val i = item.itemId - FORMAT_ID
+                if (i !in Format.MARKS.indices) return false
+                Format.wrap(this@ChatBox, Format.MARKS[i].first); mode.finish(); return true
+            }
+            override fun onDestroyActionMode(mode: android.view.ActionMode) {}
+        }
+    }
+
     override fun onCreateInputConnection(out: EditorInfo): InputConnection? {
         val ic = super.onCreateInputConnection(out) ?: return null
         EditorInfoCompat.setContentMimeTypes(out, MIMES)
@@ -29,6 +46,7 @@ class ChatBox(ctx: Context, private val onContent: (Uri, String, () -> Unit) -> 
     }
 
     companion object {
+        private const val FORMAT_ID = 0x4d53
         val MIMES = arrayOf("image/gif", "image/webp", "image/png", "image/jpeg")
     }
 }

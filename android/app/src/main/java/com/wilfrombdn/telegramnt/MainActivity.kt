@@ -137,6 +137,7 @@ class MainActivity : Activity() {
 
     private fun handle(i: Intent?) {
         i?.getStringExtra("chat")?.let { u -> if (Messenger.core.contact(u) != null) showChat(u) }
+        i?.getStringExtra("group")?.let { g -> if (Messenger.core.group(g) != null) showGroup(g) }
     }
 
     override fun onStart() {
@@ -1004,11 +1005,15 @@ class MainActivity : Activity() {
             typingNow != null -> typingNow
             draft != null -> "Draft: ${draft.replace('\n', ' ')}"
             last == null -> "${g.members.size} member" + if (g.members.size != 1) "s" else ""
-            last.mine -> "You: ${last.text}"
-            else -> "${last.sender ?: "?"}: ${last.text}"
+            last.mine -> "You: ${preview(last)}"
+            else -> "${last.sender ?: "?"}: ${preview(last)}"
         }
         val line2 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
         line2.addView(tv(preview, 15f, if (typingNow != null) blue else if (draft != null) red else dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (g.mentioned) line2.addView(tv("@", 12.5f, white, true).apply {
+            gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(4), dp(1), dp(4), dp(1)); background = round(blue, 11)
+            (layoutParams as? LinearLayout.LayoutParams)?.rightMargin = dp(4)
+        })
         if (g.unread > 0) line2.addView(tv("${g.unread}", 12.5f, white, true).apply {
             gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1))
             background = round(if ("g:${g.id}" in Messenger.muted) faint else blue, 11)
@@ -1152,7 +1157,8 @@ class MainActivity : Activity() {
         // read-only group: non-admins see a notice instead of the composer
         val canPost = g.canPost(Messenger.core.me?.user ?: "")
         replyTo = null; replyBar = makeReplyBar(); groupBox = box
-        val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(replyBar); addView(bar2) }
+        val picker = mentionPicker(box, g)
+        val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(picker); addView(replyBar); addView(bar2) }
         composer = compose
         val bottom: View = if (canPost) compose else tv("🔒  Only admins can post in this group", 14f, dim).apply {
             gravity = Gravity.CENTER; setBackgroundColor(listBg); setPadding(dp(16), dp(16), dp(16), dp(16))
@@ -1168,7 +1174,7 @@ class MainActivity : Activity() {
 
     private fun fillGroup() {
         val g = groupId?.let { Messenger.core.group(it) } ?: return
-        if (g.unread != 0) { g.unread = 0; Messenger.save() }
+        if (g.unread != 0 || g.mentioned) { g.unread = 0; g.mentioned = false; Messenger.save() }
         groupTop?.removeAllViews()
         val typing = groupTyping(g)
         val info = "${g.members.size} member" + (if (g.members.size != 1) "s" else "") + (if (g.public) " · public" else "") + if (g.readOnly) " · read-only" else ""
@@ -1199,7 +1205,7 @@ class MainActivity : Activity() {
         m.fwd?.let { b.addView(fwdLabel(it, tcol)) }
         m.reply?.let { b.addView(quoteView(it, g.msgs, tcol, groupBubbles, groupScroller)) }
         m.file?.let { b.addView(attachmentView(m, tcol) { groupMessageMenu(g, m) }) }
-        if (m.text.isNotEmpty()) b.addView(tv(m.text, 16f, tcol).apply { textSize = look.msg })
+        if (m.text.isNotEmpty()) b.addView(msgText(m, tcol, g.members) { groupMessageMenu(g, m) })
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val mc = (tcol and 0x00FFFFFF) or (0x99 shl 24)
         meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
@@ -1763,7 +1769,7 @@ class MainActivity : Activity() {
         m.fwd?.let { b.addView(fwdLabel(it, ink)) }
         m.reply?.let { b.addView(quoteView(it, c.msgs, ink, bubbles, scroller)) }
         m.file?.let { b.addView(attachmentView(m, ink) { messageMenu(c, m) }) }
-        if (m.text.isNotEmpty()) b.addView(tv(m.text, 16f, ink).apply { textSize = look.msg })
+        if (m.text.isNotEmpty()) b.addView(msgText(m, ink, setOf(c.user)) { messageMenu(c, m) })
         val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val metaColor = (ink and 0x00FFFFFF) or (0x99 shl 24)
         meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, metaColor).apply { setPadding(0, 0, dp(6), 0) }) // gap before the tick
@@ -1983,6 +1989,23 @@ class MainActivity : Activity() {
     // ---------- forwarding ----------
 
     /** "Forwarded from Sam" at the top of a bubble. */
+    /** Messages whose spoilers you've tapped open (until the app closes). */
+    private val shownSpoilers = HashSet<String>()
+
+    /** A message's text: formatting, tappable links, highlighted @mentions, tap-to-show spoilers. */
+    private fun msgText(m: Msg, ink: Int, people: Set<String>, onLong: () -> Unit): TextView {
+        val me = Messenger.core.me?.user ?: ""
+        return tv("", 16f, ink).apply {
+            textSize = look.msg
+            text = Format.render(m.text, ink, blue, people + me, m.id in shownSpoilers) {
+                shownSpoilers.add(m.id); if (screen == "group") fillGroup() else fillChat()
+            }
+            setLinkTextColor(if (ink == Color.WHITE || ink == 0xFFFFFFFF.toInt()) Color.parseColor("#8CC4FF") else Color.parseColor("#1F6FC5"))
+            movementMethod = android.text.method.LinkMovementMethod.getInstance()
+            setOnLongClickListener { onLong(); true }   // tappable text would otherwise swallow the hold
+        }
+    }
+
     private fun fwdLabel(user: String, ink: Int) = tv("Forwarded from ${displayName(user)}", 13.5f, (ink and 0x00FFFFFF) or (0xCC shl 24)).apply {
         setTypeface(typeface, android.graphics.Typeface.ITALIC); setPadding(0, 0, 0, dp(3))
     }
@@ -2108,6 +2131,39 @@ class MainActivity : Activity() {
             2 -> "${who[0]} and ${who[1]} are typing…"
             else -> "${who.size} people are typing…"
         }
+    }
+
+    /** Type "@" in a group: a list of matching members appears above the box; tap one to put in "@username ". */
+    private fun mentionPicker(box: EditText, g: Group): LinearLayout {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(listBg); visibility = View.GONE }
+        fun update() {
+            col.removeAllViews()
+            val cur = box.selectionStart
+            val before = if (cur >= 0) box.text.substring(0, cur) else ""
+            val m = Regex("(?:^|\\s)@([A-Za-z0-9_]*)$").find(before)
+            val me = Messenger.core.me?.user
+            val q = m?.groupValues?.get(1)?.lowercase()
+            val hits = if (q == null) emptyList() else synchronized(Messenger.core) { g.members.toList() }
+                .filter { it != me && (it.startsWith(q) || (Messenger.core.contact(it)?.name?.lowercase()?.contains(q) == true)) }.sorted().take(4)
+            col.visibility = if (hits.isEmpty()) View.GONE else View.VISIBLE
+            for (u in hits) col.addView(LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(6), dp(14), dp(6)); background = pressable()
+                addView(avatar(displayName(u), 32, Messenger.core.contact(u)?.avatar))
+                addView(tv(displayName(u), 15f, white, true).apply { setPadding(dp(12), 0, dp(8), 0) })
+                addView(tv("@$u", 14f, dim))
+                setOnClickListener {
+                    val c2 = box.selectionStart
+                    val start = c2 - (q?.length ?: 0) - 1
+                    if (start >= 0) { box.text.replace(start, c2, "@$u "); box.setSelection(start + u.length + 2) }
+                }
+            })
+        }
+        box.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
+            override fun afterTextChanged(e: android.text.Editable?) { update() }
+        })
+        return col
     }
 
     /** Remembers what's in the box for [key] as you type (cleared when sent). Not while editing a message. */
@@ -2346,7 +2402,9 @@ class MainActivity : Activity() {
     private var emojiData: List<Pair<String, List<String>>>? = null
     private val pictures = HashMap<String, android.graphics.Bitmap?>()
 
-    private fun preview(m: Msg): String {
+    private fun preview(m: Msg): String = Format.plain(previewRaw(m))
+
+    private fun previewRaw(m: Msg): String {
         m.call?.let { return callTitle(it) + if (it.optString("s") == "ok") " (${callDuration(it.optInt("dur"))})" else "" }
         val f = m.file ?: return m.text
         if (Voice.isVoice(f)) return "🎤 Voice message" + (Voice.unpack(f.optString("th"))?.let { " (${Voice.clock(it.first)})" } ?: "")

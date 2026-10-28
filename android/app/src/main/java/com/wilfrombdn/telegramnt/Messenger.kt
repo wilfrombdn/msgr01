@@ -63,6 +63,7 @@ object Messenger {
     var signedOutReason: String? = null
     @Volatile var visible = false
     var onNotify: ((Contact) -> Unit)? = null
+    var onNotifyMention: ((Group) -> Unit)? = null
 
     private lateinit var app: Context
     private var disk: Aead? = null
@@ -109,6 +110,7 @@ object Messenger {
         core.onChange = { save(); changed(); ui.post { scheduleExpiry() } }
         core.onNew = { contact -> if (!visible && "u:${contact.user}" !in muted) ui.post { onNotify?.invoke(contact) } }
         core.onCall = { k -> ui.post { callChanged(k) } }
+        core.onMention = { g -> if (!visible && "g:${g.id}" !in muted) ui.post { onNotifyMention?.invoke(g) } }
     }
 
     val signedIn get() = core.me != null

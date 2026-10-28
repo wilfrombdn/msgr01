@@ -184,6 +184,7 @@ class Group(
     var setVer = 0                        // version counter for settings changes (newer wins)
     var epoch = 0                         // re-key generation; a higher epoch's secret replaces a lower one
     var pinned: String? = null            // id of the pinned message (set by an admin)
+    var mentioned = false                 // someone @mentioned me in a message I haven't seen yet
     val typing = java.util.concurrent.ConcurrentHashMap<String, Long>()   // @username -> show "typing…" until (not saved)
     val pending = mutableListOf<Triple<String, String, ByteArray>>() // gmsgs waiting for a sender key
     val pendingCtl = mutableListOf<Pair<String, ByteArray>>()        // gctl controls waiting for a sender key
@@ -205,7 +206,7 @@ class Group(
     fun json(withMsgs: Boolean): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("secret", secret).put("public", public)
         .put("cursor", cursor).put("created", created).put("members", JSONArray(members.toList()))
-        .put("owner", owner).put("leaders", JSONArray(leaders.toList())).put("readOnly", readOnly).put("setVer", setVer).put("epoch", epoch).put("pinned", pinned)
+        .put("owner", owner).put("leaders", JSONArray(leaders.toList())).put("readOnly", readOnly).put("setVer", setVer).put("epoch", epoch).put("pinned", pinned).put("mentioned", mentioned)
         .put("rekeyDue", JSONArray(rekeyDue.toList()))
         .put("rekeyResend", JSONArray(rekeyResend.map { JSONObject().put("addr", it.addr).put("blob", it.blob).put("until", it.until).put("last", it.last) }))
         .apply { if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() })) }
@@ -218,6 +219,7 @@ class Group(
             o.optJSONArray("leaders")?.let { for (i in 0 until it.length()) g.leaders.add(it.getString(i)) }
             g.readOnly = o.optBoolean("readOnly"); g.setVer = o.optInt("setVer"); g.epoch = o.optInt("epoch")
             g.pinned = o.optString("pinned").ifEmpty { null }
+            g.mentioned = o.optBoolean("mentioned")
             o.optJSONArray("rekeyDue")?.let { for (i in 0 until it.length()) g.rekeyDue.add(it.getString(i)) }
             o.optJSONArray("rekeyResend")?.let { for (i in 0 until it.length()) it.getJSONObject(i).let { r ->
                 g.rekeyResend.add(ResendItem(r.getString("addr"), r.getString("blob"), r.getLong("until"), r.optLong("last")))
@@ -253,6 +255,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     val blocked: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())
     var onChange: () -> Unit = {}
     var onNew: (Contact) -> Unit = {}
+    /** Someone @mentioned me in group [g] (groups don't notify otherwise). */
+    var onMention: (Group) -> Unit = {}
     /** Where encrypted attachments are kept on this device (Android: files folder; tests: memory). */
     var saveBlob: (String, ByteArray) -> Unit = { _, _ -> }
     var loadBlob: (String) -> ByteArray? = { null }
@@ -891,6 +895,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             g.msgs.add(msg)
             if (openChat != "g:${g.id}") g.unread++
         }
+        val mine = me?.user
+        if (mine != null && openChat != "g:${g.id}" && Format.MENTION.findAll(text).any { it.groupValues[1] == mine }) { g.mentioned = true; onMention(g) }
     }
 
     /** Marks a chat read and, if read receipts are on, tells the other side. */
