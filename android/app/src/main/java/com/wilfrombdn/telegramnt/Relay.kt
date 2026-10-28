@@ -15,14 +15,18 @@ import java.util.Base64
  * for a direct connection; for a .onion server it must be non-null or the request fails (fail-closed —
  * we never silently fall back to a non-Tor route).
  */
-class Relay(val server: String, private val socks: () -> Int? = { null }) {
+class Relay(server: String, private val socks: () -> Int? = { null }) {
+    /** Where the server is: the .onion (through Tor), or the Direct address (Settings > Connection). */
+    @Volatile var server = server
+    /** If set, calls use this server (the .onion, through Tor) whatever [server] is: Direct can't carry call audio. */
+    @Volatile var callServer: String? = null
     class Incoming(val token: String, val id: String, val blob: ByteArray)
     class Profile(val user: String, val enc: String, val sig: String, val inbox: String, val ident: String)
 
     @Volatile private var live: Socket? = null
 
-    private fun route(): Net.Route {
-        val u = URL(server)
+    private fun route(to: String = server): Net.Route {
+        val u = URL(to)
         val tls = u.protocol == "https"
         val port = if (u.port != -1) u.port else if (tls) 443 else 80
         // a .onion can only be reached through Tor; refuse rather than leak the request to a DNS lookup
@@ -159,7 +163,7 @@ class Relay(val server: String, private val socks: () -> Int? = { null }) {
     /** Joins a voice-call room (same route as everything else: Tor to the .onion today). */
     /** Joins a call's audio room. [side] ("caller"/"callee") lets the server replace this phone's own dropped attempt. */
     fun pipe(room: String, side: String = ""): Socket =
-        Net.openStream(route(), "/pipe", if (side.isEmpty()) mapOf("X-Room" to room) else mapOf("X-Room" to room, "X-Side" to side), readMs = 130_000)
+        Net.openStream(route(callServer ?: server), "/pipe", if (side.isEmpty()) mapOf("X-Room" to room) else mapOf("X-Room" to room, "X-Side" to side), readMs = 130_000)
 
     fun doneWith(id: String) {
         post("/done", JSONObject().put("id", id), 20)

@@ -30,7 +30,8 @@ object Updater {
         if (Build.VERSION.SDK_INT >= 28) ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode
         else @Suppress("DEPRECATION") ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionCode.toLong()
 
-    private fun route(): Net.Route = Net.Route(HOST, 443, true, Tor.socksPort() ?: throw IOException("Tor not ready"))
+    // Direct mode (Settings > Connection) skips Tor here too, so updates still arrive where Tor is blocked
+    private fun route(): Net.Route = Net.Route(HOST, 443, true, if (Messenger.direct) null else Tor.socksPort() ?: throw IOException("Tor not ready"))
 
     /** The newer version on offer, or null. Off the main thread. */
     fun check(ctx: Context): Update? {

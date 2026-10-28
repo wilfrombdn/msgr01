@@ -724,7 +724,7 @@ class MainActivity : Activity() {
         val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
         else if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
             if (Messenger.connected) "MSNGR" else "Connecting…",
-            if (Messenger.connected) null else Tor.status(),
+            if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
         )
@@ -3803,11 +3803,22 @@ class MainActivity : Activity() {
         val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")
         col.addView(settingRow("Check for updates", "You have MSNGR $ver") { checkUpdateNow() })
         col.addView(tv("Connection", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
-        col.addView(tv("Direct server   · in progress", 16f, faint).apply { setPadding(dp(20), dp(6), dp(20), dp(2)) })
-        col.addView(settingNote("A faster, direct connection to your own server. Coming later."))
-        val torReady = Tor.socksPort() != null && Messenger.connected
-        col.addView(tv("Tor" + if (torReady) "   ✓ active" else "   — ${Tor.status()}", 16f, if (torReady) white else amber).apply { setPadding(dp(20), dp(10), dp(20), dp(2)) })
-        col.addView(settingNote("Everything goes through the Tor network, so no one — not even the server's host — ever sees your IP address. Used until the direct connection is ready."))
+        val direct = Messenger.direct
+        val on = Messenger.connected
+        fun choice(title: String, state: String, picked: Boolean, go: () -> Unit) = col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(2)); background = pressable()
+            addView(tv(if (picked) "◉" else "○", 18f, if (picked) blue else dim).apply { setPadding(0, 0, dp(12), 0) })
+            addView(tv(title, 16f, white), LinearLayout.LayoutParams(0, -2, 1f))
+            if (picked) addView(tv(state, 13.5f, if (on) green else amber))
+            setOnClickListener { go() }
+        })
+        choice("Tor (most private)", if (on) "✓ active" else Tor.status(), !direct) { if (direct) { Messenger.useDirect(false); showSettings() } }
+        col.addView(settingNote("Everything goes through the Tor network, so no one, not even the server, ever sees your phone's internet address."))
+        choice("Direct (faster)", if (on) "✓ active" else "connecting…", direct) {
+            if (!direct) popup("Use Direct?", "Faster, and works on networks that block Tor (like some work Wi-Fi). Your messages stay end-to-end encrypted, but Cloudflare and the server can see your phone's internet address. Calls still go through Tor.",
+                null, "Cancel" to dim, "Use Direct" to white) { i -> if (i == 1) { Messenger.useDirect(true); showSettings() } }
+        }
+        col.addView(settingNote("Goes through a Cloudflare tunnel to the server. Messages stay end-to-end encrypted; your internet address is not hidden."))
         if (Messenger.core.unreadable > 0) col.addView(tv("⚠ ${Messenger.core.unreadable} message(s) arrived but couldn't be decrypted — the two accounts' keys are out of sync (usually from reinstalling/restoring). Fresh accounts fix this.", 13.5f, amber).apply { setPadding(dp(20), dp(2), dp(20), dp(10)) })
         if (Messenger.core.lastDrop.isNotEmpty()) col.addView(tv("diag · last fetched message: ${Messenger.core.lastDrop}", 12.5f, dim).apply { setPadding(dp(20), 0, dp(20), dp(10)) })
         col.addView(gap(8))

@@ -24,6 +24,10 @@ object Messenger {
 
     lateinit var core: Core
     var background = true
+    /** Settings > Connection: Direct (through the Cloudflare tunnel, faster, works where Tor is blocked) instead of Tor. */
+    @Volatile var direct = false
+    /** The Direct address last read from server.json (it changes whenever the laptop server restarts). */
+    @Volatile var directUrl = ""
     val look = Look()
     /** A user-chosen file (via the system picker) we keep an encrypted full backup in, so chats
      *  survive uninstall/reinstall. Empty = off. Nothing goes to the server. */
@@ -108,6 +112,7 @@ object Messenger {
         Tor.start(app)                                  // start the embedded Tor daemon (bootstraps in the background)
         start(Core(ONION) { Tor.socksPort() })          // all traffic goes to the .onion through Tor's SOCKS port
         load()
+        applyRoute()
     }
 
     /** For screenshots/tests: no Keystore, nothing saved. */
@@ -353,6 +358,7 @@ object Messenger {
         o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
         o.put("keepMediaDays", keepMediaDays)
+        o.put("direct", direct).put("directUrl", directUrl)
         o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
         o.put("stickers", JSONObject().also { j -> synchronized(allStickers) { allStickers.forEach { (u, ss) -> j.put(u, org.json.JSONArray(ss)) } } })
         o.put("archived", JSONObject().also { j -> synchronized(allArchived) { allArchived.forEach { (u, ms) -> j.put(u, org.json.JSONArray(ms.toList())) } } })
@@ -366,6 +372,7 @@ object Messenger {
         o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
         o.optJSONObject("spot")?.let { spot = Spot.from(it) }
         keepMediaDays = o.optInt("keepMediaDays", 0)
+        direct = o.optBoolean("direct"); directUrl = o.optString("directUrl")
         o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->
             val a = j.optJSONArray(u) ?: return@forEach
             allPins[u] = MutableList(a.length()) { a.getString(it) }
@@ -465,9 +472,42 @@ object Messenger {
     /** Checks the server answers over Tor. Returns false while Tor is still bootstrapping (fail-closed:
      *  the request only ever goes through Tor, never a fallback that would expose an IP). Off-main only. */
     fun findServer(): Boolean {
-        val ok = core.relay.ping()
+        var ok = core.relay.ping()
+        // Direct: the tunnel address changes when the server restarts; look up the new one and try again
+        if (!ok && direct && refreshDirect()) ok = core.relay.ping()
         setConnected(ok)
         return ok
+    }
+
+    // ---------- Tor or Direct ----------
+
+    /** Points the app at the .onion (Tor) or the Direct address. Calls always stay on Tor. */
+    fun applyRoute() {
+        val r = core.relay
+        if (direct && directUrl.isNotEmpty()) { r.server = directUrl; r.callServer = ONION }
+        else { r.server = ONION; r.callServer = null }
+    }
+
+    /** Reads the current Direct address from the website (straight, not through Tor). */
+    fun refreshDirect(): Boolean {
+        val out = java.io.ByteArrayOutputStream()
+        runCatching {
+            Net.download(Net.Route("wilfrombdn.github.io", 443, true, null), "/telegramnt/server.json?t=${System.currentTimeMillis() / 60_000}", out)
+        }.onFailure { return false }
+        val url = runCatching { JSONObject(String(out.toByteArray())).optString("server") }.getOrDefault("")
+        if (!Regex("^https://[a-z0-9-]+\\.trycloudflare\\.com$").matches(url)) return false
+        if (url != directUrl) { directUrl = url; io.execute { save() } }
+        applyRoute()
+        return true
+    }
+
+    fun useDirect(on: Boolean) {
+        direct = on
+        applyRoute()
+        settingsChanged()
+        setConnected(false)
+        io.execute { if (on && directUrl.isEmpty()) refreshDirect(); findServer() }
+        kick()
     }
 
     private var finding: Thread? = null
