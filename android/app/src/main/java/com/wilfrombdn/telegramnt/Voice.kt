@@ -167,7 +167,8 @@ object Voice {
         player = null; playingId = null
     }
 
-    private class Bytes(val b: ByteArray) : MediaDataSource() {
+    /** Plays straight from unlocked bytes in memory (voice + round video messages). */
+    class Bytes(val b: ByteArray) : MediaDataSource() {
         override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
             if (position >= b.size) return -1
             val n = minOf(size.toLong(), b.size - position).toInt()

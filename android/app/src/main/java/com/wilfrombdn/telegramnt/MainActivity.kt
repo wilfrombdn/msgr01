@@ -910,6 +910,7 @@ class MainActivity : Activity() {
         private const val MIC_FOR_VOICE = 15
         private const val LOCATION_FOR_SHARE = 16
         private const val SCAN_QR = 17
+        private const val ROUND_VIDEO = 18
 
         /** Fixed reactions, then the most-used emoji not already in the bar, padded with [filler]. */
         fun quickReactions(use: Map<String, Int>, fixed: List<String>, filler: List<String>): List<String> {
@@ -1245,7 +1246,7 @@ class MainActivity : Activity() {
         if (!m.mine) m.sender?.let { su ->
             b.addView(tv("@$su", 13f, avatarColors[Math.floorMod(su.hashCode(), avatarColors.size)], true))
         }
-        if (isSticker(m) && m.text.isEmpty() && m.reply == null) b.background = null
+        if ((isSticker(m) || isRound(m)) && m.text.isEmpty() && m.reply == null) b.background = null
         m.fwd?.let { b.addView(fwdLabel(it, tcol)) }
         m.reply?.let { b.addView(quoteView(it, g.msgs, tcol, groupBubbles, groupScroller)) }
         m.file?.let { b.addView(attachmentView(m, tcol) { groupMessageMenu(g, m) }) }
@@ -1822,7 +1823,7 @@ class MainActivity : Activity() {
             background = round(fill, if (look.square) 0 else 14)
             setPadding(dp(10), dp(6), dp(10), dp(5))
         }
-        if (isSticker(m) && m.text.isEmpty() && m.reply == null) b.background = null   // stickers sit on the chat background
+        if ((isSticker(m) || isRound(m)) && m.text.isEmpty() && m.reply == null) b.background = null   // stickers / round videos sit on the chat background
         m.fwd?.let { b.addView(fwdLabel(it, ink)) }
         m.reply?.let { b.addView(quoteView(it, c.msgs, ink, bubbles, scroller)) }
         m.file?.let { b.addView(attachmentView(m, ink) { messageMenu(c, m) }) }
@@ -1953,6 +1954,95 @@ class MainActivity : Activity() {
     private fun imageActions(m: Msg, copyLabel: String = "Copy"): List<Pair<String, () -> Unit>> =
         if (m.file?.optString("m")?.startsWith("image/") == true && m.file?.has("local") == true)
             listOf(copyLabel to { copyImage(m) }, "Download" to { downloadImage(m) }, "Add to my stickers" to { addToStickers(m) }) else emptyList()
+
+    // ---------- round video messages ----------
+
+    /** The mic button is switched to round video. */
+    private var videoMode = false
+    private var roundHeld = false
+
+    private fun isRound(m: Msg) = m.file?.optString("m") == "video/mp4" && m.file?.optString("n")?.startsWith("Video message") == true
+
+    /** A recorded round video: read it, make a round-ish preview frame, delete the file, send it to the open chat. */
+    private fun sendRound(path: String) {
+        val c = chatUser?.let { Messenger.core.contact(it) }.takeIf { screen == "chat" }
+        val g = groupId?.let { Messenger.core.group(it) }.takeIf { screen == "group" }
+        val f = File(path)
+        if (c == null && g == null) { f.delete(); return }
+        stick = true
+        Messenger.run({
+            val bytes = f.readBytes()
+            val thumb = runCatching {
+                val r = android.media.MediaMetadataRetriever(); r.setDataSource(path)
+                val frame = r.getFrameAtTime(0); r.release()
+                frame?.let { b -> val s = minOf(b.width, b.height); thumbOf(android.graphics.Bitmap.createBitmap(b, (b.width - s) / 2, (b.height - s) / 2, s, s)) }
+            }.getOrNull()
+            f.delete()
+            if (g != null) Messenger.sendGroupFile(g, "Video message.mp4", "video/mp4", bytes, thumb) else Messenger.sendFile(c!!, "Video message.mp4", "video/mp4", bytes, thumb)
+        }, {}) { e -> f.delete(); toast(errorText(e)) }
+    }
+
+    /** A round video in the chat (its first frame); tap plays it with sound in a pop-up circle. */
+    private fun roundView(m: Msg, onLong: () -> Unit): View {
+        val f = m.file!!
+        val here = f.has("local")
+        val thumb = f.optString("th").takeIf { it.isNotEmpty() }?.let { val t = java.util.Base64.getDecoder().decode(it); android.graphics.BitmapFactory.decodeByteArray(t, 0, t.size) }
+        return FrameLayout(this).apply {
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, o: android.graphics.Outline) = o.setOval(0, 0, v.width, v.height)
+            }
+            clipToOutline = true
+            setBackgroundColor(Color.parseColor("#33000000"))
+            layoutParams = LinearLayout.LayoutParams(dp(200), dp(200)).apply { bottomMargin = dp(4) }
+            addView(ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; thumb?.let { setImageBitmap(it) } }, FrameLayout.LayoutParams(-1, -1))
+            addView(tv(if (!here) (if (f.optBoolean("cleared")) "Removed" else if (m.mine) "" else "Downloading…") else "▶", if (here) 26f else 13f, Color.WHITE).apply {
+                gravity = Gravity.CENTER; background = circle(Color.parseColor("#88000000")); setPadding(dp(12), dp(6), dp(12), dp(6))
+            }, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+            setOnClickListener { if (here) playRound(m) else if (!f.optBoolean("cleared")) retryFetch(m) }
+            setOnLongClickListener { onLong(); true }
+        }
+    }
+
+    /** Plays a round video from memory in a big circle over the chat (so chat refreshes don't cut it off). */
+    private fun playRound(m: Msg) {
+        val bytes = Messenger.core.openFile(m) ?: return toast("Couldn't open that video")
+        Voice.stopPlaying()
+        val size = minOf(resources.displayMetrics.widthPixels - dp(40), dp(340))
+        val d = android.app.Dialog(this)
+        val mp = android.media.MediaPlayer()
+        val texture = android.view.TextureView(this)
+        texture.surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
+                try {
+                    mp.setDataSource(Voice.Bytes(bytes)); mp.setSurface(android.view.Surface(st))
+                    mp.setOnVideoSizeChangedListener { _, vw, vh ->   // fill the circle without stretching
+                        if (vw > 0 && vh > 0) {
+                            val s = maxOf(size.toFloat() / vw, size.toFloat() / vh)
+                            texture.setTransform(android.graphics.Matrix().apply { setScale(vw * s / size, vh * s / size, size / 2f, size / 2f) })
+                        }
+                    }
+                    mp.setOnCompletionListener { d.dismiss() }
+                    mp.prepare(); mp.start()
+                } catch (e: Exception) { d.dismiss(); toast("Couldn't play that video") }
+            }
+            override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) {}
+            override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture) = true
+            override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) {}
+        }
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        d.setContentView(FrameLayout(this).apply {
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, o: android.graphics.Outline) = o.setOval(0, 0, v.width, v.height)
+            }
+            clipToOutline = true
+            addView(texture, FrameLayout.LayoutParams(size, size))
+            setOnClickListener { d.dismiss() }
+        })
+        d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        d.window?.setLayout(size, size)
+        d.setOnDismissListener { runCatching { mp.stop() }; runCatching { mp.release() } }
+        d.show()
+    }
 
     // ---------- stickers ----------
 
@@ -2774,6 +2864,7 @@ class MainActivity : Activity() {
 
     private fun previewRaw(m: Msg): String {
         if (m.loc != null) return "📍 Location"
+        if (isRound(m)) return "📹 Video message"
         m.poll?.let { return "📊 " + it.optString("q") }
         m.call?.let { return callTitle(it) + if (it.optString("s") == "ok") " (${callDuration(it.optInt("dur"))})" else "" }
         val f = m.file ?: return m.text
@@ -3160,7 +3251,17 @@ class MainActivity : Activity() {
      */
     private fun sendOrMic(row: LinearLayout, box: EditText, send: () -> Unit, special: (Boolean, Long) -> Unit, sendVoice: (ByteArray, ByteArray) -> Unit): View {
         val btn = icon(R.drawable.ic_mic, white)
-        fun showIcon() = btn.setImageResource(if (box.text.isNullOrBlank()) R.drawable.ic_mic else R.drawable.ic_send)
+        fun showIcon() = btn.setImageResource(if (!box.text.isNullOrBlank()) R.drawable.ic_send else if (videoMode) R.drawable.ic_videocam else R.drawable.ic_mic)
+        // tap the mic = switch to round video (and back); hold = record
+        val openRound = Runnable {
+            roundHeld = true
+            btn.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            @Suppress("DEPRECATION") startActivityForResult(Intent(this, RoundActivity::class.java), ROUND_VIDEO)
+        }
+        fun toggleMode() {
+            videoMode = !videoMode; showIcon()
+            if (videoMode) toast("Video message: hold to record. Tap to switch back to voice.")
+        }
         showIcon()
         box.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -3255,6 +3356,14 @@ class MainActivity : Activity() {
                 }
                 return@setOnTouchListener true
             }
+            if (videoMode) {
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { roundHeld = false; btn.postDelayed(openRound, 300) }
+                    MotionEvent.ACTION_UP -> { btn.removeCallbacks(openRound); if (!roundHeld) toggleMode() }
+                    MotionEvent.ACTION_CANCEL -> btn.removeCallbacks(openRound)
+                }
+                return@setOnTouchListener true
+            }
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -3287,7 +3396,7 @@ class MainActivity : Activity() {
                         if (dx > dp(130)) end(false)
                     }
                 }
-                MotionEvent.ACTION_UP -> if (!locked) end(true)
+                MotionEvent.ACTION_UP -> if (!locked) { if (active && Voice.elapsed() < 300) { end(false); toggleMode() } else end(true) }
                 MotionEvent.ACTION_CANCEL -> if (!locked) end(false)
             }
             true
@@ -3356,6 +3465,7 @@ class MainActivity : Activity() {
         val f = m.file!!
         val here = f.has("local")
         if (Voice.isVoice(f)) return voiceView(m, ink, onLong)
+        if (isRound(m)) return roundView(m, onLong)
         if (f.optString("m").startsWith("image/")) {
             val bmp = pictures[m.id] ?: run {
                 val full = if (here) Messenger.core.openFile(m)?.let { decodeSmall(it, 720) } else null
@@ -3517,6 +3627,7 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == SCAN_QR && resultCode == RESULT_OK) return data?.getStringExtra("qr")?.let { scanned(it) } ?: Unit
+        if (requestCode == ROUND_VIDEO && resultCode == RESULT_OK) return data?.getStringExtra("path")?.let { sendRound(it) } ?: Unit
         val uri = data?.data
         if (resultCode != RESULT_OK || uri == null) return
         if (requestCode == CREATE_RECOVERY) return setupRecovery(uri)
