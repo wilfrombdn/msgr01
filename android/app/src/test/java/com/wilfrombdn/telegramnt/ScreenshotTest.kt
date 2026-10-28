@@ -315,6 +315,32 @@ class ScreenshotTest {
         Messenger.pins.clear(); Messenger.folders.clear()
     }
 
+    /** Mute, drafts, Saved Messages, group typing (list); pinned bar; blocked chat; message search. */
+    @Test fun everyday() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val core = Messenger.core
+        val jo = core.contacts.first { it.user != "sam_r" && it.status == Contact.FRIENDS }
+        val sam = core.contact("sam_r")!!
+        val g = core.group("g1")!!
+        Messenger.muted.clear(); Messenger.muted.add("u:${jo.user}"); jo.unread = 2
+        Messenger.drafts.clear(); Messenger.drafts["u:sam_r"] = "ok i'll grab the"
+        g.typing["sam_r"] = System.currentTimeMillis() + 60_000
+        core.savedChat().msgs += Msg("s1", true, "VIN 1FUJGLDR5CL...", System.currentTimeMillis(), Msg.SENT)
+        sam.pinned = sam.msgs.first { it.text.isNotEmpty() && it.state == Msg.SENT }.id
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChats"); shoot(a, "50-list-everyday")
+        call(a, "showChat", "sam_r"); shoot(a, "51-pinned-bar")
+        call(a, "showGroup", "g1"); shoot(a, "52-group-typing")
+        core.block(jo.user, true)
+        call(a, "showChat", jo.user); shoot(a, "53-blocked")
+        core.block(jo.user, false)
+        a.javaClass.getDeclaredField("search").apply { isAccessible = true }.set(a, "truck")
+        call(a, "showChats"); shoot(a, "54-search")
+        a.javaClass.getDeclaredField("search").apply { isAccessible = true }.set(a, "")
+        call(a, "showChat", core.savedChat().user); shoot(a, "55-saved")
+        Messenger.muted.clear(); Messenger.drafts.clear()
+    }
+
     /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */
     @Test fun composerWraps() {
         Messenger.initForPreview(fakeCore(signedIn = true))

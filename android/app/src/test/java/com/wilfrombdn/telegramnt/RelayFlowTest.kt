@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Assume.assumeTrue
@@ -395,6 +396,57 @@ class RelayFlowTest {
         val fake = Msg(gm.id, true, "cancelled", 0, Msg.SENT)
         ci.editGroupMessage(cg, fake, "no work today"); bo.poll(8)
         assertEquals("7am start", bg.msgs.first { it.id == gm.id }.text)
+    }
+
+    /** Block, pinned messages (1:1 + admin-only in groups), group typing, and Saved Messages staying local. */
+    @Test fun everydayFeatures() {
+        assumeTrue(Relay(server).ping())
+        val al = withDisk(Core(server)); val bo = withDisk(Core(server)); val ci = withDisk(Core(server))
+        val au = "eda_$tag"; val bu = "edb_$tag"; val cu = "edc_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo"); ci.signup(cu, "cis long password", "Ci")
+        fun befriend(a: Core, aun: String, b: Core, bun: String) { a.addFriend(bun); b.poll(5); b.accept(b.contact(aun)!!, friend = true); a.poll(5) }
+        befriend(al, au, bo, bu); befriend(al, au, ci, cu)
+        val toBo = al.contact(bu)!!; val alOnBo = bo.contact(au)!!
+
+        // pin a message for both
+        val m1 = al.queue(toBo, "gate code 4411").also { al.deliver(toBo, it) }
+        bo.poll(5)
+        al.pinMessage(toBo, m1); bo.poll(5)
+        assertEquals(m1.id, alOnBo.pinned)
+        al.pinMessage(toBo, null); bo.poll(5)
+        assertNull(alOnBo.pinned)
+
+        // block: nothing from them gets through (and survives a save/load)
+        bo.block(au, true)
+        val before = alOnBo.msgs.size
+        al.queue(toBo, "you there?").also { al.deliver(toBo, it) }
+        al.sendTyping(toBo); bo.poll(5)
+        assertEquals(before, alOnBo.msgs.size); assertEquals(0L, alOnBo.theirTypingUntil)
+        assertTrue(au in Core(server).also { it.loadJson(bo.toJson()) }.blocked)
+        bo.block(au, false)
+        al.queue(toBo, "now?").also { al.deliver(toBo, it) }; bo.poll(5)
+        assertEquals("now?", alOnBo.msgs.last().text)
+
+        // group: typing shows; a stale typing is ignored; only admins pin
+        val g = al.createGroup("Crew", public = false, invite = listOf(bu, cu))
+        bo.poll(5); ci.poll(5); al.poll(5); bo.poll(5); ci.poll(5)
+        val bg = bo.groups.first { it.secret == g.secret }; val cg = ci.groups.first { it.secret == g.secret }
+        al.sendGroupTyping(g); bo.poll(8)
+        assertTrue((bg.typing[au] ?: 0) > System.currentTimeMillis())
+        val gm = al.sendGroup(g, "6am"); bo.poll(8); ci.poll(8)
+        assertNull(bg.typing[au])   // the message arrived
+        al.pinGroupMessage(g, gm); bo.poll(8)
+        assertEquals(gm.id, bg.pinned)
+        assertFalse(ci.canPin(cg))
+        runCatching { ci.pinGroupMessage(cg, null) }
+        bo.poll(8); assertEquals(gm.id, bg.pinned)
+
+        // Saved Messages: sent instantly, nothing goes to the server
+        val saved = al.savedChat()
+        assertSame(saved, al.savedChat())
+        val note = al.queue(saved, "buy filters").also { al.deliver(saved, it) }
+        assertEquals(Msg.SENT, note.state)
+        assertTrue(al.contacts.none { it.status == Contact.SAVED && it.user != au })
     }
 
     /** A reaction reaches the other side and survives a save/load. */

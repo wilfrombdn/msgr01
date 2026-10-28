@@ -96,17 +96,18 @@ class Contact(
     var theirReadUpto: Long = 0,        // my sent messages up to this time have been read by them
     var net: String = Core.NET_TOR,     // how they connect ("tor" / "direct"); calls need both on the same one
     var theirSeen: Long = 0,            // when they last had the app open (0 = unknown / they hide it)
+    var pinned: String? = null,         // id of the message pinned at the top of the chat (shared by both)
 ) {
     @Volatile var theirTypingUntil = 0L  // show "typing…" until then
     @Volatile var theirOnlineUntil = 0L  // show "online" until then (refreshed while their app is open)
     val myAddr get() = Crypto.addressOf(myToken)
     val lastTs get() = msgs.lastOrNull()?.ts ?: created
-    val canChat get() = status == Contact.FRIENDS || status == Contact.CHATTING
+    val canChat get() = status == Contact.FRIENDS || status == Contact.CHATTING || status == Contact.SAVED
 
     fun json(withMsgs: Boolean): JSONObject = JSONObject()
         .put("user", user).put("name", name).put("status", status).put("myToken", myToken)
         .put("theirAddr", theirAddr).put("theirEnc", theirEnc).put("theirSig", theirSig)
-        .put("verified", verified).put("created", created).put("theirInbox", theirInbox).put("waitingForAdd", waitingForAdd).put("theirIdent", theirIdent).put("ttl", ttl).put("net", net).put("seen", theirSeen)
+        .put("verified", verified).put("created", created).put("theirInbox", theirInbox).put("waitingForAdd", waitingForAdd).put("theirIdent", theirIdent).put("ttl", ttl).put("net", net).put("seen", theirSeen).put("pinned", pinned)
         .apply {
             if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() }))
                 .put("avatar", avatar?.let { Base64.getEncoder().encodeToString(it) })
@@ -117,6 +118,7 @@ class Contact(
         const val ASKING = 1   // they sent me one
         const val FRIENDS = 2
         const val CHATTING = 3 // message request accepted, but not friends
+        const val SAVED = 4    // "Saved Messages": a chat with yourself, kept only on this phone (nothing is sent)
 
         fun from(o: JSONObject): Contact {
             val c = Contact(
@@ -132,6 +134,7 @@ class Contact(
             c.ttl = o.optInt("ttl")
             c.net = o.optString("net", Core.NET_TOR).ifEmpty { Core.NET_TOR }
             c.theirSeen = o.optLong("seen", 0)
+            c.pinned = o.optString("pinned").ifEmpty { null }
             c.avatar = o.optString("avatar").takeIf { it.isNotEmpty() }?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
             return c
         }
@@ -180,6 +183,8 @@ class Group(
     var readOnly = false                  // true = only leaders can post (client-enforced)
     var setVer = 0                        // version counter for settings changes (newer wins)
     var epoch = 0                         // re-key generation; a higher epoch's secret replaces a lower one
+    var pinned: String? = null            // id of the pinned message (set by an admin)
+    val typing = java.util.concurrent.ConcurrentHashMap<String, Long>()   // @username -> show "typing…" until (not saved)
     val pending = mutableListOf<Triple<String, String, ByteArray>>() // gmsgs waiting for a sender key
     val pendingCtl = mutableListOf<Pair<String, ByteArray>>()        // gctl controls waiting for a sender key
     val rekeyDue = mutableSetOf<String>()               // owner: members a leave means I still have to re-key out
@@ -200,7 +205,7 @@ class Group(
     fun json(withMsgs: Boolean): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("secret", secret).put("public", public)
         .put("cursor", cursor).put("created", created).put("members", JSONArray(members.toList()))
-        .put("owner", owner).put("leaders", JSONArray(leaders.toList())).put("readOnly", readOnly).put("setVer", setVer).put("epoch", epoch)
+        .put("owner", owner).put("leaders", JSONArray(leaders.toList())).put("readOnly", readOnly).put("setVer", setVer).put("epoch", epoch).put("pinned", pinned)
         .put("rekeyDue", JSONArray(rekeyDue.toList()))
         .put("rekeyResend", JSONArray(rekeyResend.map { JSONObject().put("addr", it.addr).put("blob", it.blob).put("until", it.until).put("last", it.last) }))
         .apply { if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() })) }
@@ -212,6 +217,7 @@ class Group(
             o.optJSONArray("members")?.let { for (i in 0 until it.length()) g.members.add(it.getString(i)) }
             o.optJSONArray("leaders")?.let { for (i in 0 until it.length()) g.leaders.add(it.getString(i)) }
             g.readOnly = o.optBoolean("readOnly"); g.setVer = o.optInt("setVer"); g.epoch = o.optInt("epoch")
+            g.pinned = o.optString("pinned").ifEmpty { null }
             o.optJSONArray("rekeyDue")?.let { for (i in 0 until it.length()) g.rekeyDue.add(it.getString(i)) }
             o.optJSONArray("rekeyResend")?.let { for (i in 0 until it.length()) it.getJSONObject(i).let { r ->
                 g.rekeyResend.add(ResendItem(r.getString("addr"), r.getString("blob"), r.getLong("until"), r.optLong("last")))
@@ -243,6 +249,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     var readReceipts = true   // tell friends when I've read their messages (and so see theirs)
     var showTyping = true     // tell a friend when I'm typing to them
     var showSeen = true       // tell friends when I'm online / last seen
+    /** @usernames I've blocked: nothing from them gets through and they get no signals from me. They aren't told. */
+    val blocked: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())
     var onChange: () -> Unit = {}
     var onNew: (Contact) -> Unit = {}
     /** Where encrypted attachments are kept on this device (Android: files folder; tests: memory). */
@@ -386,7 +394,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val m = me ?: return
         m.cloudBackup = on
         backupDirty = false
-        relay.saveBackup(m.user, m.device, lockedBackup(m, synchronized(this) { contacts.toList() }))
+        relay.saveBackup(m.user, m.device, lockedBackup(m, synchronized(this) { contacts.filter { it.status != Contact.SAVED } }))
         changed()
     }
 
@@ -394,7 +402,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val m = me ?: return
         backupDirty = false
         try {
-            relay.saveBackup(m.user, m.device, lockedBackup(m, synchronized(this) { contacts.toList() }))
+            relay.saveBackup(m.user, m.device, lockedBackup(m, synchronized(this) { contacts.filter { it.status != Contact.SAVED } }))
         } catch (e: Exception) {
             backupDirty = true
             throw e
@@ -754,6 +762,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     return
                 }
                 if (!g.canPost(u)) return   // read-only: ignore posts from non-leaders
+                g.typing.remove(u)
                 addGroupMsg(g, u, id, String(text), Msg.replyRef(inner.optJSONObject("r")), Msg.fwdOf(inner))
             }
             "gdel" -> {
@@ -791,6 +800,17 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 val msg = Msg(id, false, "", System.currentTimeMillis(), Msg.RECEIVED).also { it.sender = u; it.file = f; it.fwd = Msg.fwdOf(p) }
                 synchronized(this) { g.msgs.add(msg); if (openChat != "g:${g.id}") g.unread++ }
                 toFetch.add(msg)   // poll() downloads it; fetchFile skips doneWith for group files
+            }
+            "typing" -> {
+                if (System.currentTimeMillis() - p.optLong("ts", 0) > 15_000) return   // old news (re-read from the mailbox)
+                g.typing[u] = System.currentTimeMillis() + TYPING_MS
+                onChange()
+            }
+            "pinm" -> {   // admins pin (any member in a legacy group without roles)
+                if (g.owner.isNotEmpty() && !g.isLeader(u)) return
+                val id = p.optString("id")
+                synchronized(this) { g.pinned = if (id.isEmpty() || g.msgs.none { it.id == id }) null else id }
+                onChange()
             }
             "edit" -> {   // only the original sender (proven by the gctl decrypt) may change a message
                 val id = p.optString("id"); val x = p.optString("x").take(MAX_TEXT)
@@ -880,7 +900,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val lastTheirs = synchronized(this) { c.msgs.lastOrNull { !it.mine && it.state == Msg.RECEIVED }?.ts ?: 0 }
         if (had) onChange()
         val m = me ?: return
-        if (readReceipts && c.canChat && lastTheirs > 0) {
+        if (readReceipts && c.canChat && lastTheirs > 0 && c.user !in blocked) {
             runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "read").put("ts", lastTheirs)) }
         }
     }
@@ -892,8 +912,15 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     /** Tells [c] I'm typing (the caller limits how often). Network: off the main thread. */
     fun sendTyping(c: Contact) {
         val m = me ?: return
-        if (!showTyping || c.status != Contact.FRIENDS) return
-        runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "typing")) }
+        if (!showTyping || c.status != Contact.FRIENDS || c.user in blocked) return
+        runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "typing").put("ts", System.currentTimeMillis())) }
+    }
+
+    /** Tells the group I'm typing (the caller limits how often). Network. */
+    fun sendGroupTyping(g: Group) {
+        val m = me ?: return
+        if (!showTyping || !g.canPost(m.user)) return
+        runCatching { gctl(g, m, JSONObject().put("t", "typing").put("ts", System.currentTimeMillis())) }
     }
 
     /** Tells every friend I'm [online] now, or that I just left. "hide" clears what they show. Network. */
@@ -901,7 +928,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val m = me ?: return
         if (!showSeen && !hide) return
         val o = JSONObject().put("t", "seen").put("ts", System.currentTimeMillis()).put("on", online).put("hide", hide)
-        val friends = synchronized(this) { contacts.filter { it.status == Contact.FRIENDS } }
+        val friends = synchronized(this) { contacts.filter { it.status == Contact.FRIENDS && it.user !in blocked } }
         for (c in friends) runCatching { sealSignal(m, c, c.theirAddr!!, o) }
     }
 
@@ -1132,6 +1159,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     fun deliver(c: Contact, msg: Msg) {
         val m = me ?: return
         if (c.status == Contact.ASKING) return
+        if (c.status == Contact.SAVED) { msg.state = Msg.SENT; onChange(); return }
         msg.state = Msg.SENDING
         var editedMeanwhile = false
         msg.state = try {
@@ -1162,6 +1190,45 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         }
         onChange()
         if (editedMeanwhile && c.canChat) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "edit").put("id", msg.id).put("x", msg.text)) }
+    }
+
+    // ---------- pinned message, block, saved messages ----------
+
+    /** Pins [msg] at the top of the chat for both of us (null unpins). Network: off the main thread. */
+    fun pinMessage(c: Contact, msg: Msg?) {
+        synchronized(this) { c.pinned = msg?.id }
+        onChange()
+        val m = me ?: return
+        if (c.canChat) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "pinm").put("id", msg?.id ?: "")) }
+    }
+
+    fun canPin(g: Group) = me?.user?.let { g.owner.isEmpty() || g.isLeader(it) } == true
+
+    fun pinGroupMessage(g: Group, msg: Msg?) {
+        val m = me ?: return
+        if (!canPin(g)) throw UserError("Only an admin can pin messages")
+        synchronized(this) { g.pinned = msg?.id }
+        onChange()
+        runCatching { gctl(g, m, JSONObject().put("t", "pinm").put("id", msg?.id ?: "")) }
+    }
+
+    fun block(user: String, on: Boolean) {
+        if (on) blocked.add(user) else blocked.remove(user)
+        contact(user)?.let { it.theirTypingUntil = 0; it.theirOnlineUntil = 0 }
+        changed()
+    }
+
+    /** "Saved Messages": a chat with myself, kept only on this phone. Made the first time it's opened. */
+    fun savedChat(): Contact {
+        val m = me ?: throw UserError("Not signed in")
+        synchronized(this) {
+            contacts.firstOrNull { it.status == Contact.SAVED }?.let { return it }
+            val c = Contact(m.user, "Saved Messages", Contact.SAVED, Crypto.randomHex(32), null, "", "")
+            c.msgs.add(note("Save messages, photos and files here. They stay on this phone only."))
+            contacts.add(c)
+            changed()
+            return c
+        }
     }
 
     /** Changes the text of my sent message here and on their phone. Network: off the main thread. */
@@ -1234,6 +1301,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     /** Encrypts [inner] in the Signal session with [c] (starting one if needed) and sends it to [address]. */
     private fun sealSignal(m: Me, c: Contact, address: String, inner: JSONObject) {
+        if (c.status == Contact.SAVED) return   // my own notes: nothing leaves the phone
         val remote = SignalProtocolAddress(c.user, 1)
         val ct = synchronized(m.signal) {
             if (!m.signal.containsSession(remote)) startSession(m, c)
@@ -1292,7 +1360,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     /** One round of picking up mail. Waits up to [wait] seconds for something to arrive. */
     fun poll(wait: Int) {
         val m = me ?: return
-        val byToken = synchronized(this) { contacts.associateBy { it.myToken } }
+        val byToken = synchronized(this) { contacts.filter { it.status != Contact.SAVED }.associateBy { it.myToken } }
         // The friend-request inbox is listed under my @username, so it's checked in its own request:
         // the server never sees it fetched together with my chat mailboxes.
         val got = fetchFrom(listOf(m.inboxToken), inboxAcks, if (byToken.isEmpty()) wait else 0) +
@@ -1339,6 +1407,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val sigKey = Crypto.parsePublic(unb64(p.sig), Crypto.SIG_TEMPLATE) ?: run { drop("req:sigkey"); return }
         if (!Crypto.verify(sigKey, o)) { drop("req:verify"); return }
         val inner = openSignal(m, user, p.ident, env) ?: run { unreadable++; drop("req:signal"); return }
+        if (user in blocked) { drop("req:blocked"); return }
         val kind = inner.optString("t")
         if (kind != "request" && kind != "rmsg") { drop("req:kind?$kind"); return }
         val addr = inner.optString("a")
@@ -1383,6 +1452,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val env = parse(o) ?: run { drop("chat:parse"); return }
         if (c.theirIdent == null) c.theirIdent = relay.lookup(c.user)?.ident?.ifEmpty { null }
         val inner = openSignal(m, c.user, c.theirIdent, env) ?: run { unreadable++; drop("chat:signal"); return }
+        if (c.user in blocked) { drop("chat:blocked"); return }   // decrypted (keeps the ratchet in step), then ignored
         drop("chat:OK->${inner.optString("t")}")
         when (inner.optString("t")) {
             "accept" -> {
@@ -1421,6 +1491,11 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     synchronized(this) { g.members.add(c.user) }
                 }
             }
+            "pinm" -> {
+                val id = inner.optString("id")
+                synchronized(this) { c.pinned = if (id.isEmpty() || c.msgs.none { it.id == id }) null else id }
+                onChange()
+            }
             "edit" -> {
                 val id = inner.optString("id"); val x = inner.optString("x").take(MAX_TEXT)
                 if (x.isBlank()) return
@@ -1436,6 +1511,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             "net" -> { val n = inner.optString("n"); if (n == NET_TOR || n == NET_DIRECT) { c.net = n; onChange() } }
             "typing" -> {
                 if (c.status != Contact.FRIENDS) return
+                if (System.currentTimeMillis() - inner.optLong("ts", System.currentTimeMillis()) > 15_000) return   // old news
                 c.theirTypingUntil = System.currentTimeMillis() + TYPING_MS
                 onChange()
             }
@@ -1591,7 +1667,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 .put("cloudBackup", m.cloudBackup))
         }
         return o.put("contacts", JSONArray(contacts.map { it.json(withMsgs = true) })).put("backupDirty", backupDirty)
-            .put("readReceipts", readReceipts).put("showTyping", showTyping).put("showSeen", showSeen).put("groups", JSONArray(groups.map { it.json(withMsgs = true) }))
+            .put("readReceipts", readReceipts).put("showTyping", showTyping).put("showSeen", showSeen).put("blocked", JSONArray(blocked.toList())).put("groups", JSONArray(groups.map { it.json(withMsgs = true) }))
     }
 
     @Synchronized
@@ -1618,6 +1694,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         readReceipts = o.optBoolean("readReceipts", true)
         showTyping = o.optBoolean("showTyping", true)
         showSeen = o.optBoolean("showSeen", true)
+        blocked.clear(); o.optJSONArray("blocked")?.let { for (i in 0 until it.length()) blocked.add(it.getString(i)) }
         groups.clear()
         o.optJSONArray("groups")?.let { for (i in 0 until it.length()) groups.add(Group.from(it.getJSONObject(i))) }
         // attachments that arrived but weren't downloaded yet

@@ -680,7 +680,8 @@ class MainActivity : Activity() {
             }
         }
         for (t in rows.filter { it.first !in inFolder }.sortedByDescending { it.second }) list.addView(rowFor(t))
-        if (all.isEmpty() && grps.isEmpty()) {
+        if (q.length >= 2) messageResults(list, q)
+        if (all.isEmpty() && grps.isEmpty() && (q.length < 2 || list.childCount == 0)) {
             list.addView(tv(
                 if (q.isNotEmpty()) "No chats match \"$search\""
                 else "Welcome, ${core.me?.name}!\n\nTap the pencil to add a friend by their @username.\n\nYour username is @${core.me?.user}. Share it so friends can add you.",
@@ -914,6 +915,7 @@ class MainActivity : Activity() {
     private fun chatRowMenu(key: String) {
         val pinned = key in Messenger.pins
         longPressMenu(null, null, listOf(
+            (if (key in Messenger.muted) "Unmute" else "Mute") to { toggleMute(key) },
             (if (pinned) "Unpin" else "Pin to top") to {
                 val ps = Messenger.pins
                 if (pinned) ps.remove(key) else { ps.remove(key); ps.add(0, key) }
@@ -929,10 +931,11 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(8), dp(14), dp(8))
             setOnClickListener { showChat(c.user) }
         }
-        row.addView(avatar(c.name, 54, c.avatar))
+        row.addView(if (c.status == Contact.SAVED) savedAvatar(54) else avatar(c.name, 54, c.avatar))
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
         val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         line1.addView(tv(c.name, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        if ("u:${c.user}" in Messenger.muted) line1.addView(tv("🔇", 12f, dim).apply { setPadding(dp(4), 0, 0, 0) })
         val last = c.msgs.lastOrNull()
         if (last?.mine == true && last.state == Msg.SENT) line1.addView(icon(R.drawable.ic_check, blue, 16, 2))
         if (key in pinnedKeys) line1.addView(pinMark())
@@ -942,7 +945,8 @@ class MainActivity : Activity() {
         val (preview, previewColor) = when {
             c.status == Contact.ASKING -> (last?.takeIf { it.state == Msg.RECEIVED }?.let { "Message request: ${it.text}" } ?: "Wants to be your friend") to blue
             c.status == Contact.ASKED && last?.state == Msg.NOTE -> "Friend request sent" to dim
-            c.status == Contact.FRIENDS && c.theirTypingUntil > System.currentTimeMillis() -> "typing…" to blue
+            c.status == Contact.FRIENDS && c.theirTypingUntil > System.currentTimeMillis() && c.user !in Messenger.core.blocked -> "typing…" to blue
+            Messenger.drafts["u:${c.user}"] != null -> "Draft: ${Messenger.drafts["u:${c.user}"]!!.replace('\n', ' ')}" to red
             last == null -> "" to dim
             last.mine && last.call == null -> "You: ${preview(last)}" to dim
             last.call?.optString("s") == "missed" -> preview(last) to red
@@ -950,11 +954,12 @@ class MainActivity : Activity() {
         }
         line2.addView(tv(preview, 15f, previewColor).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
         val badge = if (c.status == Contact.ASKING) 1 else c.unread
+        val quiet = "u:${c.user}" in Messenger.muted
         if (badge > 0) line2.addView(tv("$badge", 12.5f, white, true).apply {
             gravity = Gravity.CENTER
             minWidth = dp(22)
             setPadding(dp(6), dp(1), dp(6), dp(1))
-            background = round(blue, 11)
+            background = round(if (quiet) faint else blue, 11)   // muted chats get a grey count
         })
         mid.addView(line2)
         row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
@@ -988,19 +993,25 @@ class MainActivity : Activity() {
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
         val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         line1.addView(tv(g.name, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        if ("g:${g.id}" in Messenger.muted) line1.addView(tv("🔇", 12f, dim).apply { setPadding(dp(4), 0, 0, 0) })
         if (key in pinnedKeys) line1.addView(pinMark())
         line1.addView(tv(time(g.lastTs), 13f, dim).apply { setPadding(dp(4), 0, 0, 0) })
         mid.addView(line1)
         val last = g.msgs.lastOrNull { it.state != Msg.NOTE }
+        val draft = Messenger.drafts["g:${g.id}"]
+        val typingNow = groupTyping(g)
         val preview = when {
+            typingNow != null -> typingNow
+            draft != null -> "Draft: ${draft.replace('\n', ' ')}"
             last == null -> "${g.members.size} member" + if (g.members.size != 1) "s" else ""
             last.mine -> "You: ${last.text}"
             else -> "${last.sender ?: "?"}: ${last.text}"
         }
         val line2 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
-        line2.addView(tv(preview, 15f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        line2.addView(tv(preview, 15f, if (typingNow != null) blue else if (draft != null) red else dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
         if (g.unread > 0) line2.addView(tv("${g.unread}", 12.5f, white, true).apply {
-            gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1)); background = round(blue, 11)
+            gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1))
+            background = round(if ("g:${g.id}" in Messenger.muted) faint else blue, 11)
         })
         mid.addView(line2)
         row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
@@ -1095,7 +1106,7 @@ class MainActivity : Activity() {
         screen = "group"; groupId = id; chatUser = null
         Messenger.core.openChat = "g:$id"
         stick = restore == null; restoreTo = restore
-        groupTop = LinearLayout(this)
+        groupTop = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         groupBubbles = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
             isClickable = true; setOnClickListener { dismissKeyboard() }
@@ -1124,7 +1135,16 @@ class MainActivity : Activity() {
             val r = replyTo?.let { replyRef(it) }; cancelReply()
             Messenger.io.execute { Messenger.core.sendGroup(g2, t, r) }
         }
+        box.setText(Messenger.drafts["g:$id"] ?: "")
         box.setOnEditorActionListener { _, aid, _ -> if (aid == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
+        keepDraft(box, "g:$id")
+        box.addTextChangedListener(object : TextWatcher {   // the group sees "you are typing…" (unless switched off)
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {
+                if (!s.isNullOrBlank() && n > 0 && editing == null) Messenger.core.group(id)?.let { Messenger.groupTyping(it) }
+            }
+            override fun afterTextChanged(e: android.text.Editable?) {}
+        })
         bar2.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         bar2.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box, g) } })
         bar2.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachGroupId = id; attachTo = null; attachMenu(v) } })
@@ -1150,9 +1170,12 @@ class MainActivity : Activity() {
         val g = groupId?.let { Messenger.core.group(it) } ?: return
         if (g.unread != 0) { g.unread = 0; Messenger.save() }
         groupTop?.removeAllViews()
-        groupTop?.addView(topBar(g.name, "${g.members.size} member" + (if (g.members.size != 1) "s" else "") + (if (g.public) " · public" else "") + if (g.readOnly) " · read-only" else "",
+        val typing = groupTyping(g)
+        val info = "${g.members.size} member" + (if (g.members.size != 1) "s" else "") + (if (g.public) " · public" else "") + if (g.readOnly) " · read-only" else ""
+        groupTop?.addView(topBar(g.name, typing?.let { android.text.SpannableString(it).apply { setSpan(android.text.style.ForegroundColorSpan(blue), 0, it.length, 0) } } ?: info,
             LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; addView(icon(R.drawable.ic_back) { showChats() }); addView(avatar(g.name, 40)) },
             icon(R.drawable.ic_more) { groupMenu(g) }), LinearLayout.LayoutParams(-1, -2))
+        pinnedBar(g.pinned, g.msgs, groupBubbles, groupScroller, Messenger.core.canPin(g)) { Messenger.run({ Messenger.core.pinGroupMessage(g, null) }) { e -> toast(errorText(e)) } }?.let { groupTop?.addView(it) }
         val list = groupBubbles ?: return
         val msgs = synchronized(Messenger.core) { g.msgs.takeLast(300) }
         if (!stick && restoreTo == null) restoreTo = anchorOf(groupScroller, list)
@@ -1201,6 +1224,9 @@ class MainActivity : Activity() {
         })
         opts.addAll(imageActions(m, if (m.text.isNotEmpty()) "Copy photo" else "Copy"))
         if (canForward(m)) opts.add("Forward" to { forwardPicker(m, authorOf(m)) })
+        if (Messenger.core.canPin(g)) opts.add((if (g.pinned == m.id) "Unpin" else "Pin") to {
+            Messenger.run({ Messenger.core.pinGroupMessage(g, if (g.pinned == m.id) null else m) }) { e -> toast(errorText(e)) }
+        })
         if (m.mine && m.text.isNotEmpty() && g.canPost(me ?: "")) opts.add("Edit" to { startEdit(m, groupBox) })
         if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
             Messenger.io.execute { Messenger.core.deleteGroupMessage(g, m, forEveryone = true) }
@@ -1211,6 +1237,8 @@ class MainActivity : Activity() {
 
     private fun groupMenu(g: Group) {
         val items = mutableListOf<Pair<String, () -> Unit>>()
+        val key = "g:${g.id}"
+        items.add((if (key in Messenger.muted) "Unmute" else "Mute") to { toggleMute(key) })
         if (g.public) items.add("Copy invite link" to {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("group", Messenger.core.groupInviteLink(g)))
             toast("Invite link copied")
@@ -1345,7 +1373,7 @@ class MainActivity : Activity() {
         Messenger.core.openChat = user
         stick = restore == null; restoreTo = restore
 
-        chatTop = LinearLayout(this)
+        chatTop = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         banner = FrameLayout(this)
         bubbles = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -1387,7 +1415,9 @@ class MainActivity : Activity() {
             val r = replyTo?.let { replyRef(it) }; cancelReply()
             Messenger.send(c, t, r)
         }
+        box.setText(Messenger.drafts["u:${c.user}"] ?: "")   // what you left unsent last time
         box.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
+        keepDraft(box, "u:${c.user}")
         box.addTextChangedListener(object : TextWatcher {   // friends see "typing…" (unless switched off in Settings)
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) { if (!s.isNullOrBlank() && n > 0) Messenger.typing(c) }
@@ -1400,6 +1430,11 @@ class MainActivity : Activity() {
         replyTo = null; replyBar = makeReplyBar(); chatBox = box
         val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(replyBar); addView(input) }
         composer = compose
+        // blocked: no message box, just a way back
+        val bottom: View = if (c.user in Messenger.core.blocked && c.status != Contact.SAVED) tv("Unblock", 16f, blue, true).apply {
+            gravity = Gravity.CENTER; setBackgroundColor(listBg); setPadding(dp(16), dp(16), dp(16), dp(16)); background = pressable()
+            setOnClickListener { blockConfirm(c, false) }
+        } else compose
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1408,7 +1443,7 @@ class MainActivity : Activity() {
             addView(chatTop, LinearLayout.LayoutParams(-1, -2))
             addView(banner, LinearLayout.LayoutParams(-1, -2))
             addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
-            addView(compose, LinearLayout.LayoutParams(-1, -2))
+            addView(bottom, LinearLayout.LayoutParams(-1, -2))
         }
         setContentView(root)
         fillChat()
@@ -1423,20 +1458,24 @@ class MainActivity : Activity() {
             Contact.ASKED -> "friend request sent"
             Contact.ASKING -> if (c.msgs.any { !it.mine && it.state == Msg.RECEIVED }) "message request" else "wants to be your friend"
             Contact.CHATTING -> if (c.waitingForAdd) "@${c.user} · hasn't added you yet" else "@${c.user} · not your friend"
-            else -> if (c.verified) "@${c.user} · verified ✓" else "@${c.user}"
+            Contact.SAVED -> "only on this phone"
+            else -> if (c.user in Messenger.core.blocked) "@${c.user} · blocked" else if (c.verified) "@${c.user} · verified ✓" else "@${c.user}"
         }
         chatTop?.removeAllViews()
         val blocked = Messenger.core.callBlocked(c)
         val netNote = blocked?.takeIf { c.status == Contact.FRIENDS }   // "your network differs…" shows under the name
-        val live = presence(c)
+        val live = presence(c).takeIf { c.user !in Messenger.core.blocked }
         val head: CharSequence = if (live?.toString() == "typing…") live else netNote ?: live ?: sub
-        chatTop?.addView(topBar(c.name, head, LinearLayout(this).apply {
+        val left = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(icon(R.drawable.ic_back) { showChats() })
-            addView(avatar(c.name, 40, c.avatar))
-        }, icon(R.drawable.ic_call, if (blocked == null) white else faint, 22) {
-            if (blocked != null) toast(blocked) else callFriend(c)
-        }, icon(R.drawable.ic_more).also { v -> v.setOnClickListener { chatMenu(c, v) } }), LinearLayout.LayoutParams(-1, -2))
+            addView(if (c.status == Contact.SAVED) savedAvatar(40) else avatar(c.name, 40, c.avatar))
+        }
+        val more = icon(R.drawable.ic_more).also { v -> v.setOnClickListener { chatMenu(c, v) } }
+        chatTop?.addView(if (c.status == Contact.SAVED) topBar(c.name, head, left, more) else topBar(c.name, head, left,
+            icon(R.drawable.ic_call, if (blocked == null) white else faint, 22) { if (blocked != null) toast(blocked) else callFriend(c) }, more),
+            LinearLayout.LayoutParams(-1, -2))
+        pinnedBar(c.pinned, c.msgs, bubbles, scroller, c.canChat) { Messenger.run({ Messenger.core.pinMessage(c, null) }) }?.let { chatTop?.addView(it) }
 
         banner?.removeAllViews()
         fun bannerButton(label: String, color: Int, action: () -> Unit) = tv(label, 15f, color, true).apply {
@@ -1465,7 +1504,7 @@ class MainActivity : Activity() {
         val msgs = synchronized(Messenger.core) { c.msgs.takeLast(300) }
         if (!stick && restoreTo == null) restoreTo = anchorOf(scroller, list)
         list.removeAllViews()
-        list.addView(note(if (c.verified) "Messages are end-to-end encrypted. Safety code checked ✓"
+        if (c.status != Contact.SAVED) list.addView(note(if (c.verified) "Messages are end-to-end encrypted. Safety code checked ✓"
         else "Messages are end-to-end encrypted. Tap here to check the safety code.") { safety(c) })
         for (m in msgs) list.addView(if (m.state == Msg.NOTE) note(m.text) else bubble(c, m))
     }
@@ -1555,20 +1594,7 @@ class MainActivity : Activity() {
                 addView(tv(displayName(who), 13.5f, accent, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
                 addView(tv(orig?.let { preview(it) } ?: r.optString("p").ifEmpty { "Message deleted" }, 14f, faded).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
             })
-            setOnClickListener {
-                val l = list ?: return@setOnClickListener; val s = sc ?: return@setOnClickListener
-                for (i in 0 until l.childCount) {
-                    val v = l.getChildAt(i)
-                    if (v.tag == r.optString("id")) {
-                        s.smoothScrollTo(0, maxOf(0, v.top - dp(80)))
-                        // brief flash so you can see which message it was
-                        v.foreground = android.graphics.drawable.ColorDrawable(Color.parseColor("#304EA4F6"))
-                        v.postDelayed({ v.foreground = null }, 900)
-                        return@setOnClickListener
-                    }
-                }
-                toast("That message isn't loaded any more")
-            }
+            setOnClickListener { jumpTo(r.optString("id"), list, sc) }
             layoutParams = LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(4) }
         }
     }
@@ -2010,6 +2036,9 @@ class MainActivity : Activity() {
         })
         opts.addAll(imageActions(m, if (m.text.isNotEmpty()) "Copy photo" else "Copy"))
         if (canForward(m)) opts.add("Forward" to { forwardPicker(m, authorOf(m)) })
+        if (c.canChat && m.call == null) opts.add((if (c.pinned == m.id) "Unpin" else "Pin") to {
+            Messenger.run({ Messenger.core.pinMessage(c, if (c.pinned == m.id) null else m) })
+        })
         if (m.mine && m.text.isNotEmpty() && c.canChat) opts.add("Edit" to { startEdit(m, chatBox) })
         if (m.mine && m.state != Msg.FAILED) opts.add("Delete for everyone" to {
             Messenger.run({ Messenger.core.deleteMessage(c, m, forEveryone = true) }, { fillChat() })
@@ -2018,8 +2047,129 @@ class MainActivity : Activity() {
         longPressMenu(m.reactions[me], { e -> Messenger.react(c, m, e); fillChat() }, opts)
     }
 
+    // ---------- mute, block, pinned message, drafts, search ----------
+
+    private fun toggleMute(key: String) {
+        val ms = Messenger.muted
+        val on = key !in ms
+        if (on) ms.add(key) else ms.remove(key)
+        Messenger.settingsChanged()
+        toast(if (on) "Muted: no notifications from this chat" else "Unmuted")
+        redraw()
+    }
+
+    private fun blockConfirm(c: Contact, on: Boolean) {
+        if (!on) { Messenger.core.block(c.user, false); Messenger.save(); toast("Unblocked"); showChat(c.user); return }
+        popup("Block ${c.name}?", "They won't be able to message or call you, and won't see when you're online, typing or have read their messages. They aren't told.",
+            null, "Cancel" to dim, "Block" to red) { i ->
+            if (i == 1) { Messenger.core.block(c.user, true); Messenger.save(); showChat(c.user) }
+        }
+    }
+
+    /** Scrolls the chat to message [id] and flashes it. */
+    private fun jumpTo(id: String, list: LinearLayout?, sc: ScrollView?) {
+        val l = list ?: return; val s = sc ?: return
+        for (i in 0 until l.childCount) {
+            val v = l.getChildAt(i)
+            if (v.tag == id) {
+                s.smoothScrollTo(0, maxOf(0, v.top - dp(80)))
+                // brief flash so you can see which message it was
+                v.foreground = android.graphics.drawable.ColorDrawable(Color.parseColor("#304EA4F6"))
+                v.postDelayed({ v.foreground = null }, 900)
+                return
+            }
+        }
+        toast("That message isn't loaded any more")
+    }
+
+    /** The "📌 Pinned message" strip under a chat's title: tap to jump to it, ✕ unpins it (for everyone). */
+    private fun pinnedBar(id: String?, msgs: List<Msg>, list: LinearLayout?, sc: ScrollView?, canUnpin: Boolean, unpin: () -> Unit): View? {
+        val m = synchronized(Messenger.core) { msgs.firstOrNull { it.id == id } } ?: return null
+        return LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(bar); setPadding(dp(14), dp(6), dp(4), dp(6)); background = pressable()
+            addView(View(context).apply { setBackgroundColor(blue) }, LinearLayout.LayoutParams(dp(3), dp(34)))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
+                addView(tv("Pinned message", 13.5f, blue, true))
+                addView(tv(preview(m), 14f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            if (canUnpin) addView(tv("✕", 17f, dim).apply { setPadding(dp(14), dp(6), dp(14), dp(6)); setOnClickListener { unpin() } })
+            setOnClickListener { jumpTo(m.id, list, sc) }
+        }
+    }
+
+    /** "sam is typing…" / "sam and jo are typing…", or null. */
+    private fun groupTyping(g: Group): String? {
+        val now = System.currentTimeMillis()
+        val who = g.typing.filter { it.value > now }.keys.map { u -> Messenger.core.contact(u)?.name ?: "@$u" }
+        return when (who.size) {
+            0 -> null
+            1 -> "${who[0]} is typing…"
+            2 -> "${who[0]} and ${who[1]} are typing…"
+            else -> "${who.size} people are typing…"
+        }
+    }
+
+    /** Remembers what's in the box for [key] as you type (cleared when sent). Not while editing a message. */
+    private fun keepDraft(box: EditText, key: String) = box.addTextChangedListener(object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
+        override fun onTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
+        override fun afterTextChanged(e: android.text.Editable?) {
+            if (editing != null) return
+            val t = e?.toString().orEmpty()
+            if (t.isBlank()) Messenger.drafts.remove(key) else Messenger.drafts[key] = t
+        }
+    })
+
+    private fun savedAvatar(sizeDp: Int): View = FrameLayout(this).apply {
+        background = circle(blue)
+        addView(ImageView(context).apply { setImageResource(R.drawable.ic_bookmark); setColorFilter(Color.WHITE) },
+            FrameLayout.LayoutParams(dp(sizeDp / 2), dp(sizeDp / 2), Gravity.CENTER))
+        layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+    }
+
+    /** Search results inside messages (all chats and groups): tap one to open the chat at that message. */
+    private fun messageResults(list: LinearLayout, q: String) {
+        val core = Messenger.core
+        data class Hit(val title: String, val m: Msg, val open: () -> Unit)
+        val hits = synchronized(core) {
+            core.contacts.filter { it.status != Contact.ASKING }.flatMap { c -> c.msgs.filter { it.state != Msg.NOTE && it.text.lowercase().contains(q) }
+                .map { m -> Hit(c.name, m) { showChat(c.user, m.id to dp(80)) } } } +
+            core.groups.flatMap { g -> g.msgs.filter { it.state != Msg.NOTE && it.text.lowercase().contains(q) }
+                .map { m -> Hit(g.name, m) { showGroup(g.id, m.id to dp(80)) } } }
+        }.sortedByDescending { it.m.ts }.take(60)
+        if (hits.isEmpty()) return
+        list.addView(tv("Messages", 14f, dim, true).apply { setPadding(dp(16), dp(14), dp(16), dp(6)); setBackgroundColor(nestedBg) })
+        for (h in hits) list.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(10)); background = pressable()
+            addView(LinearLayout(context).apply {
+                addView(tv(h.title, 15.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(tv(time(h.m.ts), 13f, dim))
+            })
+            // the matching part, with the words around it
+            val t = h.m.text.replace('\n', ' ')
+            val at = t.lowercase().indexOf(q)
+            val start = maxOf(0, at - 30)
+            val shown = (if (start > 0) "…" else "") + t.substring(start)
+            val span = android.text.SpannableString(shown)
+            val hit = shown.lowercase().indexOf(q)
+            if (hit >= 0) span.setSpan(android.text.style.ForegroundColorSpan(blue), hit, hit + q.length, 0)
+            addView(tv("", 14.5f, dim).apply { text = span; maxLines = 2; ellipsize = TextUtils.TruncateAt.END; setPadding(0, dp(2), 0, 0) })
+            setOnClickListener { search = ""; screenSearch = false; h.open() }
+        })
+    }
+
     private fun chatMenu(c: Contact, anchor: View) {
+        val key = "u:${c.user}"
+        val isMuted = key in Messenger.muted
+        val isBlocked = c.user in Messenger.core.blocked
+        if (c.status == Contact.SAVED) {
+            dropdown(anchor, Gravity.END, "Delete all saved messages" to { deleteChatConfirm(c) })
+            return
+        }
         dropdown(anchor, Gravity.END,
+            (if (isMuted) "Unmute" else "Mute") to { toggleMute(key) },
+            (if (isBlocked) "Unblock" else "Block") to { blockConfirm(c, !isBlocked) },
             "Safety code" to { safety(c) },
             (if (c.ttl == 0) "Disappearing messages" else "Disappearing: on") to { timerMenu(c) },
             "Rename" to {
@@ -2115,6 +2265,7 @@ class MainActivity : Activity() {
         item(R.drawable.ic_more, "New Group") { showNewGroup() }
         item(R.drawable.ic_search, "Join Group", "with an invite link") { joinGroupPrompt() }
         item(R.drawable.ic_folder, "New Folder", "group chats, e.g. Family") { newFolder() }
+        item(R.drawable.ic_bookmark, "Saved Messages", "notes to yourself, on this phone") { showChat(Messenger.core.savedChat().user) }
         divider()
         item(R.drawable.ic_palette, "Appearance", "colours, text size, bubbles") { showAppearance() }
         item(R.drawable.ic_menu, "Settings") { showSettings() }

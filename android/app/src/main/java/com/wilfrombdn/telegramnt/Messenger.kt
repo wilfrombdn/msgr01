@@ -36,6 +36,12 @@ object Messenger {
     /** Pinned chats ("u:<user>" / "g:<group>"), shown above everything in this order. Per account, this phone only. */
     val allPins = HashMap<String, MutableList<String>>()
     val pins: MutableList<String> get() = synchronized(allPins) { allPins.getOrPut(core.me?.user ?: "") { mutableListOf() } }
+    /** Muted chats (no notifications), same keys. Per account, this phone only. */
+    val allMuted = HashMap<String, MutableSet<String>>()
+    val muted: MutableSet<String> get() = synchronized(allMuted) { allMuted.getOrPut(core.me?.user ?: "") { mutableSetOf() } }
+    /** Unsent text left in a chat's message box, same keys. Per account, this phone only. */
+    val allDrafts = HashMap<String, MutableMap<String, String>>()
+    val drafts: MutableMap<String, String> get() = synchronized(allDrafts) { allDrafts.getOrPut(core.me?.user ?: "") { mutableMapOf() } }
     /** Where you were when the app last went to the background, so reopening puts you back there. */
     var spot = Spot()
     /** Auto-delete photos/videos/files older than this many days from this phone (0 = never). */
@@ -101,7 +107,7 @@ object Messenger {
             core.blobSize = { id -> File(dir, id).length() }
         }
         core.onChange = { save(); changed(); ui.post { scheduleExpiry() } }
-        core.onNew = { contact -> if (!visible) ui.post { onNotify?.invoke(contact) } }
+        core.onNew = { contact -> if (!visible && "u:${contact.user}" !in muted) ui.post { onNotify?.invoke(contact) } }
         core.onCall = { k -> ui.post { callChanged(k) } }
     }
 
@@ -125,6 +131,14 @@ object Messenger {
         if (!core.showTyping || now - (typingSent[c.user] ?: 0) < 4000) return
         typingSent[c.user] = now
         io.execute { core.sendTyping(c) }
+    }
+
+    /** Called as you type in group [g]: tells the group at most every 5 s. */
+    fun groupTyping(g: Group) {
+        val now = System.currentTimeMillis()
+        if (!core.showTyping || now - (typingSent["g:${g.id}"] ?: 0) < 5000) return
+        typingSent["g:${g.id}"] = now
+        io.execute { core.sendGroupTyping(g) }
     }
 
     /** Typing stopped (message sent / box cleared): the next keystroke tells them again straight away. */
@@ -164,7 +178,8 @@ object Messenger {
     private fun scheduleExpiry() {
         ui.removeCallbacks(expire)
         val now = System.currentTimeMillis()
-        val next = synchronized(core) { core.contacts.flatMap { listOf(it.theirTypingUntil, it.theirOnlineUntil) } }.filter { it > now }.minOrNull() ?: return
+        val next = synchronized(core) { core.contacts.flatMap { listOf(it.theirTypingUntil, it.theirOnlineUntil) } + core.groups.flatMap { it.typing.values } }
+            .filter { it > now }.minOrNull() ?: return
         ui.postDelayed(expire, next - now + 200)
     }
 
@@ -309,6 +324,8 @@ object Messenger {
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
         o.put("keepMediaDays", keepMediaDays)
         o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
+        o.put("muted", JSONObject().also { j -> synchronized(allMuted) { allMuted.forEach { (u, ms) -> j.put(u, org.json.JSONArray(ms.toList())) } } })
+        o.put("drafts", JSONObject().also { j -> synchronized(allDrafts) { allDrafts.forEach { (u, ds) -> j.put(u, JSONObject(ds.toMap() as Map<*, *>)) } } })
         return o.put("spot", spot.json())
     }
 
@@ -320,6 +337,14 @@ object Messenger {
         o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->
             val a = j.optJSONArray(u) ?: return@forEach
             allPins[u] = MutableList(a.length()) { a.getString(it) }
+        } } }
+        o.optJSONObject("muted")?.let { j -> synchronized(allMuted) { j.keys().forEach { u ->
+            val a = j.optJSONArray(u) ?: return@forEach
+            allMuted[u] = MutableList(a.length()) { a.getString(it) }.toMutableSet()
+        } } }
+        o.optJSONObject("drafts")?.let { j -> synchronized(allDrafts) { j.keys().forEach { u ->
+            val d = j.optJSONObject(u) ?: return@forEach
+            allDrafts[u] = d.keys().asSequence().associateWith { d.optString(it) }.toMutableMap()
         } } }
     }
 
