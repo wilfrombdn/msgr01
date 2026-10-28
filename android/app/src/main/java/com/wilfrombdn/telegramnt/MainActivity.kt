@@ -170,6 +170,7 @@ class MainActivity : Activity() {
             !Messenger.signedIn && screen != "welcome" -> showWelcome()
             screen == "viewer" -> leaveViewer()
             screen == "storage" -> showSettings()
+            screen == "chats" && showArchive -> { showArchive = false; showChats() }
             Messenger.signedIn && screen != "chats" -> showChats()
             search.isNotEmpty() -> { search = ""; showChats() }
             else -> super.onBackPressed()
@@ -659,6 +660,12 @@ class MainActivity : Activity() {
         val nested = nestedBg   // chats inside an open folder sit on a slightly different strip
         val byKey = rows.associateBy { it.first }
         val inFolder = HashSet<String>()
+        val arch = Messenger.archived
+        if (q.isEmpty()) arch.retainAll { it in byKey || it.startsWith("u:") && core.contact(it.drop(2)) != null }   // forget deleted chats
+        if (showArchive && q.isEmpty()) {
+            // the Archived chats page: just those, newest first
+            for (t in rows.filter { it.first in arch }.sortedByDescending { it.second }) list.addView(rowFor(t))
+        } else {
         // pinned chats: at the very top, above folders, in the order you pinned them
         val pins = Messenger.pins
         pins.retainAll { it in byKey || it.startsWith("u:") && core.contact(it.drop(2)) != null }   // forget deleted chats
@@ -667,10 +674,13 @@ class MainActivity : Activity() {
         inFolder += pins
         for (c in requests) list.addView(chatRow(c))   // friend requests right under the pins
         if (q.isEmpty()) {
+            inFolder += arch   // archived chats only show on their own page
+            val archRows = rows.filter { it.first in arch && it.first !in pinnedKeys }
+            if (archRows.isNotEmpty()) list.addView(archiveRow(archRows.sumOf { (it.third as? Contact)?.unread ?: (it.third as Group).unread }, archRows.size))
             val fs = Messenger.folders
             fs.forEach { f -> f.items.retainAll { it in byKey || it.startsWith("u:") && core.contact(it.drop(2)) != null } }   // forget deleted chats
             for (f in fs) {
-                val members = f.items.filter { it !in pinnedKeys }.mapNotNull { byKey[it] }.sortedByDescending { it.second }
+                val members = f.items.filter { it !in pinnedKeys && it !in arch }.mapNotNull { byKey[it] }.sortedByDescending { it.second }
                 inFolder += f.items
                 list.addView(folderRow(f, members.sumOf { (it.third as? Contact)?.unread ?: (it.third as Group).unread }, members.size))
                 if (f.open) for (t in members) list.addView(rowFor(t, nested).apply {
@@ -681,6 +691,7 @@ class MainActivity : Activity() {
             }
         }
         for (t in rows.filter { it.first !in inFolder }.sortedByDescending { it.second }) list.addView(rowFor(t))
+        }
         if (q.length >= 2) messageResults(list, q)
         if (all.isEmpty() && grps.isEmpty() && (q.length < 2 || list.childCount == 0)) {
             list.addView(tv(
@@ -710,7 +721,8 @@ class MainActivity : Activity() {
             setOnClickListener { showNewChat() }
         }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
 
-        val top = if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
+        val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
+        else if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
             if (Messenger.connected) "MSNGR" else "Connecting…",
             if (Messenger.connected) null else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
@@ -737,6 +749,27 @@ class MainActivity : Activity() {
     private var dragging = false
 
     // ---------- folders ----------
+
+    /** Showing the Archived chats page instead of the main list. */
+    private var showArchive = false
+
+    /** The "Archived chats" row: opens the page of chats you've put away. */
+    private fun archiveRow(unread: Int, count: Int): View = LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(8), dp(14), dp(8)); background = pressable()
+        addView(FrameLayout(context).apply {
+            background = circle(raised)
+            addView(ImageView(context).apply { setImageResource(R.drawable.ic_folder); setColorFilter(dim) }, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER))
+        }, LinearLayout.LayoutParams(dp(54), dp(54)))
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0)
+            addView(tv("Archived chats", 16.5f, white, true))
+            addView(tv("$count chat" + if (count != 1) "s" else "", 15f, dim).apply { setPadding(0, dp(3), 0, 0) })
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (unread > 0) addView(tv("$unread", 12.5f, white, true).apply {
+            gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1)); background = round(faint, 11)
+        })
+        setOnClickListener { showArchive = true; chatsScrollY = 0; showChats() }
+    }
 
     private fun folderRow(f: Folder, unread: Int, count: Int): View {
         val row = LinearLayout(this).apply {
@@ -915,7 +948,12 @@ class MainActivity : Activity() {
     /** Long-press a chat and let go without dragging it: pin / unpin. */
     private fun chatRowMenu(key: String) {
         val pinned = key in Messenger.pins
+        val archived = key in Messenger.archived
         longPressMenu(null, null, listOf(
+            (if (archived) "Unarchive" else "Archive") to {
+                if (archived) Messenger.archived.remove(key) else { Messenger.archived.add(key); Messenger.pins.remove(key) }
+                Messenger.settingsChanged(); showChats()
+            },
             (if (key in Messenger.muted) "Unmute" else "Mute") to { toggleMute(key) },
             (if (pinned) "Unpin" else "Pin to top") to {
                 val ps = Messenger.pins

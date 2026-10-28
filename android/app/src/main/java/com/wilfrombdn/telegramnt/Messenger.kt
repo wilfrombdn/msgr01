@@ -39,6 +39,9 @@ object Messenger {
     /** Muted chats (no notifications), same keys. Per account, this phone only. */
     val allMuted = HashMap<String, MutableSet<String>>()
     val muted: MutableSet<String> get() = synchronized(allMuted) { allMuted.getOrPut(core.me?.user ?: "") { mutableSetOf() } }
+    /** Archived chats (hidden from the main list), same keys. Per account, this phone only. */
+    val allArchived = HashMap<String, MutableSet<String>>()
+    val archived: MutableSet<String> get() = synchronized(allArchived) { allArchived.getOrPut(core.me?.user ?: "") { mutableSetOf() } }
     /** Unsent text left in a chat's message box, same keys. Per account, this phone only. */
     val allDrafts = HashMap<String, MutableMap<String, String>>()
     val drafts: MutableMap<String, String> get() = synchronized(allDrafts) { allDrafts.getOrPut(core.me?.user ?: "") { mutableMapOf() } }
@@ -326,6 +329,7 @@ object Messenger {
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
         o.put("keepMediaDays", keepMediaDays)
         o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
+        o.put("archived", JSONObject().also { j -> synchronized(allArchived) { allArchived.forEach { (u, ms) -> j.put(u, org.json.JSONArray(ms.toList())) } } })
         o.put("muted", JSONObject().also { j -> synchronized(allMuted) { allMuted.forEach { (u, ms) -> j.put(u, org.json.JSONArray(ms.toList())) } } })
         o.put("drafts", JSONObject().also { j -> synchronized(allDrafts) { allDrafts.forEach { (u, ds) -> j.put(u, JSONObject(ds.toMap() as Map<*, *>)) } } })
         return o.put("spot", spot.json())
@@ -339,6 +343,10 @@ object Messenger {
         o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->
             val a = j.optJSONArray(u) ?: return@forEach
             allPins[u] = MutableList(a.length()) { a.getString(it) }
+        } } }
+        o.optJSONObject("archived")?.let { j -> synchronized(allArchived) { j.keys().forEach { u ->
+            val a = j.optJSONArray(u) ?: return@forEach
+            allArchived[u] = MutableList(a.length()) { a.getString(it) }.toMutableSet()
         } } }
         o.optJSONObject("muted")?.let { j -> synchronized(allMuted) { j.keys().forEach { u ->
             val a = j.optJSONArray(u) ?: return@forEach
