@@ -87,7 +87,10 @@ class Contact(
     var ttl: Int = 0,                   // disappearing-messages timer in seconds (0 = off), shared by both sides
     var theirReadUpto: Long = 0,        // my sent messages up to this time have been read by them
     var net: String = Core.NET_TOR,     // how they connect ("tor" / "direct"); calls need both on the same one
+    var theirSeen: Long = 0,            // when they last had the app open (0 = unknown / they hide it)
 ) {
+    @Volatile var theirTypingUntil = 0L  // show "typing…" until then
+    @Volatile var theirOnlineUntil = 0L  // show "online" until then (refreshed while their app is open)
     val myAddr get() = Crypto.addressOf(myToken)
     val lastTs get() = msgs.lastOrNull()?.ts ?: created
     val canChat get() = status == Contact.FRIENDS || status == Contact.CHATTING
@@ -95,7 +98,7 @@ class Contact(
     fun json(withMsgs: Boolean): JSONObject = JSONObject()
         .put("user", user).put("name", name).put("status", status).put("myToken", myToken)
         .put("theirAddr", theirAddr).put("theirEnc", theirEnc).put("theirSig", theirSig)
-        .put("verified", verified).put("created", created).put("theirInbox", theirInbox).put("waitingForAdd", waitingForAdd).put("theirIdent", theirIdent).put("ttl", ttl).put("net", net)
+        .put("verified", verified).put("created", created).put("theirInbox", theirInbox).put("waitingForAdd", waitingForAdd).put("theirIdent", theirIdent).put("ttl", ttl).put("net", net).put("seen", theirSeen)
         .apply {
             if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() }))
                 .put("avatar", avatar?.let { Base64.getEncoder().encodeToString(it) })
@@ -120,6 +123,7 @@ class Contact(
             c.theirIdent = o.optString("theirIdent").ifEmpty { null }
             c.ttl = o.optInt("ttl")
             c.net = o.optString("net", Core.NET_TOR).ifEmpty { Core.NET_TOR }
+            c.theirSeen = o.optLong("seen", 0)
             c.avatar = o.optString("avatar").takeIf { it.isNotEmpty() }?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
             return c
         }
@@ -229,6 +233,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     @Volatile var lastDrop = ""    // diagnostic: why the last fetched message was dropped (which step). Shown in Settings.
     private fun drop(reason: String) { lastDrop = reason }
     var readReceipts = true   // tell friends when I've read their messages (and so see theirs)
+    var showTyping = true     // tell a friend when I'm typing to them
+    var showSeen = true       // tell friends when I'm online / last seen
     var onChange: () -> Unit = {}
     var onNew: (Contact) -> Unit = {}
     /** Where encrypted attachments are kept on this device (Android: files folder; tests: memory). */
@@ -859,6 +865,26 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         }
     }
 
+    // ---------- typing / online / last seen ----------
+    // Sent straight to friends over the encrypted channel like read receipts, so the server never learns
+    // when anyone is online. Each side can switch theirs off in Settings.
+
+    /** Tells [c] I'm typing (the caller limits how often). Network: off the main thread. */
+    fun sendTyping(c: Contact) {
+        val m = me ?: return
+        if (!showTyping || c.status != Contact.FRIENDS) return
+        runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "typing")) }
+    }
+
+    /** Tells every friend I'm [online] now, or that I just left. "hide" clears what they show. Network. */
+    fun sendPresence(online: Boolean, hide: Boolean = false) {
+        val m = me ?: return
+        if (!showSeen && !hide) return
+        val o = JSONObject().put("t", "seen").put("ts", System.currentTimeMillis()).put("on", online).put("hide", hide)
+        val friends = synchronized(this) { contacts.filter { it.status == Contact.FRIENDS } }
+        for (c in friends) runCatching { sealSignal(m, c, c.theirAddr!!, o) }
+    }
+
     // ---------- disappearing messages ----------
 
     // ---------- voice calls ----------
@@ -1353,6 +1379,23 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             }
             "call", "ring", "dec", "busy", "end" -> onCallCtl(m, c, inner)
             "net" -> { val n = inner.optString("n"); if (n == NET_TOR || n == NET_DIRECT) { c.net = n; onChange() } }
+            "typing" -> {
+                if (c.status != Contact.FRIENDS) return
+                c.theirTypingUntil = System.currentTimeMillis() + TYPING_MS
+                onChange()
+            }
+            "seen" -> {
+                if (c.status != Contact.FRIENDS) return
+                val now = System.currentTimeMillis()
+                if (inner.optBoolean("hide")) { c.theirSeen = 0; c.theirOnlineUntil = 0; onChange(); return }
+                // their clock, but never in the future; an old "online" (sat in the mailbox) only means "last seen then"
+                val ts = inner.optLong("ts", 0).coerceAtMost(now)
+                if (ts <= c.theirSeen) return
+                c.theirSeen = ts
+                c.theirOnlineUntil = if (inner.optBoolean("on")) ts + ONLINE_MS else 0
+                if (!inner.optBoolean("on")) c.theirTypingUntil = 0
+                onChange()
+            }
             "read" -> {
                 val ts = inner.optLong("ts", 0)
                 if (ts > c.theirReadUpto) { c.theirReadUpto = ts; onChange() }
@@ -1383,6 +1426,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     c.msgs.add(incoming(id, inner, c.ttl))
                     if (openChat != c.user) c.unread++
                 }
+                c.theirTypingUntil = 0   // the message they were typing has arrived
                 if (openChat != c.user) onNew(c)
             }
         }
@@ -1491,7 +1535,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 .put("cloudBackup", m.cloudBackup))
         }
         return o.put("contacts", JSONArray(contacts.map { it.json(withMsgs = true) })).put("backupDirty", backupDirty)
-            .put("readReceipts", readReceipts).put("groups", JSONArray(groups.map { it.json(withMsgs = true) }))
+            .put("readReceipts", readReceipts).put("showTyping", showTyping).put("showSeen", showSeen).put("groups", JSONArray(groups.map { it.json(withMsgs = true) }))
     }
 
     @Synchronized
@@ -1516,6 +1560,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         }
         backupDirty = o.optBoolean("backupDirty")
         readReceipts = o.optBoolean("readReceipts", true)
+        showTyping = o.optBoolean("showTyping", true)
+        showSeen = o.optBoolean("showSeen", true)
         groups.clear()
         o.optJSONArray("groups")?.let { for (i in 0 until it.length()) groups.add(Group.from(it.getJSONObject(i))) }
         // attachments that arrived but weren't downloaded yet
@@ -1526,6 +1572,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         const val MAX_TEXT = 4000
         const val MAX_AVATAR = 8000 // bytes of JPEG; fits in one sealed message
         const val MAX_FILE = 25 * 1024 * 1024
+        const val TYPING_MS = 6_000L
+        const val ONLINE_MS = 5 * 60_000L   // "online" lasts this long unless refreshed (the app re-sends every 4 min)
         const val NET_TOR = "tor"
         const val NET_DIRECT = "direct"
         const val GROUP_FILE_TTL = 7 * 24 * 3600   // group blobs fan out (no per-reader delete); keep them a week

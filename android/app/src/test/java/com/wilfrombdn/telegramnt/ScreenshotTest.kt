@@ -254,6 +254,21 @@ class ScreenshotTest {
         return null
     }
 
+    /** "typing…" / "online" / "last seen" under the name and in the chat list; the two privacy switches. */
+    @Test fun presence() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val sam = Messenger.core.contact("sam_r")!!
+        val jo = Messenger.core.contacts.first { it.user != "sam_r" && it.status == Contact.FRIENDS }
+        val now = System.currentTimeMillis()
+        sam.theirTypingUntil = now + 60_000
+        jo.theirSeen = now - 25 * 60_000
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChats"); shoot(a, "43-typing-list")
+        call(a, "showChat", "sam_r"); shoot(a, "44-typing")
+        call(a, "showChat", jo.user); shoot(a, "45-last-seen")
+        call(a, "showSettings"); shoot(a, "46-privacy-switches")
+    }
+
     /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */
     @Test fun composerWraps() {
         Messenger.initForPreview(fakeCore(signedIn = true))

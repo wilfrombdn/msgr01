@@ -390,6 +390,36 @@ class RelayFlowTest {
         assertEquals(-1, b!!.getInputStream().read())   // one hangs up: the other's line closes
     }
 
+    /** Typing and online/last seen go friend to friend; switching them off stops them. */
+    @Test fun typingAndLastSeen() {
+        assumeTrue(Relay(server).ping())
+        val al = Core(server); val bo = Core(server)
+        val au = "tya_$tag"; val bu = "tyb_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo")
+        al.addFriend(bu); bo.poll(5); bo.accept(bo.contact(au)!!, friend = true); al.poll(5)
+        val alOnBo = bo.contact(au)!!
+        val now = System.currentTimeMillis()
+
+        al.sendTyping(al.contact(bu)!!); bo.poll(5)
+        assertTrue(alOnBo.theirTypingUntil > now)
+        al.contact(bu)!!.let { al.deliver(it, al.queue(it, "hi")) }; bo.poll(5)
+        assertEquals(0L, alOnBo.theirTypingUntil)   // the message arrived: no more "typing…"
+
+        al.sendPresence(true); bo.poll(5)
+        assertTrue(alOnBo.theirOnlineUntil > now); assertTrue(alOnBo.theirSeen >= now)
+        al.sendPresence(false); bo.poll(5)
+        assertEquals(0L, alOnBo.theirOnlineUntil); assertTrue(alOnBo.theirSeen > 0)
+        assertEquals(alOnBo.theirSeen, Contact.from(alOnBo.json(withMsgs = false)).theirSeen)   // kept
+
+        // switched off: nothing goes out, and "hide" clears what they had
+        al.showTyping = false; al.showSeen = false
+        alOnBo.theirTypingUntil = 0
+        al.sendTyping(al.contact(bu)!!); al.sendPresence(true); bo.poll(5)
+        assertEquals(0L, alOnBo.theirTypingUntil); assertEquals(0L, alOnBo.theirOnlineUntil)
+        al.sendPresence(false, hide = true); bo.poll(5)
+        assertEquals(0L, alOnBo.theirSeen)
+    }
+
     /** 5.0 calls: offer/ring/answer/end, cancel -> missed, decline; each phone writes its own summary. */
     @Test fun callSignalingAndSummaries() {
         assumeTrue(Relay(server).ping())

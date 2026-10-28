@@ -97,7 +97,7 @@ object Messenger {
             core.deleteBlob = { id -> File(dir, id).delete() }
             core.blobSize = { id -> File(dir, id).length() }
         }
-        core.onChange = { save(); changed() }
+        core.onChange = { save(); changed(); ui.post { scheduleExpiry() } }
         core.onNew = { contact -> if (!visible) ui.post { onNotify?.invoke(contact) } }
         core.onCall = { k -> ui.post { callChanged(k) } }
     }
@@ -109,6 +109,60 @@ object Messenger {
     private fun changed() {
         val ls = synchronized(listeners) { listeners.toList() }
         ui.post { ls.forEach { it() } }
+    }
+
+    // ---------- typing / online ----------
+
+    private val typingSent = HashMap<String, Long>()
+    private var onlineSent = 0L
+
+    /** Called as you type to [c]: tells them at most every 4 s. */
+    fun typing(c: Contact) {
+        val now = System.currentTimeMillis()
+        if (!core.showTyping || now - (typingSent[c.user] ?: 0) < 4000) return
+        typingSent[c.user] = now
+        io.execute { core.sendTyping(c) }
+    }
+
+    /** Typing stopped (message sent / box cleared): the next keystroke tells them again straight away. */
+    fun typingDone(c: Contact) { typingSent.remove(c.user) }
+
+    private val heartbeat = object : Runnable {
+        override fun run() { if (visible) { onlineSent = 0; appShown() } }
+    }
+
+    /** App came on screen: friends see "online" (refreshed every 4 min while it stays open). */
+    fun appShown() {
+        if (!signedIn || !core.showSeen) return
+        ui.removeCallbacks(heartbeat)
+        ui.postDelayed(heartbeat, 4 * 60_000L)
+        val now = System.currentTimeMillis()
+        if (now - onlineSent < 60_000) return   // flipping in and out of the app: don't spam friends
+        onlineSent = now
+        io.execute { core.sendPresence(true) }
+    }
+
+    /** App left the screen: friends see "last seen" from now. */
+    fun appHidden() {
+        ui.removeCallbacks(heartbeat)
+        if (!signedIn || !core.showSeen || onlineSent == 0L) return
+        onlineSent = 0
+        io.execute { core.sendPresence(false) }
+    }
+
+    fun setShowSeen(on: Boolean) {
+        core.showSeen = on
+        settingsChanged()
+        if (on) { onlineSent = 0; appShown() } else { ui.removeCallbacks(heartbeat); onlineSent = 0; io.execute { core.sendPresence(false, hide = true) } }
+    }
+
+    // redraw when someone's "typing…" / "online" runs out
+    private val expire = Runnable { changed(); scheduleExpiry() }
+    private fun scheduleExpiry() {
+        ui.removeCallbacks(expire)
+        val now = System.currentTimeMillis()
+        val next = synchronized(core) { core.contacts.flatMap { listOf(it.theirTypingUntil, it.theirOnlineUntil) } }.filter { it > now }.minOrNull() ?: return
+        ui.postDelayed(expire, next - now + 200)
     }
 
     // ---------- calls ----------

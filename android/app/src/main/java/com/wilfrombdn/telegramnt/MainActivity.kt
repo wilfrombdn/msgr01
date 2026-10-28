@@ -143,6 +143,7 @@ class MainActivity : Activity() {
         super.onStart()
         maybeCheckUpdate()
         Messenger.visible = true
+        Messenger.appShown()
         Messenger.listen(refresh)
         if (Messenger.signedIn) startForegroundService(Intent(this, SyncService::class.java))
         redraw()
@@ -153,6 +154,7 @@ class MainActivity : Activity() {
         saveSpot()
         if (Messenger.signedIn) Messenger.io.execute { Messenger.save() }
         Messenger.visible = false
+        Messenger.appHidden()
         Messenger.unlisten(refresh)
         if (!Messenger.background) stopService(Intent(this, SyncService::class.java))
         super.onStop()
@@ -380,7 +382,7 @@ class MainActivity : Activity() {
         typeface = Typeface.DEFAULT
     }
 
-    private fun topBar(title: String, sub: String? = null, left: View? = null, vararg right: View) = LinearLayout(this).apply {
+    private fun topBar(title: String, sub: CharSequence? = null, left: View? = null, vararg right: View) = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setBackgroundColor(bar)
         setPadding(dp(4), dp(4), dp(4), dp(4))
@@ -388,7 +390,7 @@ class MainActivity : Activity() {
         left?.let { addView(it) } ?: addView(View(context), LinearLayout.LayoutParams(dp(12), 1))
         val titles = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), 0, 0, 0) }
         titles.addView(tv(title, 19f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-        sub?.let { titles.addView(tv(it, 13.5f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }) }
+        sub?.let { titles.addView(tv("", 13.5f, dim).apply { text = it; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }) }
         addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
         right.forEach { addView(it) }
     }
@@ -430,6 +432,32 @@ class MainActivity : Activity() {
         val then = Calendar.getInstance().apply { timeInMillis = ts }
         val today = now.get(Calendar.YEAR) == then.get(Calendar.YEAR) && now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
         return SimpleDateFormat(if (today) "HH:mm" else "MMM d", Locale.getDefault()).format(Date(ts))
+    }
+
+    /** "typing…" / "online" (blue) or "last seen …" under a friend's name, or null if they don't share it. */
+    private fun presence(c: Contact): CharSequence? {
+        if (c.status != Contact.FRIENDS) return null
+        val now = System.currentTimeMillis()
+        fun blueText(t: String) = android.text.SpannableString(t).apply { setSpan(android.text.style.ForegroundColorSpan(blue), 0, t.length, 0) }
+        return when {
+            c.theirTypingUntil > now -> blueText("typing…")
+            c.theirOnlineUntil > now -> blueText("online")
+            c.theirSeen > 0 -> "last seen " + lastSeen(c.theirSeen, now)
+            else -> null
+        }
+    }
+
+    private fun lastSeen(ts: Long, now: Long): String {
+        val mins = (now - ts) / 60_000
+        val day = { t: Long -> Calendar.getInstance().apply { timeInMillis = t }.let { it.get(Calendar.YEAR) * 400 + it.get(Calendar.DAY_OF_YEAR) } }
+        val clock = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
+        return when {
+            mins < 1 -> "just now"
+            mins < 60 -> if (mins == 1L) "1 minute ago" else "$mins minutes ago"
+            day(ts) == day(now) -> "today at $clock"
+            day(ts) == day(now - 86_400_000) -> "yesterday at $clock"
+            else -> "on " + SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(ts))
+        }
     }
 
     private fun errorText(e: Exception) = when (e) {
@@ -878,6 +906,7 @@ class MainActivity : Activity() {
         val (preview, previewColor) = when {
             c.status == Contact.ASKING -> (last?.takeIf { it.state == Msg.RECEIVED }?.let { "Message request: ${it.text}" } ?: "Wants to be your friend") to blue
             c.status == Contact.ASKED && last?.state == Msg.NOTE -> "Friend request sent" to dim
+            c.status == Contact.FRIENDS && c.theirTypingUntil > System.currentTimeMillis() -> "typing…" to blue
             last == null -> "" to dim
             last.mine && last.call == null -> "You: ${preview(last)}" to dim
             last.call?.optString("s") == "missed" -> preview(last) to red
@@ -1301,12 +1330,18 @@ class MainActivity : Activity() {
             if (t.isEmpty()) return
             if (t.length > Core.MAX_TEXT) { toast("Too long (max ${Core.MAX_TEXT} characters)"); return }
             box.setText("")
+            Messenger.typingDone(c)
             box.requestFocus()                 // stay in the field so you can keep typing
             stick = true                       // your own message always brings you to the bottom
             val r = replyTo?.let { replyRef(it) }; cancelReply()
             Messenger.send(c, t, r)
         }
         box.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { doSend(); true } else false }
+        box.addTextChangedListener(object : TextWatcher {   // friends see "typing…" (unless switched off in Settings)
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, n: Int) { if (!s.isNullOrBlank() && n > 0) Messenger.typing(c) }
+            override fun afterTextChanged(e: android.text.Editable?) {}
+        })
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         input.addView(icon(R.drawable.ic_emoji, dim, pad = 10).also { v -> v.setOnClickListener { emojiPicker(v, box, c) } })
         input.addView(icon(R.drawable.ic_attach, dim, pad = 10).also { v -> v.setOnClickListener { attachTo = c.user; attachGroupId = null; attachMenu(v) } })
@@ -1342,7 +1377,9 @@ class MainActivity : Activity() {
         chatTop?.removeAllViews()
         val blocked = Messenger.core.callBlocked(c)
         val netNote = blocked?.takeIf { c.status == Contact.FRIENDS }   // "your network differs…" shows under the name
-        chatTop?.addView(topBar(c.name, netNote ?: sub, LinearLayout(this).apply {
+        val live = presence(c)
+        val head: CharSequence = if (live?.toString() == "typing…") live else netNote ?: live ?: sub
+        chatTop?.addView(topBar(c.name, head, LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(icon(R.drawable.ic_back) { showChats() })
             addView(avatar(c.name, 40, c.avatar))
@@ -2946,6 +2983,10 @@ class MainActivity : Activity() {
         col.addView(settingNote("Keeps a small \"connected\" notification. No Google push service is used."))
         col.addView(settingSwitch("Read receipts", Messenger.core.readReceipts) { on -> Messenger.core.readReceipts = on; Messenger.settingsChanged() })
         col.addView(settingNote("When on, friends see when you've read their messages, and you see when they've read yours."))
+        col.addView(settingSwitch("Show when I'm typing", Messenger.core.showTyping) { on -> Messenger.core.showTyping = on; Messenger.settingsChanged() })
+        col.addView(settingNote("When on, a friend sees \"typing…\" while you write to them."))
+        col.addView(settingSwitch("Show when I'm online", Messenger.core.showSeen) { on -> Messenger.setShowSeen(on) })
+        col.addView(settingNote("When on, friends see \"online\" while you have MSNGR open, and \"last seen\" after."))
         col.addView(gap(20))
         col.addView(tv("MSNGR ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
             13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })
