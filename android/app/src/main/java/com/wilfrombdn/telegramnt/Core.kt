@@ -870,6 +870,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         @Volatile var phase = DIALING
         @Volatile var connectedAt = 0L
         @Volatile var muted = false
+        /** Why the call couldn't go through, shown on the call screen. */
+        @Volatile var problem: String? = null
         val startedAt = System.currentTimeMillis()
         companion object { const val DIALING = 0; const val RINGING = 1; const val INCOMING = 2; const val CONNECTING = 3; const val ACTIVE = 4; const val ENDED = 5 }
     }
@@ -892,17 +894,24 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     private fun callCtl(c: Contact, o: JSONObject) { val m = me ?: return; sealSignal(m, c, c.theirAddr!!, o) }
 
     /** Starts a call to [c]. Network: call off the main thread. */
-    fun startCall(c: Contact): Call {
+    fun startCall(c: Contact): Call = prepareCall(c).also { offerCall(c, it) }
+
+    /** Makes the outgoing call (no network), so the call screen can show "Calling…" straight away. */
+    fun prepareCall(c: Contact): Call {
         callBlocked(c)?.let { throw UserError(it) }
         if (call != null) throw UserError("You're already in a call")
         val k = Call(Crypto.randomHex(16), c.user, true, Crypto.randomHex(32), Crypto.randomHex(32))
         seenCalls.add(k.id)
         call = k; onCall(k)
+        return k
+    }
+
+    /** Sends the call invite for [k] to [c]. Network: call off the main thread. */
+    fun offerCall(c: Contact, k: Call, why: (Exception) -> String? = { null }) {
         try {
             callCtl(c, JSONObject().put("t", "call").put("id", k.id).put("k", k.key).put("r", k.room)
                 .put("ts", System.currentTimeMillis()).put("n", netMode))
-        } catch (e: Exception) { endCall(k, "failed"); throw e }
-        return k
+        } catch (e: Exception) { k.problem = why(e); endCall(k, "failed"); throw e }
     }
 
     fun answerCall() { val k = call ?: return; if (k.phase == Call.INCOMING) { k.phase = Call.CONNECTING; onCall(k) } }

@@ -1545,7 +1545,7 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC_FOR_CALL); return
         }
         Messenger.core.call?.let { startActivity(Intent(this, CallActivity::class.java)); return }   // already in one: show it
-        Messenger.startCall(this, c) { e -> toast(errorText(e)) }
+        Messenger.startCall(this, c, { e -> toast(errorText(e)) }, ::errorText)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

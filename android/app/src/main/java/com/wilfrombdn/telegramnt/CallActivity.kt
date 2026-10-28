@@ -34,6 +34,7 @@ class CallActivity : Activity() {
     private val listener: (Core.Call) -> Unit = { render() }
     private var proximity: PowerManager.WakeLock? = null
     private var answerWhenAllowed = false
+    private var shown: Core.Call? = null
     private val tick = object : Runnable {
         override fun run() { updateStatus(); status.postDelayed(this, 1000) }
     }
@@ -47,6 +48,7 @@ class CallActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_SECURE)
         window.statusBarColor = BG; window.navigationBarColor = BG
         val k = Messenger.core.call ?: return finish()
+        shown = k
         val c = Messenger.core.contact(k.user)
         val name = c?.name ?: "@${k.user}"
         status = TextView(this).apply { setTextColor(DIM); textSize = 16f; gravity = Gravity.CENTER }
@@ -104,8 +106,9 @@ class CallActivity : Activity() {
     private fun render() {
         val k = Messenger.core.call
         if (k == null || k.phase == Core.Call.ENDED) {
-            status.text = "Call ended"; buttons.removeAllViews()
-            status.postDelayed({ finish() }, 1200)
+            val why = shown?.problem
+            status.text = why ?: "Call ended"; buttons.removeAllViews()
+            status.postDelayed({ finish() }, if (why != null) 3500 else 1200)
             return
         }
         updateStatus()

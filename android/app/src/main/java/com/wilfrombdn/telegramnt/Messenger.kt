@@ -159,15 +159,16 @@ object Messenger {
         runCatching { app.getSystemService(android.os.Vibrator::class.java)?.cancel() }
     }
 
-    /** Calls [c]: joins the call room right away and waits there for them (up to a minute). */
-    fun startCall(ctx: Context, c: Contact, fail: (Exception) -> Unit) {
-        run({ core.startCall(c) }, {
-            val k = core.call ?: return@run
-            ctx.startActivity(Intent(ctx, CallActivity::class.java))
-            runCatching { ctx.startForegroundService(Intent(ctx, CallService::class.java)) }
-            CallAudio.start(ctx, k)
-            ui.postDelayed({ if (core.call === k && k.phase <= Core.Call.RINGING) io.execute { core.hangUp("noanswer") } }, 60_000)
-        }, fail)
+    /** The call screen opens at once ("Calling…"); the invite goes out through Tor meanwhile. */
+    fun startCall(ctx: Context, c: Contact, fail: (Exception) -> Unit, problem: (Exception) -> String) {
+        val k = try { core.prepareCall(c) } catch (e: Exception) { fail(e); return }
+        ctx.startActivity(Intent(ctx, CallActivity::class.java))
+        runCatching { ctx.startForegroundService(Intent(ctx, CallService::class.java)) }
+        CallAudio.start(ctx, k)
+        ui.postDelayed({ if (core.call === k && k.phase <= Core.Call.RINGING) io.execute { core.hangUp("noanswer") } }, 60_000)
+        io.execute {
+            runCatching { core.offerCall(c, k, problem) }
+        }
     }
 
     fun answer(ctx: Context) {
