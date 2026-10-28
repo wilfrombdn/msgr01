@@ -2,6 +2,7 @@ package com.wilfrombdn.telegramnt
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -339,6 +340,54 @@ class ScreenshotTest {
         a.javaClass.getDeclaredField("search").apply { isAccessible = true }.set(a, "")
         call(a, "showChat", core.savedChat().user); shoot(a, "55-saved")
         Messenger.muted.clear(); Messenger.drafts.clear()
+    }
+
+    /** Formatting, link card, location, poll, sticker, round video, scheduled, archive row; QR + preview parsing. */
+    @Test fun niceExtras() {
+        // pure helpers
+        assertEquals("bold and secret", Format.plain("**bold** and __secret__").replace("▒", ""))
+        val lp = LinkPreview.parse("https://www.example.com/x", "<html><head><title>Ignored</title><meta property=\"og:title\" content=\"Hello &amp; welcome\"><meta name=\"description\" content=\"A page\"></head></html>")!!
+        assertEquals("Hello & welcome", lp.getString("t")); assertEquals("example.com", lp.getString("s")); assertEquals("A page", lp.getString("d"))
+        assertEquals("https://example.com", LinkPreview.firstUrl("go to example.com now"))
+        val qr = QrActivity.codeFor("sam_r", 300)
+        val px = IntArray(300 * 300).also { qr.getPixels(it, 0, 300, 0, 0, 300, 300) }
+        val lum = com.google.zxing.RGBLuminanceSource(300, 300, px)
+        assertEquals(QrActivity.ADD + "sam_r", com.google.zxing.qrcode.QRCodeReader().decode(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(lum))).text)
+
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val core = Messenger.core
+        val sam = core.contact("sam_r")!!
+        val now = System.currentTimeMillis()
+        sam.msgs += Msg("x1", false, "**Heads up:** the gate code is ||4411||, see example.com", now, Msg.RECEIVED).also {
+            it.lp = org.json.JSONObject().put("u", "https://example.com").put("s", "example.com").put("t", "Example Domain").put("d", "This domain is for use in illustrative examples.")
+        }
+        sam.msgs += Msg("x2", true, "", now, Msg.SENT).also { it.loc = org.json.JSONObject().put("la", 45.6793).put("lo", -111.0373).put("acc", 9.0) }
+        sam.msgs += Msg("x3", false, "", now, Msg.RECEIVED).also {
+            it.file = org.json.JSONObject().put("id", "4".repeat(32)).put("k", "0".repeat(64)).put("n", "sticker.webp").put("m", "image/webp").put("s", 9000)
+                .put("th", java.util.Base64.getEncoder().encodeToString(testJpeg(0xFFFFC107.toInt(), 0xFFE91E63.toInt())))
+        }
+        sam.msgs += Msg("x4", true, "", now, Msg.SENT).also {
+            it.file = org.json.JSONObject().put("id", "5".repeat(32)).put("k", "0".repeat(64)).put("n", "Video message.mp4").put("m", "video/mp4").put("s", 900000)
+                .put("th", java.util.Base64.getEncoder().encodeToString(testJpeg(0xFF2E7D32.toInt(), 0xFF8D6E63.toInt()))).put("local", "x")
+        }
+        sam.msgs += Msg("x5", true, "don't forget the filters", now, Msg.SCHEDULED).also { it.sendAt = now + 3_600_000 }
+        val g = core.group("g1")!!
+        g.msgs += Msg("pl", false, "", now, Msg.RECEIVED).also {
+            it.sender = "sam_r"; it.poll = org.json.JSONObject().put("q", "Lunch?").put("o", org.json.JSONArray(listOf("Tacos", "Pizza", "Skip")))
+            it.votes["sam_r"] = 0; it.votes["jordan_k"] = 1; it.votes["wil_p"] = 0
+        }
+        g.mentioned = true
+        Messenger.archived.clear(); Messenger.archived.add("u:taylor_b")
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChat", "sam_r"); shoot(a, "56-extras-chat")
+        a.javaClass.getDeclaredField("scroller").apply { isAccessible = true }.get(a).let { sc ->
+            (sc as android.widget.ScrollView).scrollTo(0, 0); val list = sc.getChildAt(0) as android.widget.LinearLayout
+            for (i in 0 until list.childCount) if (list.getChildAt(i).tag == "x1") { sc.scrollTo(0, list.getChildAt(i).top - 300); break }
+        }
+        shoot(a, "56b-formatting")
+        call(a, "showGroup", "g1"); shoot(a, "57-poll")
+        call(a, "showChats"); shoot(a, "58-archive-mention")
+        Messenger.archived.clear()
     }
 
     /** Guards the 3.6/3.7 composer fix: the message box must wrap (maxLines 5), not collapse to one line. */

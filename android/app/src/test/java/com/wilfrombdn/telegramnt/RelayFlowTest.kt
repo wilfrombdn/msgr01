@@ -449,6 +449,61 @@ class RelayFlowTest {
         assertTrue(al.contacts.none { it.status == Contact.SAVED && it.user != au })
     }
 
+    /** 5.3 extras over the wire: silent send, scheduled send, location, link card, polls + votes, @mention flag. */
+    @Test fun niceExtras() {
+        assumeTrue(Relay(server).ping())
+        val al = withDisk(Core(server)); val bo = withDisk(Core(server)); val ci = withDisk(Core(server))
+        val au = "nxa_$tag"; val bu = "nxb_$tag"; val cu = "nxc_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo"); ci.signup(cu, "cis long password", "Ci")
+        fun befriend(a: Core, aun: String, b: Core, bun: String) { a.addFriend(bun); b.poll(5); b.accept(b.contact(aun)!!, friend = true); a.poll(5) }
+        befriend(al, au, bo, bu); befriend(al, au, ci, cu)
+        val toBo = al.contact(bu)!!; val alOnBo = bo.contact(au)!!
+        var notified = 0
+        bo.onNew = { notified++ }
+
+        // silent: arrives, but no notification
+        al.queue(toBo, "shh").also { it.silent = true; al.deliver(toBo, it) }; bo.poll(5)
+        assertEquals("shh", alOnBo.msgs.last().text); assertEquals(0, notified)
+        al.queue(toBo, "loud").also { al.deliver(toBo, it) }; bo.poll(5)
+        assertEquals(1, notified)
+
+        // scheduled: waits until due, then goes out at the end of the chat
+        val later = al.queue(toBo, "later").also { al.schedule(it, System.currentTimeMillis() + 3_600_000) }
+        assertTrue(al.dueScheduled().isEmpty())
+        val due = al.dueScheduled(System.currentTimeMillis() + 7_200_000)
+        assertEquals(1, due.size); assertEquals(later.id, due[0].second.id)
+        al.deliver(toBo, due[0].second); bo.poll(5)
+        assertEquals("later", alOnBo.msgs.last().text)
+
+        // location + link card travel with the message (and bad values are dropped)
+        al.queue(toBo, "").also { it.loc = org.json.JSONObject().put("la", 45.68).put("lo", -111.04).put("acc", 12.0); al.deliver(toBo, it) }
+        al.queue(toBo, "see https://example.com", lp = org.json.JSONObject().put("u", "https://example.com").put("s", "Example").put("t", "Example Domain").put("d", "x"))
+            .also { al.deliver(toBo, it) }
+        al.queue(toBo, "").also { it.loc = org.json.JSONObject().put("la", 999).put("lo", 0); al.deliver(toBo, it) }
+        bo.poll(5)
+        val got = alOnBo.msgs.takeLast(3)
+        assertEquals(45.68, got[0].loc!!.getDouble("la"), 1e-9)
+        assertEquals("Example Domain", got[1].lp!!.getString("t"))
+        assertNull(got[2].loc)
+
+        // group poll + votes (each member's vote counted once, retractable); @mention flag
+        val g = al.createGroup("Crew", public = false, invite = listOf(bu, cu))
+        bo.poll(5); ci.poll(5); al.poll(5); bo.poll(5); ci.poll(5)
+        val p = al.sendPoll(g, "Lunch?", listOf("Tacos", "Pizza", "Skip"))
+        assertEquals(Msg.SENT, p.state)
+        bo.poll(8); ci.poll(8)
+        val bg = bo.groups.first { it.secret == g.secret }; val cg = ci.groups.first { it.secret == g.secret }
+        val bp = bg.msgs.first { it.id == p.id }; val cp = cg.msgs.first { it.id == p.id }
+        assertEquals("Lunch?", bp.poll!!.getString("q"))
+        bo.vote(bg, bp, 0); ci.vote(cg, cp, 1); ci.vote(cg, cp, 0)
+        al.poll(8)
+        assertEquals(mapOf(bu to 0, cu to 0), p.votes.toMap())
+        bo.vote(bg, bp, -1); al.poll(8)
+        assertEquals(mapOf(cu to 0), p.votes.toMap())
+        al.sendGroup(g, "@$bu can you open up?"); bo.poll(8)
+        assertTrue(bg.mentioned)
+    }
+
     /** A reaction reaches the other side and survives a save/load. */
     @Test fun reactionsPropagateAndPersist() {
         assumeTrue(Relay(server).ping())
