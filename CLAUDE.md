@@ -1,4 +1,4 @@
-# MSNGR: notes for Claude
+# quipu: notes for Claude
 
 - **Ship every change as an in-app update.** Follow `RELEASING.md` exactly: bump the version, build signed,
   copy the APK + write `update.json` with 2–4 brief plain-words notes in `~/wilfrombdn.github.io/telegramnt/`, push both repos,

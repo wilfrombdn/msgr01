@@ -1,4 +1,4 @@
-# MSNGR
+# quipu
 
 Private messaging for Android. Messages are end-to-end encrypted on the phone,
 and the relay server only passes along sealed boxes it can't open.

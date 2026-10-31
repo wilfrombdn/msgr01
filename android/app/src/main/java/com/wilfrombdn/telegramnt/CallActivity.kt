@@ -162,7 +162,7 @@ class CallActivity : Activity() {
         if (!answerWhenAllowed) return
         answerWhenAllowed = false
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) Messenger.answer(this)
-        else { status.text = "MSNGR needs the microphone for calls"; Messenger.hangUp() }
+        else { status.text = "quipu needs the microphone for calls"; Messenger.hangUp() }
     }
 
     companion object {

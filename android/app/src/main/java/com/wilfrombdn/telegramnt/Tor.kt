@@ -85,6 +85,30 @@ object Tor {
         }, OnSuccess { err = null })
     }
 
+    /**
+     * Restarts the daemon: fresh circuits, and it forgets what it cached about the .onion. After the
+     * server has been down a long time, Tor can keep trying dead routes to it even once it's back up.
+     */
+    fun restart() {
+        val rt = runtime ?: return
+        rt.enqueue(Action.RestartDaemon, OnFailure { t ->
+            err = "restart: ${(t.message ?: t.toString()).take(130)}"
+            startDaemon(rt, 0)
+        }, OnSuccess { err = null })
+    }
+
+    /**
+     * Whether to [restart] Tor because the server hasn't answered since [lastOk] although Tor is ready.
+     * Waits 3 minutes, then spaces restarts out (10, then every 30 minutes) so a server that is really
+     * off for hours doesn't cost a full Tor start every few minutes.
+     */
+    fun restartDue(now: Long, lastOk: Long, lastRestart: Long, restarts: Int): Boolean {
+        if (now - lastOk < 3 * 60_000L) return false
+        if (restarts == 0) return true
+        val gap = if (restarts == 1) 10 * 60_000L else 30 * 60_000L
+        return now - lastRestart >= gap
+    }
+
     private fun note(line: String) {
         if (line.contains("Bootstrapped")) boot = line.substringAfter("Bootstrapped ").substringBefore(" (").take(12)
         else if (line.contains("[err]") || line.contains("[warn]")) err = line.takeLast(140)

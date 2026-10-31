@@ -220,7 +220,7 @@ class MainActivity : Activity() {
             layoutTransition = android.animation.LayoutTransition()   // the panel grows smoothly when it expands
         }
         col.addView(tv("Update available", 17.5f, white, true).apply { setPadding(0, 0, dp(8), dp(6)) })
-        col.addView(tv("MSNGR ${u.name} is ready. Update now?", 14.5f, dim).apply { setPadding(0, 0, dp(8), dp(4)) })
+        col.addView(tv("quipu ${u.name} is ready. Update now?", 14.5f, dim).apply { setPadding(0, 0, dp(8), dp(4)) })
         fun buttons(vararg b: Pair<Pair<String, Int>, () -> Unit>) = LinearLayout(this).apply {
             gravity = Gravity.END; setPadding(0, dp(4), 0, 0)
             b.forEach { (lc, act) -> addView(tv(lc.first.uppercase(), 14f, lc.second, true).apply { setPadding(dp(12), dp(10), dp(12), dp(10)); setOnClickListener { act() } }) }
@@ -245,12 +245,12 @@ class MainActivity : Activity() {
                 apk = Updater.download(this, u) { p -> runOnUiThread { fill.scaleX = p; status.text = "Downloading… ${(p * 100).toInt()}%" } }
             }, {
                 fill.scaleX = 1f
-                status.text = "Installing… MSNGR will close and reopen."
+                status.text = "Installing… quipu will close and reopen."
                 val f = apk!!
                 if (!packageManager.canRequestPackageInstalls()) {
-                    // Android asks once whether MSNGR may install its own updates
+                    // Android asks once whether quipu may install its own updates
                     pendingApk = f
-                    status.text = "Allow MSNGR to install updates, then come back here."
+                    status.text = "Allow quipu to install updates, then come back here."
                     startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:$packageName")))
                 } else Messenger.run({ Updater.install(this, f) }, {}) { e -> status.text = "Couldn't update: ${e.message}"; go.visibility = View.VISIBLE; d.setCancelable(true) }
             }) { e ->
@@ -279,7 +279,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // back from "allow installs from MSNGR": carry on with the update
+        // back from "allow installs from quipu": carry on with the update
         pendingApk?.let { f -> if (packageManager.canRequestPackageInstalls()) { pendingApk = null; Messenger.run({ Updater.install(this, f) }) } }
         if (screen == "settings") showSettings()   // back from a phone setting (battery, full-screen alerts): show what changed
     }
@@ -482,7 +482,7 @@ class MainActivity : Activity() {
         col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(ImageView(context).apply { setImageResource(R.drawable.ic_bubble_logo) }, LinearLayout.LayoutParams(dp(64), dp(64)))
-            addView(tv("MSNGR", 34f, white, true).apply { typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(dp(12), 0, 0, 0) })
+            addView(tv("quipu", 34f, white, true).apply { typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(dp(12), 0, 0, 0) })
         }, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
         col.addView(gap(18))
         col.addView(tv("The world's most private messaging app.\nEvery chat is end-to-end encrypted.\nNo phone number or email needed.", 16f, dim).apply {
@@ -645,20 +645,20 @@ class MainActivity : Activity() {
     // ---------- ringing when the app is closed ----------
 
     /**
-     * What the phone still needs so a call rings like a normal phone call when MSNGR is closed:
+     * What the phone still needs so a call rings like a normal phone call when quipu is closed:
      * each item is (what, why, fix). Empty = all set.
      */
     private fun ringFixes(): List<Triple<String, String, () -> Unit>> {
         val out = mutableListOf<Triple<String, String, () -> Unit>>()
         val nm = getSystemService(android.app.NotificationManager::class.java)
-        if (!Messenger.background) out.add(Triple("Get messages when the app is closed", "Without it, nothing can reach this phone while MSNGR is closed.") {
+        if (!Messenger.background) out.add(Triple("Get messages when the app is closed", "Without it, nothing can reach this phone while quipu is closed.") {
             Messenger.background = true; Messenger.settingsChanged(); startForegroundService(Intent(this, SyncService::class.java)); showSettings()
         })
         if (!nm.areNotificationsEnabled()) out.add(Triple("Notifications", "Calls and messages show as notifications.") {
             startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
         })
         if (!getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)) out.add(Triple("Battery: unrestricted",
-            "Otherwise Android cuts MSNGR's internet when the screen is off, and calls never arrive.") {
+            "Otherwise Android cuts quipu's internet when the screen is off, and calls never arrive.") {
             @android.annotation.SuppressLint("BatteryLife")
             val i = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:$packageName"))
             runCatching { startActivity(i) }.onFailure { startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
@@ -670,13 +670,13 @@ class MainActivity : Activity() {
         return out
     }
 
-    /** Once, after signing in: offer to set the phone up so calls ring when MSNGR is closed. */
+    /** Once, after signing in: offer to set the phone up so calls ring when quipu is closed. */
     private fun maybeAskRingSetup() {
         if (Messenger.ringSetupAsked || !Messenger.signedIn) return
         val fixes = ringFixes()
         Messenger.ringSetupAsked = true; Messenger.settingsChanged()
         if (fixes.isEmpty()) return
-        popup("Ring like a phone call", "So calls ring this phone even when MSNGR is closed, allow: " + fixes.joinToString(", ") { it.first } +
+        popup("Ring like a phone call", "So calls ring this phone even when quipu is closed, allow: " + fixes.joinToString(", ") { it.first } +
             ". You can do this later in Settings > Calls.", null, "Later" to dim, "Set up" to white) { i -> if (i == 1) showSettings() }
     }
 
@@ -763,7 +763,7 @@ class MainActivity : Activity() {
 
         val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
         else if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
-            if (Messenger.connected) "MSNGR" else "Connecting…",
+            if (Messenger.connected) "quipu" else "Connecting…",
             if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
@@ -1448,7 +1448,7 @@ class MainActivity : Activity() {
                 setPadding(0, dp(8), dp(8), dp(8))
                 setOnClickListener {
                     startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
-                        "Add me on MSNGR: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
+                        "Add me on quipu: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
                 }
             })
         })
@@ -1785,18 +1785,18 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == LOCATION_FOR_SHARE) {
-            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) shareLocation() else toast("MSNGR needs location access to share where you are")
+            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) shareLocation() else toast("quipu needs location access to share where you are")
             return
         }
         if (requestCode == MIC_FOR_VOICE) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toast("Hold the mic to record, let go to send")
-            else toast("MSNGR needs the microphone for voice messages")
+            else toast("quipu needs the microphone for voice messages")
             return
         }
         if (requestCode != MIC_FOR_CALL) return
         val c = callAfterMic; callAfterMic = null
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) c?.let { callFriend(it) }
-        else toast("MSNGR needs the microphone for calls")
+        else toast("quipu needs the microphone for calls")
     }
 
     private fun callTitle(k: org.json.JSONObject): String {
@@ -2165,10 +2165,10 @@ class MainActivity : Activity() {
 
     private var pendingSave: Msg? = null
 
-    /** Saves the photo to the phone's Pictures/MSNGR folder (only when you ask; outside the app it isn't locked). */
+    /** Saves the photo to the phone's Pictures/quipu folder (only when you ask; outside the app it isn't locked). */
     private fun downloadImage(m: Msg) {
         val f = m.file ?: return
-        val name = "MSNGR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(m.ts)) + if (isGif(m)) ".gif" else ".jpg"
+        val name = "quipu_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(m.ts)) + if (isGif(m)) ".gif" else ".jpg"
         if (Build.VERSION.SDK_INT < 29) {
             pendingSave = m
             val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(f.optString("m")).putExtra(Intent.EXTRA_TITLE, name)
@@ -2180,7 +2180,7 @@ class MainActivity : Activity() {
             val values = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
                 put(android.provider.MediaStore.Images.Media.MIME_TYPE, f.optString("m", "image/jpeg"))
-                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MSNGR")
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/quipu")
                 put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
             }
             val r = contentResolver
@@ -2188,7 +2188,7 @@ class MainActivity : Activity() {
             r.openOutputStream(uri)?.use { it.write(bytes) } ?: throw UserError("Couldn't save the photo")
             values.clear(); values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
             r.update(uri, values, null, null)
-        }, { toast("Saved to Pictures/MSNGR") }) { e -> toast(errorText(e)) }
+        }, { toast("Saved to Pictures/quipu") }) { e -> toast(errorText(e)) }
     }
 
     private fun saveImageTo(uri: android.net.Uri) {
@@ -2280,7 +2280,7 @@ class MainActivity : Activity() {
         val opts = mutableListOf("In 30 minutes" to now + 30 * 60_000L, "In 1 hour" to now + 3_600_000L, "In 3 hours" to now + 3 * 3_600_000L)
         if (at(0, 21) > now + 30 * 60_000L) opts.add("Tonight at 21:00" to at(0, 21))
         opts.add("Tomorrow at 08:00" to at(1, 8)); opts.add("Tomorrow at 18:00" to at(1, 18))
-        pickList("Schedule message", "It waits on this phone and goes out at that time (MSNGR needs to be running in the background).",
+        pickList("Schedule message", "It waits on this phone and goes out at that time (quipu needs to be running in the background).",
             opts.map { it.first }.toTypedArray()) { i -> done(opts[i].second) }
     }
 
@@ -2297,7 +2297,7 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(dp(230), dp(230)))
             addView(tv("@${me.user}", 17f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(12), 0, 0) })
         }
-        popup("My QR code", "A friend scans this in MSNGR (side menu > My QR code > Scan) to add you.", col, "Close" to dim, "Scan a code" to white) { i ->
+        popup("My QR code", "A friend scans this in quipu (side menu > My QR code > Scan) to add you.", col, "Close" to dim, "Scan a code" to white) { i ->
             if (i == 1) @Suppress("DEPRECATION") startActivityForResult(Intent(this, QrActivity::class.java), SCAN_QR)
         }
     }
@@ -2309,7 +2309,7 @@ class MainActivity : Activity() {
             return
         }
         val user = text.removePrefix(QrActivity.ADD).trim().lowercase()
-        if (!Core.USERNAME.matches(user)) return toast("That isn't an MSNGR code")
+        if (!Core.USERNAME.matches(user)) return toast("That isn't a quipu code")
         if (user == Messenger.core.me?.user) return toast("That's your own code")
         Messenger.core.contact(user)?.let { return showChat(it.user) }
         popup("Add @$user?", "Sends them a friend request.", null, "Cancel" to dim, "Add" to white) { i ->
@@ -2824,7 +2824,7 @@ class MainActivity : Activity() {
         item(R.drawable.ic_palette, "Appearance", "colours, text size, bubbles") { showAppearance() }
         item(R.drawable.ic_menu, "Settings") { showSettings() }
         col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
-        col.addView(tv("MSNGR ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
+        col.addView(tv("quipu ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
             setPadding(dp(22), dp(14), dp(22), dp(16))
         })
         return LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(listBg); addView(col, LinearLayout.LayoutParams(-1, -1)) }
@@ -3612,7 +3612,7 @@ class MainActivity : Activity() {
 
     private fun chooseRecoveryFile() {
         val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "MSNGR-recovery-${Messenger.core.me?.user}.m01")
+            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "quipu-recovery-${Messenger.core.me?.user}.m01")
         @Suppress("DEPRECATION") startActivityForResult(i, CREATE_RECOVERY)
     }
 
@@ -3632,7 +3632,7 @@ class MainActivity : Activity() {
         Messenger.run({ bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } }, {
             val b = bytes
             val owner = b?.let { Messenger.core.backupOwner(it) }
-            if (b == null || owner == null) { toast("That isn't a MSNGR recovery file."); return@run }
+            if (b == null || owner == null) { toast("That isn't a quipu recovery file."); return@run }
             val pass = field("Password", password = true)
             popup("Restore @$owner", "Enter the account password to unlock this backup. Your chats will be restored on this phone.", pass,
                 "Cancel" to dim, "Restore" to white) { i ->
@@ -3779,7 +3779,7 @@ class MainActivity : Activity() {
         col.addView(settingRow(if (me.avatar == null) "Set profile photo" else "Change profile photo", "Only your friends can see it") { v -> photoMenu(v) })
         col.addView(settingRow("Share username", "Invite a friend to add you") {
             startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                .putExtra(Intent.EXTRA_TEXT, "Add me on MSNGR: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
+                .putExtra(Intent.EXTRA_TEXT, "Add me on quipu: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
         })
         col.addView(gap(8))
         col.addView(settingRow("Cloud backup", if (me.cloudBackup) "On: you can log in on a new phone. The backup is locked with your password; the server can't read it." else "Off: this account only works on this phone, and the server keeps nothing to restore.") {
@@ -3796,10 +3796,10 @@ class MainActivity : Activity() {
         col.addView(settingRow("Recovery backup", if (Messenger.recoveryUri.isEmpty()) "Off. Save an encrypted backup file so your chats survive reinstalling the app." else "On. Your chats are saved, encrypted, to the file you chose. The server still keeps nothing.") {
             if (Messenger.recoveryUri.isEmpty()) popup("Turn on recovery backup",
                 "Here's exactly what this does:\n\n" +
-                "• MSNGR keeps a copy of all your chats in one file and keeps it up to date as you message.\n\n" +
+                "• quipu keeps a copy of all your chats in one file and keeps it up to date as you message.\n\n" +
                 "• You choose where that file goes next — your phone's storage, an SD card, or a cloud folder like Drive. It never goes to the server; only you hold it.\n\n" +
                 "• The file is locked with your account password (AES-256). Without that password it can't be read — not by us, not by the server, not by anyone who finds the file.\n\n" +
-                "• To get your chats back after reinstalling: open MSNGR → Restore from a backup file → enter your password.\n\n" +
+                "• To get your chats back after reinstalling: open quipu → Restore from a backup file → enter your password.\n\n" +
                 "One caveat: if you save it into a synced folder like Drive, that service may keep older versions of the file. For zero copies anywhere, leave this off.", null,
                 "Not now" to dim, "Choose file" to white) { i -> if (i == 1) chooseRecoveryFile() }
             else popup("Recovery backup", "Your chats are being saved to your chosen file, encrypted with your password. The server keeps nothing.", null,
@@ -3841,7 +3841,7 @@ class MainActivity : Activity() {
         col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
         col.addView(settingRow("Storage", "Photos, videos and files on this phone") { showStorage() })
         val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")
-        col.addView(settingRow("Check for updates", "You have MSNGR $ver") { checkUpdateNow() })
+        col.addView(settingRow("Check for updates", "You have quipu $ver") { checkUpdateNow() })
         col.addView(tv("Connection", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
         val direct = Messenger.direct
         val on = Messenger.connected
@@ -3866,11 +3866,11 @@ class MainActivity : Activity() {
         // Calls when closed: each missing phone setting, tap to fix
         col.addView(tv("Calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
         col.addView(settingSwitch("Wake-up pings", Messenger.pushOn) { on -> Messenger.pushOn = on; Messenger.settingsChanged(); PushService.register(this) })
-        col.addView(settingNote("Lets calls and messages wake MSNGR when it's closed, like Telegram, through Google's push service. The ping is empty: Google never sees who it's from or what it says."))
+        col.addView(settingNote("Lets calls and messages wake quipu when it's closed, like Telegram, through Google's push service. The ping is empty: Google never sees who it's from or what it says."))
         val fixes = ringFixes()
-        if (fixes.isEmpty()) col.addView(tv("✓ Calls will ring this phone even when MSNGR is closed", 15f, green).apply { setPadding(dp(20), dp(6), dp(20), dp(6)) })
+        if (fixes.isEmpty()) col.addView(tv("✓ Calls will ring this phone even when quipu is closed", 15f, green).apply { setPadding(dp(20), dp(6), dp(20), dp(6)) })
         else {
-            col.addView(settingNote("To ring like a normal phone call when MSNGR is closed, tap each one:"))
+            col.addView(settingNote("To ring like a normal phone call when quipu is closed, tap each one:"))
             for ((what, why, fix) in fixes) col.addView(settingRow("⚠  $what", why) { fix() })
         }
         col.addView(settingNote("Keeps a small \"connected\" notification. No Google push service is used."))
@@ -3879,9 +3879,9 @@ class MainActivity : Activity() {
         col.addView(settingSwitch("Show when I'm typing", Messenger.core.showTyping) { on -> Messenger.core.showTyping = on; Messenger.settingsChanged() })
         col.addView(settingNote("When on, a friend sees \"typing…\" while you write to them."))
         col.addView(settingSwitch("Show when I'm online", Messenger.core.showSeen) { on -> Messenger.setShowSeen(on) })
-        col.addView(settingNote("When on, friends see \"online\" while you have MSNGR open, and \"last seen\" after."))
+        col.addView(settingNote("When on, friends see \"online\" while you have quipu open, and \"last seen\" after."))
         col.addView(gap(20))
-        col.addView(tv("MSNGR ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
+        col.addView(tv("quipu ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
             13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })
         setContentView(page(topBar("Settings", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
     }

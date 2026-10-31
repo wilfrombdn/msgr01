@@ -93,7 +93,7 @@ object Net {
         try {
             s.soTimeout = 60_000
             s.getOutputStream().apply {
-                write(("GET $path HTTP/1.1\r\nHost: ${route.host}\r\nUser-Agent: MSNGR\r\nAccept-Encoding: identity\r\n" +
+                write(("GET $path HTTP/1.1\r\nHost: ${route.host}\r\nUser-Agent: quipu\r\nAccept-Encoding: identity\r\n" +
                     "Connection: close\r\n\r\n").toByteArray(Charsets.ISO_8859_1))
                 flush()
             }

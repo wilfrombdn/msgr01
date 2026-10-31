@@ -59,7 +59,7 @@ object Updater {
         val pi = ctx.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(ctx.packageName)
-            // Android 12+: no extra confirmation once MSNGR installed itself before
+            // Android 12+: no extra confirmation once quipu installed itself before
             if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
         val id = pi.createSession(params)
@@ -97,7 +97,7 @@ class UpdateReceiver : BroadcastReceiver() {
                 val tap = PendingIntent.getActivity(ctx, 8, open, PendingIntent.FLAG_IMMUTABLE)
                 val name = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault("")
                 ctx.getSystemService(NotificationManager::class.java).notify(77, Notification.Builder(ctx, SyncService.CH_MSG)
-                    .setSmallIcon(R.drawable.ic_notify).setContentTitle("MSNGR updated to $name").setContentText("Tap to open")
+                    .setSmallIcon(R.drawable.ic_notify).setContentTitle("quipu updated to $name").setContentText("Tap to open")
                     .setContentIntent(tap).setAutoCancel(true).setTimeoutAfter(10 * 60_000).build())
             }
         }

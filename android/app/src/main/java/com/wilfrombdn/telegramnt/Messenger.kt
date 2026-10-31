@@ -33,7 +33,7 @@ object Messenger {
 
     fun setPushToken(t: String) { core.pushToken = t; kick() }
 
-    /** Asked once to set the phone up so calls ring when MSNGR is closed. */
+    /** Asked once to set the phone up so calls ring when quipu is closed. */
     var ringSetupAsked = false
     val look = Look()
     /** A user-chosen file (via the system picker) we keep an encrypted full backup in, so chats
@@ -483,9 +483,21 @@ object Messenger {
         var ok = core.relay.ping()
         // Direct: the tunnel address changes when the server restarts; look up the new one and try again
         if (!ok && direct && refreshDirect()) ok = core.relay.ping()
+        val now = System.currentTimeMillis()
+        if (ok) { lastServerOk = now; torRestarts = 0 }
+        else if (Tor.socksPort() != null && core.call.let { it == null || it.phase == Core.Call.ENDED } &&
+            Tor.restartDue(now, lastServerOk, lastTorRestart, torRestarts)) {
+            // Tor is up but the server still doesn't answer: Tor may be stuck on dead routes from an outage
+            lastTorRestart = now; torRestarts++
+            Tor.restart()
+        }
         setConnected(ok)
         return ok
     }
+
+    @Volatile private var lastServerOk = System.currentTimeMillis()
+    @Volatile private var lastTorRestart = 0L
+    @Volatile private var torRestarts = 0
 
     // ---------- Tor or Direct ----------
 

@@ -1,4 +1,4 @@
-# Builds MSNGR and runs every test on GitHub's machines (much faster than the laptop).
+# Builds quipu and runs every test on GitHub's machines (much faster than the laptop).
 # Runs on every push to main; the test report, screenshots and a test APK are attached to each run.
 name: build
 

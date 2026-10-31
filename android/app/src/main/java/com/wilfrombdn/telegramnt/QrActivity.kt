@@ -28,7 +28,7 @@ import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeWriter
 import java.util.concurrent.Executors
 
-/** Scans a friend's MSNGR QR code (or a group invite) and hands the text back to the chat list. */
+/** Scans a friend's quipu QR code (or a group invite) and hands the text back to the chat list. */
 class QrActivity : ComponentActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     @Volatile private var done = false
@@ -45,7 +45,7 @@ class QrActivity : ComponentActivity() {
             setBackgroundColor(Color.BLACK)
             addView(preview, FrameLayout.LayoutParams(-1, -1))
             addView(TextView(context).apply {
-                text = "Point the camera at a friend's MSNGR code"; setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER
+                text = "Point the camera at a friend's quipu code"; setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER
                 setPadding(40, 40, 40, 40); setBackgroundColor(0x88000000.toInt())
             }, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         })

@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- in-app updates: MSNGR can install its own newer version (Android asks once) -->
+    <!-- in-app updates: quipu can install its own newer version (Android asks once) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- voice calls -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -28,7 +28,7 @@
         android:fullBackupContent="false"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="MSNGR"
+        android:label="quipu"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true"
             android:launchMode="singleTask"

@@ -800,7 +800,7 @@ def giphy_get(url, cap):
     host = urllib.parse.urlparse(url).hostname or ""
     if not (host == "giphy.com" or host.endswith(".giphy.com")):
         raise ValueError("not giphy")
-    r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "MSNGR-relay"}), timeout=15)
+    r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "quipu-relay"}), timeout=15)
     body = r.read(cap + 1)
     if len(body) > cap:
         raise ValueError("too big")

@@ -1,4 +1,4 @@
-# MSNGR server
+# quipu server
 
 The server is one file, `server/relay.py`, and only needs Python (no installs).
 

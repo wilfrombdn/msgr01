@@ -8,7 +8,7 @@ import java.net.URL
 import java.util.Base64
 
 /**
- * Talks to the MSNGR server. Messages only ever travel sealed.
+ * Talks to the quipu server. Messages only ever travel sealed.
  *
  * All traffic goes through [Net], which connects either directly (tests, and the future "Direct" path)
  * or through Tor's SOCKS5 proxy to a .onion address. [socks] returns the live Tor SOCKS port, or null

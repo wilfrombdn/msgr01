@@ -1,4 +1,4 @@
-# Releasing an MSNGR update
+# Releasing a quipu update
 
 Every release goes out the same way: as a normal **in-app update**. Phones on 4.7 or newer see an
 "Update available" pop-up with a short "What's new" list, download the update through Tor and install it.
