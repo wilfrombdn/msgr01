@@ -1254,18 +1254,35 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
      * Queues an attachment. It's locked here with its own random key; the server only
      * ever stores the locked copy, and the key travels inside the sealed message.
      */
-    fun queueFile(c: Contact, name: String, mime: String, data: ByteArray, thumb: ByteArray?): Msg {
+    fun queueFile(c: Contact, name: String, mime: String, data: ByteArray, thumb: ByteArray?, once: Boolean = false): Msg {
         if (data.size > MAX_FILE) throw UserError("Files can be up to ${MAX_FILE / 1024 / 1024} MB")
         val key = Crypto.randomHex(32)
         val local = Crypto.randomHex(16)
         saveBlob(local, Crypto.gcmSeal(key.unhex(), FILE_LABEL, padFile(data)))
         val f = JSONObject().put("k", key).put("n", cleanName(name)).put("m", cleanMime(mime)).put("s", data.size).put("local", local)
-        thumb?.let { f.put("th", b64(it)) }
+        // view once: no preview travels with it (it would stay on their phone)
+        if (once) f.put("vo", true) else thumb?.let { f.put("th", b64(it)) }
         val msg = Msg(Crypto.randomHex(16), true, "", System.currentTimeMillis(), Msg.SENDING).also { it.file = f }
         if (c.ttl > 0) msg.expires = System.currentTimeMillis() + c.ttl * 1000L
         synchronized(this) { c.msgs.add(msg) }
         onChange()
         return msg
+    }
+
+    /**
+     * Opens a view-once photo: returns its bytes and, before anyone sees it, deletes it from the phone
+     * and marks it opened (the caller saves at once), so closing the app mid-view can't give a second look.
+     */
+    fun openViewOnce(msg: Msg): ByteArray? {
+        val f = msg.file ?: return null
+        if (!f.optBoolean("vo") || msg.mine || f.optBoolean("opened")) return null
+        val bytes = openFile(msg) ?: return null
+        synchronized(this) {
+            f.optString("local").takeIf { it.isNotEmpty() }?.let { deleteBlob(it) }
+            f.remove("local"); f.remove("th"); f.put("opened", true)
+        }
+        onChange()
+        return bytes
     }
 
     /** The attachment's bytes, unlocked, or null if it isn't here yet. */
@@ -1296,7 +1313,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     f.put("id", relay.upload(blob))
                 }
                 body.put("f", JSONObject().put("id", f.getString("id")).put("k", f.getString("k")).put("n", f.getString("n"))
-                    .put("m", f.getString("m")).put("s", f.getInt("s")).put("th", f.optString("th")))
+                    .put("m", f.getString("m")).put("s", f.getInt("s")).put("th", f.optString("th"))
+                    .apply { if (f.optBoolean("vo")) put("vo", true) })
             }
             if (c.canChat) {
                 sealSignal(m, c, c.theirAddr!!, body.put("t", "msg"))
@@ -1307,6 +1325,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             }
             // edited while it was on its way: send the new text right behind it
             synchronized(this) { msg.state = Msg.SENT; editedMeanwhile = msg.text != sentText; if (editedMeanwhile) msg.edited = true }
+            // view once: it's on its way, so my own copy goes too (I can't reopen it either)
+            msg.file?.takeIf { it.optBoolean("vo") }?.let { f -> f.optString("local").takeIf { it.isNotEmpty() }?.let { deleteBlob(it) }; f.remove("local") }
             Msg.SENT
         } catch (e: Exception) {
             Msg.FAILED
@@ -1717,6 +1737,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val out = JSONObject().put("id", id).put("k", k).put("n", cleanName(f.optString("n"))).put("m", cleanMime(f.optString("m"))).put("s", size)
         f.optString("th").takeIf { it.isNotEmpty() && it.length <= 8000 }?.let { out.put("th", it) }
         if (f.optBoolean("grp")) out.put("grp", true)   // keep: tells fetchFile not to delete-on-pickup (group fan-out)
+        if (f.optBoolean("vo")) { out.put("vo", true); out.remove("th") }   // view once: never keep a preview
         return out
     }
 
@@ -1726,7 +1747,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     /** Downloads one received attachment, checks it opens, keeps the locked copy, tells the server to forget it. */
     fun fetchFile(msg: Msg): Boolean {
         val f = msg.file ?: return false
-        if (f.has("local") || f.optBoolean("cleared")) return true
+        if (f.has("local") || f.optBoolean("cleared") || f.optBoolean("opened")) return true   // opened view-once: gone for good
         val id = f.getString("id")
         val blob = relay.download(id)
         if (Crypto.gcmOpen(f.getString("k").unhex(), FILE_LABEL, blob) == null) return false

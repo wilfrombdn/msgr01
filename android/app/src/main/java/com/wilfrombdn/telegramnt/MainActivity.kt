@@ -105,9 +105,84 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+        val fresh = savedInstanceState == null && intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0
+        if (Messenger.locked && Messenger.signedIn) { afterUnlock = if (fresh) intent else null; showLock(); return }
         if (Messenger.signedIn) reopenSpot() else { showWelcome(); Messenger.connectInBackground() }
         // a notification tap opens that chat; but not again when reopening from recents (keep your place)
-        if (savedInstanceState == null && intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) handle(intent)
+        if (fresh) handle(intent)
+    }
+
+    // ---------- app lock ----------
+
+    /** A notification tap or share that arrived while locked: carried out after unlocking. */
+    private var afterUnlock: Intent? = null
+    private var lockAsked = false
+
+    /** Nothing but the logo and an Unlock button until the phone's own lock (fingerprint, face, PIN) is passed. */
+    private fun showLock() {
+        val firstShow = screen != "lock"
+        screen = "lock"
+        val km = getSystemService(android.app.KeyguardManager::class.java)
+        if (!km.isDeviceSecure) {
+            // the phone's screen lock was removed: don't trap anyone behind a lock that can't open
+            Messenger.appLock = false; Messenger.unlock(); Messenger.settingsChanged()
+            toast("App lock is off: this phone has no screen lock any more")
+            return unlocked()
+        }
+        setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; background = texturedBg(listBg); fitsSystemWindows = true
+            addView(ImageView(context).apply { setImageResource(R.drawable.ic_bubble_logo) }, LinearLayout.LayoutParams(dp(72), dp(72)))
+            addView(tv("quipu is locked", 20f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(18), 0, dp(28)) })
+            addView(cta("Unlock") { askToUnlock() }, ctaParams())
+        })
+        // ask straight away the first time; after a cancel, wait for a tap on Unlock
+        if (firstShow && !lockAsked) window.decorView.post { askToUnlock() }
+    }
+
+    private fun askToUnlock() {
+        lockAsked = true
+        confirmIdentity("Unlock quipu") { unlocked() }
+    }
+
+    private fun unlocked() {
+        Messenger.unlock(); lockAsked = false
+        screen = ""
+        if (Messenger.signedIn) reopenSpot() else showWelcome()
+        afterUnlock?.let { afterUnlock = null; handle(it) }
+    }
+
+    /** The phone's own check: fingerprint/face or PIN/pattern on Android 11+, PIN/pattern before that. */
+    private fun confirmIdentity(title: String, ok: () -> Unit) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val prompt = android.hardware.biometrics.BiometricPrompt.Builder(this).setTitle(title)
+                .setAllowedAuthenticators(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                    android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL).build()
+            runCatching {
+                prompt.authenticate(android.os.CancellationSignal(), mainExecutor, object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(r: android.hardware.biometrics.BiometricPrompt.AuthenticationResult) { ok() }
+                })
+            }.onFailure { toast("Couldn't show the unlock prompt") }
+        } else {
+            pendingIdentity = ok
+            @Suppress("DEPRECATION")
+            val i = getSystemService(android.app.KeyguardManager::class.java).createConfirmDeviceCredentialIntent(title, null)
+            if (i == null) ok() else @Suppress("DEPRECATION") startActivityForResult(i, CONFIRM_IDENTITY)
+        }
+    }
+    private var pendingIdentity: (() -> Unit)? = null
+
+    /** Settings > Privacy > App lock: turn on (after one check), pick the delay, or turn off. */
+    private fun appLockMenu() {
+        if (!Messenger.appLock) {
+            if (!getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure)
+                return popup("Set a screen lock first", "App lock uses your phone's own fingerprint, face or PIN. Set one up in your phone's settings, then come back.", null, "OK" to white)
+            return confirmIdentity("Turn on app lock") { Messenger.appLock = true; Messenger.lockAfterMin = 1; Messenger.settingsChanged(); showSettings() }
+        }
+        val opts = listOf(1 to "After 1 minute away", 5 to "After 5 minutes away", 60 to "After 1 hour away")
+        pickList("App lock", "quipu asks for your fingerprint, face or PIN when you come back after:", (opts.map { it.second } + "Turn off app lock").toTypedArray()) { i ->
+            if (i < opts.size) Messenger.lockAfterMin = opts[i].first else Messenger.appLock = false
+            Messenger.settingsChanged(); showSettings()
+        }
     }
 
     /** Back to the chat (and the place in it) you had open last time, else the chat list. */
@@ -132,6 +207,7 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (Messenger.locked && Messenger.signedIn) { afterUnlock = intent; return showLock() }   // open it once unlocked
         handle(intent)
     }
 
@@ -288,6 +364,7 @@ class MainActivity : Activity() {
     }
 
     private fun redraw() {
+        if (Messenger.locked && Messenger.signedIn) { if (screen != "lock") showLock(); return }
         maybeCheckUpdate()
         if (!Messenger.signedIn) {
             if (screen != "welcome" && screen != "signup" && screen != "login") showWelcome()
@@ -1004,6 +1081,7 @@ class MainActivity : Activity() {
         private const val MIC_FOR_VOICE = 15
         private const val LOCATION_FOR_SHARE = 16
         private const val SCAN_QR = 17
+        private const val CONFIRM_IDENTITY = 18
         private const val ROUND_VIDEO = 18
 
         /** Fixed reactions, then the most-used emoji not already in the bar, padded with [filler]. */
@@ -2060,7 +2138,7 @@ class MainActivity : Activity() {
 
     /** Copy / Download for a photo that's on this phone. */
     private fun imageActions(m: Msg, copyLabel: String = "Copy"): List<Pair<String, () -> Unit>> =
-        if (m.file?.optString("m")?.startsWith("image/") == true && m.file?.has("local") == true)
+        if (m.file?.optBoolean("vo") != true && m.file?.optString("m")?.startsWith("image/") == true && m.file?.has("local") == true)
             listOf(copyLabel to { copyImage(m) }, "Download" to { downloadImage(m) }, "Add to my stickers" to { addToStickers(m) }) else emptyList()
 
     // ---------- round video messages ----------
@@ -2581,7 +2659,7 @@ class MainActivity : Activity() {
     }
 
     /** Text, or an attachment that's on this phone (not one still downloading or cleared). */
-    private fun canForward(m: Msg) = m.call == null && m.state != Msg.NOTE &&
+    private fun canForward(m: Msg) = m.call == null && m.state != Msg.NOTE && m.file?.optBoolean("vo") != true &&
         (m.file?.has("local") ?: m.text.isNotEmpty())
 
     /** Pick a chat to forward [m] to; it keeps who first wrote it. Then opens that chat. */
@@ -2994,6 +3072,8 @@ class MainActivity : Activity() {
     // ---------- attachments ----------
 
     private var attachTo: String? = null
+    /** The next picked photo goes as view once (attach > View once photo). */
+    private var sendOnce = false
     private var attachGroupId: String? = null
     private var emojiPopup: android.widget.PopupWindow? = null
     private var emojiData: List<Pair<String, List<String>>>? = null
@@ -3012,6 +3092,7 @@ class MainActivity : Activity() {
     }
 
     private fun attachMenu(anchor: View) {   // target already set in attachTo / attachGroupId
+        sendOnce = false   // only the "View once photo" row turns it on, for the photo picked right after
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = round(menuBg, 10)
@@ -3035,6 +3116,14 @@ class MainActivity : Activity() {
             val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
             else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
             @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_PHOTO)
+        }
+        attachTo?.let { Messenger.core.contact(it) }?.takeIf { it.status != Contact.SAVED }?.let {
+            row(R.drawable.ic_camera, "View once photo") {
+                sendOnce = true
+                val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
+                else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
+                @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_PHOTO)
+            }
         }
         row(R.drawable.ic_file, "File") {
             val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
@@ -3346,10 +3435,11 @@ class MainActivity : Activity() {
     private fun attachPicked(uri: android.net.Uri, asPhoto: Boolean) {
         val c = attachTo?.let { Messenger.core.contact(it) }
         val g = attachGroupId?.let { Messenger.core.group(it) }
+        val once = sendOnce && c != null && asPhoto; sendOnce = false
         if (c == null && g == null) return
         // send to whichever target the attach menu was opened from
         fun out(name: String, mime: String, data: ByteArray, thumb: ByteArray?) {
-            if (g != null) Messenger.sendGroupFile(g, name, mime, data, thumb) else Messenger.sendFile(c!!, name, mime, data, thumb)
+            if (g != null) Messenger.sendGroupFile(g, name, mime, data, thumb) else Messenger.sendFile(c!!, name, mime, data, thumb, once)
         }
         toast("Locking and sending…")
         Messenger.run({
@@ -3604,6 +3694,7 @@ class MainActivity : Activity() {
         val f = m.file!!
         val here = f.has("local")
         if (Voice.isVoice(f)) return voiceView(m, ink, onLong)
+        if (f.optBoolean("vo")) return onceView(m, ink, onLong)
         if (isRound(m)) return roundView(m, onLong)
         if (f.optString("m").startsWith("image/")) {
             val ask = askToDownload(m)
@@ -3658,6 +3749,57 @@ class MainActivity : Activity() {
         android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
         val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = maxOf(1, maxOf(o.outWidth, o.outHeight) / maxSide) }
         return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+    }
+
+    /** A view-once photo: no preview, ever. Theirs: tap to view (once). Mine, or already opened: just says so. */
+    private fun onceView(m: Msg, ink: Int, onLong: () -> Unit): View {
+        val f = m.file!!
+        val here = f.has("local")
+        val (title, sub) = when {
+            m.mine -> "View once photo" to if (m.state == Msg.SENDING) "Sending…" else "Sent. Only they can open it, once"
+            f.optBoolean("opened") -> "View once photo" to "Opened"
+            !here -> "View once photo" to if (askToDownload(m)) "Tap to download" else "Downloading…"
+            else -> "View once photo" to "Tap to view. It disappears after"
+        }
+        return LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), dp(6), dp(4))
+            addView(tv("①", 22f, ink, true).apply { gravity = Gravity.CENTER; background = circle(Color.parseColor("#22FFFFFF")) }, LinearLayout.LayoutParams(dp(42), dp(42)))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
+                addView(tv(title, 15f, ink, true))
+                addView(tv(sub, 13f, (ink and 0x00FFFFFF) or (0x99 shl 24)))
+            })
+            setOnClickListener {
+                when {
+                    m.mine || f.optBoolean("opened") -> {}
+                    here -> showOnce(m)
+                    else -> retryFetch(m)
+                }
+            }
+            setOnLongClickListener { onLong(); true }
+        }
+    }
+
+    /** Shows a view-once photo: deleted from the phone (and saved as opened) before it appears. No copy, save or forward. */
+    private fun showOnce(m: Msg) {
+        var bmp: android.graphics.Bitmap? = null
+        Messenger.run({
+            val bytes = Messenger.core.openViewOnce(m) ?: throw UserError("This photo can't be opened again")
+            Messenger.save()
+            bmp = decodeSmall(bytes, 2400)
+        }, {
+            val b = bmp ?: return@run toast("Couldn't open that photo")
+            screen = "viewer"
+            setContentView(FrameLayout(this).apply {
+                setBackgroundColor(Color.BLACK)
+                addView(ImageView(context).apply { setImageBitmap(b); scaleType = ImageView.ScaleType.FIT_CENTER })
+                addView(tv("View once: it's gone when you close it", 13f, Color.WHITE).apply {
+                    setPadding(dp(12), dp(6), dp(12), dp(6)); background = round(Color.parseColor("#99000000"), 12)
+                }, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(36) })
+                addView(icon(R.drawable.ic_back, Color.WHITE) { leaveViewer() }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START))
+                fitsSystemWindows = true
+            })
+        }) { e -> toast(errorText(e)) }
     }
 
     /** A photo/GIF/video that waits for a tap before downloading (Settings > Storage > auto-download off). */
@@ -3773,6 +3915,7 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == CONFIRM_IDENTITY) { val ok = pendingIdentity; pendingIdentity = null; if (resultCode == RESULT_OK) ok?.invoke(); return }
         if (requestCode == SCAN_QR && resultCode == RESULT_OK) return data?.getStringExtra("qr")?.let { scanned(it) } ?: Unit
         if (requestCode == ROUND_VIDEO && resultCode == RESULT_OK) return data?.getStringExtra("path")?.let { sendRound(it) } ?: Unit
         val uri = data?.data
@@ -3996,6 +4139,10 @@ class MainActivity : Activity() {
         if (Messenger.core.lastDrop.isNotEmpty()) col.addView(tv("diag · last fetched message: ${Messenger.core.lastDrop}", 12.5f, dim).apply { setPadding(dp(20), 0, dp(20), dp(10)) })
         col.addView(gap(8))
         col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged(); showSettings() })
+        col.addView(tv("Privacy", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+        col.addView(settingRow("App lock", if (Messenger.appLock) "On: asks for your fingerprint, face or PIN after ${when (Messenger.lockAfterMin) { 1 -> "1 minute"; 60 -> "1 hour"; else -> "${Messenger.lockAfterMin} minutes" }} away" else "Off") { appLockMenu() })
+        col.addView(settingSwitch("Show names in notifications", Messenger.notifyNames) { on -> Messenger.notifyNames = on; Messenger.settingsChanged() })
+        col.addView(settingNote("Message text never shows in notifications. Turn this off to hide who it's from too: you'll just see \"quipu · New message\"."))
         // Calls when closed: each missing phone setting, tap to fix
         col.addView(tv("Calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
         col.addView(settingSwitch("Wake-up pings", Messenger.pushOn) { on -> Messenger.pushOn = on; Messenger.settingsChanged(); PushService.register(this) })

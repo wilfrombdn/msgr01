@@ -153,6 +153,38 @@ class RelayFlowTest {
         }
     }
 
+    @Test fun viewOncePhotoOpensOnlyOnce() {
+        assumeTrue(Relay(server).ping())
+        val vi = withDisk(Core(server))
+        val wo = withDisk(Core(server))
+        val v = "vi_$tag"
+        val w = "wo_$tag"
+        vi.signup(v, "vis long password", "Vi")
+        wo.signup(w, "wos long password", "Wo")
+        val toWo = vi.addFriend(w)
+        wo.poll(5)
+        wo.accept(wo.contact(v)!!)
+        vi.poll(5)
+
+        val photo = ByteArray(40_000) { (it * 3).toByte() }
+        val msg = vi.queueFile(toWo, "p.jpg", "image/jpeg", photo, ByteArray(500) { 1 }, once = true)
+        assertFalse("no preview travels with a view-once photo", msg.file!!.has("th"))
+        vi.deliver(toWo, msg)
+        assertEquals(Msg.SENT, msg.state)
+        assertNull("the sender's own copy is gone once sent", vi.openFile(msg))
+
+        wo.poll(5)
+        val got = wo.contact(v)!!.msgs.last { it.file != null }
+        assertTrue("the view-once flag survives the trip", got.file!!.optBoolean("vo"))
+        assertFalse(got.file!!.has("th"))
+        assertArrayEquals(photo, wo.openViewOnce(got))
+        assertTrue(got.file!!.optBoolean("opened"))
+        assertNull("second look refused", wo.openViewOnce(got))
+        assertNull("and the bytes are gone from the phone", wo.openFile(got))
+        assertTrue("never downloaded again", wo.fetchFile(got))
+        assertNull(wo.openFile(got))
+    }
+
     @Test fun avatarPaddingIsFixedSize() {
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte()) + ByteArray(1500) { 3 }
         val padded = Core.padAvatar(jpeg)

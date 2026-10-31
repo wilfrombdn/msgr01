@@ -64,12 +64,12 @@ class SyncService : Service() {
             val open = PendingIntent.getActivity(ctx, g.id.hashCode(), Intent(ctx, MainActivity::class.java).putExtra("group", g.id),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val n = Notification.Builder(ctx, CH_MSG).setSmallIcon(R.drawable.ic_notify)
-                .setContentTitle(g.name).setContentText("You were mentioned")
+                .setContentTitle(if (Messenger.notifyNames) g.name else "quipu").setContentText(if (Messenger.notifyNames) "You were mentioned" else "New message")
                 .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open).setAutoCancel(true).build()
             ctx.getSystemService(NotificationManager::class.java).notify(g.id.hashCode(), n)
         }
 
-        /** Shows only who wrote, never the text, so it can't leak onto the lock screen. */
+        /** Shows only who wrote, never the text, so it can't leak onto the lock screen (with "show names" off, not even who). */
         fun notifyMessage(ctx: Context, c: Contact) {
             val open = PendingIntent.getActivity(
                 ctx, c.user.hashCode(),
@@ -78,13 +78,13 @@ class SyncService : Service() {
             )
             val n = Notification.Builder(ctx, CH_MSG)
                 .setSmallIcon(R.drawable.ic_notify)
-                .setContentTitle(c.name)
-                .setContentText(if (c.status == Contact.ASKING) "Wants to be your friend"
+                .setContentTitle(if (Messenger.notifyNames) c.name else "quipu")
+                .setContentText(if (!Messenger.notifyNames) "New message" else if (c.status == Contact.ASKING) "Wants to be your friend"
                     else if (c.msgs.lastOrNull()?.call?.optString("s") == "missed") "Missed call" else "New message")
                 .setVisibility(Notification.VISIBILITY_PRIVATE)
                 .setContentIntent(open)
                 .setAutoCancel(true)
-                .apply { if (c.canChat && c.status != Contact.SAVED) addAction(ReplyReceiver.action(ctx, c)) }
+                .apply { if (Messenger.notifyNames && c.canChat && c.status != Contact.SAVED) addAction(ReplyReceiver.action(ctx, c)) }
                 .build()
             ctx.getSystemService(NotificationManager::class.java).notify(c.user.hashCode(), n)
         }

@@ -78,6 +78,40 @@ object Messenger {
     var keepMediaDays = 0
     /** Download photos, GIFs and videos as they arrive (off = each waits for a tap, to save data). */
     var autoMedia = true
+    /** Say who a message is from in notifications (off = just "quipu · New message"). Text is never shown either way. */
+    var notifyNames = true
+
+    // ---------- app lock (Settings > Privacy; off by default) ----------
+
+    /** Ask for the phone's fingerprint / PIN when quipu opens. */
+    var appLock = false
+    /** Minutes away before it locks again (1 at least: photo pickers and the camera briefly leave the app). */
+    var lockAfterMin = 1
+    /** Locked right now: nothing may be shown until the phone's lock is passed. */
+    @Volatile var locked = false
+    private var startedActivities = 0
+    private var awaySince = 0L
+
+    /** Whether to lock on coming back, given how long the app was out of sight. */
+    fun lockDue(on: Boolean, awaySince: Long, now: Long, afterMin: Int): Boolean =
+        on && awaySince > 0 && now - awaySince >= afterMin * 60_000L
+
+    fun unlock() { locked = false }
+
+    /** Counts quipu's screens on show, app-wide, so moving between our own screens never relocks. */
+    private fun watchForeground(a: android.app.Application) = a.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+        override fun onActivityStarted(act: android.app.Activity) {
+            if (startedActivities++ == 0 && lockDue(appLock, awaySince, System.currentTimeMillis(), lockAfterMin)) locked = true
+        }
+        override fun onActivityStopped(act: android.app.Activity) {
+            if (--startedActivities <= 0) { startedActivities = 0; awaySince = System.currentTimeMillis() }
+        }
+        override fun onActivityCreated(act: android.app.Activity, b: android.os.Bundle?) {}
+        override fun onActivityResumed(act: android.app.Activity) {}
+        override fun onActivityPaused(act: android.app.Activity) {}
+        override fun onActivitySaveInstanceState(act: android.app.Activity, b: android.os.Bundle) {}
+        override fun onActivityDestroyed(act: android.app.Activity) {}
+    })
 
     /** Photos, GIFs and videos (incl. round video messages): the ones [autoMedia] covers. Voice and files always download. */
     fun isMedia(f: JSONObject): Boolean = f.optString("m").let { it.startsWith("image/") || it.startsWith("video/") }
@@ -126,6 +160,8 @@ object Messenger {
         load()
         applyRoute()
         PushService.register(app)
+        locked = appLock   // a fresh start always asks
+        (app as? android.app.Application)?.let { watchForeground(it) }
         // once only: every screen and service calls init, and running it again swapped in a fresh Core,
         // which dropped a call in progress (the call screen saw "no call" and closed; Hang up did nothing)
         ready = true
@@ -374,7 +410,7 @@ object Messenger {
     private fun extras(o: JSONObject): JSONObject {
         o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
-        o.put("keepMediaDays", keepMediaDays).put("autoMedia", autoMedia)
+        o.put("keepMediaDays", keepMediaDays).put("autoMedia", autoMedia).put("notifyNames", notifyNames).put("appLock", appLock).put("lockAfterMin", lockAfterMin)
         o.put("direct", direct).put("directUrl", directUrl).put("ringSetupAsked", ringSetupAsked).put("pushOn", pushOn)
         o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
         o.put("stickers", JSONObject().also { j -> synchronized(allStickers) { allStickers.forEach { (u, ss) -> j.put(u, org.json.JSONArray(ss)) } } })
@@ -388,7 +424,8 @@ object Messenger {
         o.optJSONObject("emojiUse")?.let { j -> synchronized(emojiUse) { j.keys().forEach { emojiUse[it] = j.optInt(it) } } }
         o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
         o.optJSONObject("spot")?.let { spot = Spot.from(it) }
-        keepMediaDays = o.optInt("keepMediaDays", 0); autoMedia = o.optBoolean("autoMedia", true)
+        keepMediaDays = o.optInt("keepMediaDays", 0); autoMedia = o.optBoolean("autoMedia", true); notifyNames = o.optBoolean("notifyNames", true)
+        appLock = o.optBoolean("appLock"); lockAfterMin = o.optInt("lockAfterMin", 1).coerceAtLeast(1)
         direct = o.optBoolean("direct"); directUrl = o.optString("directUrl"); ringSetupAsked = o.optBoolean("ringSetupAsked"); pushOn = o.optBoolean("pushOn", true)
         o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->
             val a = j.optJSONArray(u) ?: return@forEach
@@ -626,8 +663,8 @@ object Messenger {
     fun react(c: Contact, msg: Msg, emoji: String) { useEmoji(emoji); io.execute { core.react(c, msg, emoji) } }
     fun reactGroup(g: Group, msg: Msg, emoji: String) { useEmoji(emoji); io.execute { core.reactGroup(g, msg, emoji) } }
 
-    fun sendFile(c: Contact, name: String, mime: String, data: ByteArray, thumb: ByteArray?) {
-        val m = core.queueFile(c, name, mime, data, thumb)
+    fun sendFile(c: Contact, name: String, mime: String, data: ByteArray, thumb: ByteArray?, once: Boolean = false) {
+        val m = core.queueFile(c, name, mime, data, thumb, once)
         io.execute { core.deliver(c, m) }
     }
 

@@ -297,6 +297,28 @@ class ScreenshotTest {
         File("build/shots/48-forward-picker.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** App lock screen, the Privacy settings, and view-once photo bubbles. */
+    @Test fun lockAndViewOnce() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val km = org.robolectric.RuntimeEnvironment.getApplication().getSystemService(android.app.KeyguardManager::class.java)
+        shadowOf(km).setIsDeviceSecure(true)
+        Messenger.appLock = true; Messenger.locked = true
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        shoot(a, "66-locked")
+        assert(Messenger.locked) { "still locked until the phone's check passes" }
+        Messenger.unlock(); call(a, "showSettings"); shoot(a, "67-privacy-settings")
+        Messenger.appLock = false
+        val sam = Messenger.core.contact("sam_r")!!
+        val now = System.currentTimeMillis()
+        sam.msgs += Msg("vo1", false, "", now, Msg.RECEIVED).also {
+            it.file = org.json.JSONObject().put("id", "5".repeat(32)).put("k", "0".repeat(64)).put("n", "p.jpg").put("m", "image/jpeg").put("s", 40_000).put("vo", true).put("local", "x")
+        }
+        sam.msgs += Msg("vo2", true, "", now, Msg.SENT).also {
+            it.file = org.json.JSONObject().put("id", "6".repeat(32)).put("k", "0".repeat(64)).put("n", "p.jpg").put("m", "image/jpeg").put("s", 40_000).put("vo", true)
+        }
+        call(a, "showChat", "sam_r"); shadowOf(Looper.getMainLooper()).idle(); shoot(a, "68-view-once")
+    }
+
     /** "Share" from another app: quipu asks which chat, then the shared text lands there. */
     @Test fun shareFromAnotherApp() {
         Messenger.initForPreview(fakeCore(signedIn = true))
