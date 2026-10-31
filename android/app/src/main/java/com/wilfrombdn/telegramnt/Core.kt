@@ -1506,6 +1506,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         for (g in synchronized(this) { groups.toList() }) runCatching { pollGroup(m, g, 0) }
         purgeExpired()
         for (msg in synchronized(this) { toFetch.toList() }) {
+            if (msg.file?.let { autoFetch(it) } == false) continue   // waits for a tap
             val ok = runCatching { fetchFile(msg) }.getOrDefault(false)
             synchronized(this) { if (ok || msg.file?.has("local") == true) toFetch.remove(msg) }
         }
@@ -1718,6 +1719,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         if (f.optBoolean("grp")) out.put("grp", true)   // keep: tells fetchFile not to delete-on-pickup (group fan-out)
         return out
     }
+
+    /** Whether a received attachment downloads by itself; false = it waits until it's tapped (Settings > Storage). */
+    @Volatile var autoFetch: (JSONObject) -> Boolean = { true }
 
     /** Downloads one received attachment, checks it opens, keeps the locked copy, tells the server to forget it. */
     fun fetchFile(msg: Msg): Boolean {

@@ -44,9 +44,22 @@ class QrActivity : ComponentActivity() {
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(preview, FrameLayout.LayoutParams(-1, -1))
+            val d = resources.displayMetrics.density
+            // a square guide in the middle of the picture
+            addView(android.view.View(context).apply {
+                background = android.graphics.drawable.GradientDrawable().apply { setStroke((3 * d).toInt(), Color.WHITE); cornerRadius = 18 * d }
+            }, FrameLayout.LayoutParams((240 * d).toInt(), (240 * d).toInt(), Gravity.CENTER))
             addView(TextView(context).apply {
-                text = "Point the camera at a friend's quipu code"; setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER
-                setPadding(40, 40, 40, 40); setBackgroundColor(0x88000000.toInt())
+                text = "‹"; setTextColor(Color.WHITE); textSize = 34f; setPadding((18 * d).toInt(), (6 * d).toInt(), (18 * d).toInt(), (6 * d).toInt())
+                setOnClickListener { finish() }
+            }, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { topMargin = (28 * d).toInt() })
+            addView(android.widget.LinearLayout(context).apply {
+                orientation = android.widget.LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                setBackgroundColor(0x99000000.toInt()); setPadding(0, (20 * d).toInt(), 0, (36 * d).toInt())
+                addView(TextView(context).apply {
+                    text = "Scan a friend's quipu QR code to add them"; setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER
+                    setPadding((24 * d).toInt(), 0, (24 * d).toInt(), 0)
+                })
             }, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         })
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) start()

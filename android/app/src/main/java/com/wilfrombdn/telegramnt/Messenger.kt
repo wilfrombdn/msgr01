@@ -76,6 +76,11 @@ object Messenger {
     var spot = Spot()
     /** Auto-delete photos/videos/files older than this many days from this phone (0 = never). */
     var keepMediaDays = 0
+    /** Download photos, GIFs and videos as they arrive (off = each waits for a tap, to save data). */
+    var autoMedia = true
+
+    /** Photos, GIFs and videos (incl. round video messages): the ones [autoMedia] covers. Voice and files always download. */
+    fun isMedia(f: JSONObject): Boolean = f.optString("m").let { it.startsWith("image/") || it.startsWith("video/") }
     private var lastMediaSweep = 0L
 
     /** Applies the auto-delete setting (at most hourly unless [now] is set). */
@@ -134,6 +139,7 @@ object Messenger {
 
     private fun start(c: Core) {
         core = c
+        core.autoFetch = { f -> autoMedia || !isMedia(f) }
         val dir = file?.let { File(it.parentFile, "blobs").apply { mkdirs() } }
         if (dir != null) {
             // attachments are stored still locked with their own keys (the keys live in the locked store)
@@ -368,7 +374,7 @@ object Messenger {
     private fun extras(o: JSONObject): JSONObject {
         o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
-        o.put("keepMediaDays", keepMediaDays)
+        o.put("keepMediaDays", keepMediaDays).put("autoMedia", autoMedia)
         o.put("direct", direct).put("directUrl", directUrl).put("ringSetupAsked", ringSetupAsked).put("pushOn", pushOn)
         o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
         o.put("stickers", JSONObject().also { j -> synchronized(allStickers) { allStickers.forEach { (u, ss) -> j.put(u, org.json.JSONArray(ss)) } } })
@@ -382,7 +388,7 @@ object Messenger {
         o.optJSONObject("emojiUse")?.let { j -> synchronized(emojiUse) { j.keys().forEach { emojiUse[it] = j.optInt(it) } } }
         o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
         o.optJSONObject("spot")?.let { spot = Spot.from(it) }
-        keepMediaDays = o.optInt("keepMediaDays", 0)
+        keepMediaDays = o.optInt("keepMediaDays", 0); autoMedia = o.optBoolean("autoMedia", true)
         direct = o.optBoolean("direct"); directUrl = o.optString("directUrl"); ringSetupAsked = o.optBoolean("ringSetupAsked"); pushOn = o.optBoolean("pushOn", true)
         o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->
             val a = j.optJSONArray(u) ?: return@forEach

@@ -404,12 +404,7 @@ class MainActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         background = texturedBg(bg)
         fitsSystemWindows = true
-        // Telegram-style green bar while a call is going: tap it to get back to the call screen
-        addView(tv("", 14f, Color.WHITE, true).apply {
-            gravity = Gravity.CENTER; setBackgroundColor(Color.parseColor("#3CC261")); setPadding(dp(12), dp(9), dp(12), dp(9))
-            maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-            setOnClickListener { startActivity(Intent(this@MainActivity, CallActivity::class.java)) }
-        }.also { callBar = it; updateCallBar() })
+        addView(callBarView())
         addView(top)
         addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
     }
@@ -418,6 +413,13 @@ class MainActivity : Activity() {
     private val callTicker = android.os.Handler(android.os.Looper.getMainLooper())
     private val callTick = object : Runnable { override fun run() { updateCallBar(); callTicker.postDelayed(this, 1000) } }
     private val callWatch: (Core.Call) -> Unit = { runOnUiThread { updateCallBar() } }
+
+    /** Telegram-style green bar while a call is going (top of every screen): tap it to get back to the call. */
+    private fun callBarView() = tv("", 14f, Color.WHITE, true).apply {
+        gravity = Gravity.CENTER; setBackgroundColor(Color.parseColor("#3CC261")); setPadding(dp(12), dp(9), dp(12), dp(9))
+        maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+        setOnClickListener { startActivity(Intent(this@MainActivity, CallActivity::class.java)) }
+    }.also { callBar = it; updateCallBar() }
 
     private fun updateCallBar() {
         val b = callBar ?: return
@@ -1300,6 +1302,7 @@ class MainActivity : Activity() {
         }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; background = wallBg(); fitsSystemWindows = true
+            addView(callBarView(), LinearLayout.LayoutParams(-1, -2))
             addView(groupTop, LinearLayout.LayoutParams(-1, -2))
             addView(groupScroller, LinearLayout.LayoutParams(-1, 0, 1f))
             addView(bottom, LinearLayout.LayoutParams(-1, -2))
@@ -1457,6 +1460,18 @@ class MainActivity : Activity() {
         screen = "new"
         val me = Messenger.core.me ?: return
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(20), dp(20), dp(20)) }
+        // first option, like Telegram: add someone by scanning the QR code on their phone
+        col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; background = pressable(); setPadding(dp(4), dp(12), dp(4), dp(12))
+            addView(icon(R.drawable.ic_qr, white, 24, 0))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, 0, 0)
+                addView(tv("Scan QR code", 17f, white, true))
+                addView(tv("Point your camera at a friend's code to add them", 13.5f, dim))
+            })
+            setOnClickListener { scanToAdd() }
+        })
+        col.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(8); bottomMargin = dp(20) })
         col.addView(tv("Add a friend", 18f, white, true))
         col.addView(gap(6))
         col.addView(tv("Type their username. They'll get a friend request, and you can start writing right away.", 14.5f, dim))
@@ -1590,6 +1605,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             background = wallBg()
             fitsSystemWindows = true
+            addView(callBarView(), LinearLayout.LayoutParams(-1, -2))
             addView(chatTop, LinearLayout.LayoutParams(-1, -2))
             addView(banner, LinearLayout.LayoutParams(-1, -2))
             addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -2077,7 +2093,8 @@ class MainActivity : Activity() {
     private fun roundView(m: Msg, onLong: () -> Unit): View {
         val f = m.file!!
         val here = f.has("local")
-        val thumb = f.optString("th").takeIf { it.isNotEmpty() }?.let { val t = java.util.Base64.getDecoder().decode(it); android.graphics.BitmapFactory.decodeByteArray(t, 0, t.size) }
+        val ask = askToDownload(m)
+        val thumb = if (ask) null else f.optString("th").takeIf { it.isNotEmpty() }?.let { val t = java.util.Base64.getDecoder().decode(it); android.graphics.BitmapFactory.decodeByteArray(t, 0, t.size) }
         return FrameLayout(this).apply {
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(v: View, o: android.graphics.Outline) = o.setOval(0, 0, v.width, v.height)
@@ -2086,7 +2103,7 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.parseColor("#33000000"))
             layoutParams = LinearLayout.LayoutParams(dp(200), dp(200)).apply { bottomMargin = dp(4) }
             addView(ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; thumb?.let { setImageBitmap(it) } }, FrameLayout.LayoutParams(-1, -1))
-            addView(tv(if (!here) (if (f.optBoolean("cleared")) "Removed" else if (m.mine) "" else "Downloading…") else "▶", if (here) 26f else 13f, Color.WHITE).apply {
+            addView(tv(if (!here) (if (f.optBoolean("cleared")) "Removed" else if (m.mine) "" else if (ask) "⬇ Tap" else "Downloading…") else "▶", if (here) 26f else 13f, Color.WHITE).apply {
                 gravity = Gravity.CENTER; background = circle(Color.parseColor("#88000000")); setPadding(dp(12), dp(6), dp(12), dp(6))
             }, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
             setOnClickListener { if (here) playRound(m) else if (!f.optBoolean("cleared")) retryFetch(m) }
@@ -2337,6 +2354,11 @@ class MainActivity : Activity() {
 
     // ---------- QR codes ----------
 
+    /** Opens the in-app camera to scan a friend's code (New Message > Scan QR code, or Profile). */
+    private fun scanToAdd() {
+        @Suppress("DEPRECATION") startActivityForResult(Intent(this, QrActivity::class.java), SCAN_QR)
+    }
+
     /** My code (friends scan it to add me) and a button to scan theirs. */
     private fun myQr() {
         val me = Messenger.core.me ?: return
@@ -2348,7 +2370,7 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(dp(230), dp(230)))
             addView(tv("@${me.user}", 17f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(12), 0, 0) })
         }
-        popup("My QR code", "A friend scans this in quipu (side menu > My QR code > Scan) to add you.", col, "Close" to dim, "Scan a code" to white) { i ->
+        popup("My QR code", "A friend taps New Message > Scan QR code in quipu and points the camera at this to add you.", col, "Close" to dim, "Scan a code" to white) { i ->
             if (i == 1) @Suppress("DEPRECATION") startActivityForResult(Intent(this, QrActivity::class.java), SCAN_QR)
         }
     }
@@ -2870,9 +2892,7 @@ class MainActivity : Activity() {
         item(R.drawable.ic_search, "Join Group", "with an invite link") { joinGroupPrompt() }
         item(R.drawable.ic_folder, "New Folder", "group chats, e.g. Family") { newFolder() }
         item(R.drawable.ic_bookmark, "Saved Messages", "notes to yourself, on this phone") { showChat(Messenger.core.savedChat().user) }
-        item(R.drawable.ic_qr, "My QR code", "or scan a friend's") { myQr() }
         divider()
-        item(R.drawable.ic_palette, "Appearance", "colours, text size, bubbles") { showAppearance() }
         item(R.drawable.ic_menu, "Settings") { showSettings() }
         col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
         col.addView(tv("quipu ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
@@ -3558,7 +3578,8 @@ class MainActivity : Activity() {
         if (Voice.isVoice(f)) return voiceView(m, ink, onLong)
         if (isRound(m)) return roundView(m, onLong)
         if (f.optString("m").startsWith("image/")) {
-            val bmp = pictures[m.id] ?: run {
+            val ask = askToDownload(m)
+            val bmp = if (ask) null else pictures[m.id] ?: run {
                 val full = if (here) Messenger.core.openFile(m)?.let { decodeSmall(it, 720) } else null
                 val shown = full ?: f.optString("th").takeIf { it.isNotEmpty() }?.let {
                     val t = java.util.Base64.getDecoder().decode(it); android.graphics.BitmapFactory.decodeByteArray(t, 0, t.size)
@@ -3579,7 +3600,8 @@ class MainActivity : Activity() {
                     setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(Color.parseColor("#88000000"), 4)
                 }, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(dp(6), dp(6), 0, 0) })
                 val cleared = f.optBoolean("cleared")
-                if (!here) addView(tv(if (cleared) "Removed to save space" else if (m.mine) "" else "Downloading…", 13f, Color.WHITE).apply {
+                if (!here) addView(tv(if (cleared) "Removed to save space" else if (m.mine) "" else if (ask) "⬇  ${if (isGif(m)) "GIF" else "Photo"} · ${sizeText(f.optInt("s"))}\nTap to download" else "Downloading…", 13f, Color.WHITE).apply {
+                    gravity = Gravity.CENTER
                     setPadding(dp(8), dp(4), dp(8), dp(4))
                     background = round(Color.parseColor("#99000000"), 10)
                 }, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
@@ -3596,7 +3618,7 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(10), 0, 0, 0)
                 addView(tv(f.optString("n"), 15f, ink, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.MIDDLE })
-                addView(tv(sizeText(f.optInt("s")) + if (here) "" else if (f.optBoolean("cleared")) " · removed to save space" else if (m.mine) "" else " · downloading…", 13f, (ink and 0x00FFFFFF) or (0x99 shl 24)))
+                addView(tv(sizeText(f.optInt("s")) + if (here) "" else if (f.optBoolean("cleared")) " · removed to save space" else if (m.mine) "" else if (askToDownload(m)) " · tap to download" else " · downloading…", 13f, (ink and 0x00FFFFFF) or (0x99 shl 24)))
             })
             setOnClickListener { if (here) openOutside(m) else if (f.optBoolean("cleared")) toast("This was removed from your phone to save space") else retryFetch(m) }
             setOnLongClickListener { onLong(); true }
@@ -3608,6 +3630,12 @@ class MainActivity : Activity() {
         android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
         val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = maxOf(1, maxOf(o.outWidth, o.outHeight) / maxSide) }
         return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+    }
+
+    /** A photo/GIF/video that waits for a tap before downloading (Settings > Storage > auto-download off). */
+    private fun askToDownload(m: Msg): Boolean {
+        val f = m.file ?: return false
+        return !m.mine && !f.has("local") && !f.optBoolean("cleared") && !Messenger.autoMedia && Messenger.isMedia(f)
     }
 
     private fun retryFetch(m: Msg) {
@@ -3826,6 +3854,17 @@ class MainActivity : Activity() {
                 addView(tv("@${me.user}", 15f, dim).apply { setPadding(0, dp(2), 0, 0) })
             })
         })
+        // my QR code right here: a friend scans it (their New Message opens the camera) to add me
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(20), dp(20), dp(20), dp(6))
+            addView(ImageView(context).apply {
+                setImageBitmap(QrActivity.codeFor(me.user, 512))
+                background = round(Color.WHITE, 12); setPadding(dp(10), dp(10), dp(10), dp(10))
+                setOnClickListener { myQr() }
+            }, LinearLayout.LayoutParams(dp(200), dp(200)))
+            addView(tv("My QR code: friends scan it to add you", 14f, dim).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, 0) })
+        })
+        col.addView(settingRow("Scan a QR code", "Add a friend by scanning theirs") { scanToAdd() })
         col.addView(gap(8))
         col.addView(settingRow(if (me.avatar == null) "Set profile photo" else "Change profile photo", "Only your friends can see it") { v -> photoMenu(v) })
         col.addView(settingRow("Share username", "Invite a friend to add you") {
@@ -3885,8 +3924,22 @@ class MainActivity : Activity() {
 
     // ---------- app settings ----------
 
+    /** The picked connection's state in Settings ("✓ active" / "connecting…"); kept live while Settings is open. */
+    private var connLabel: TextView? = null
+    private val connTick = object : Runnable {
+        override fun run() {
+            val l = connLabel ?: return
+            if (screen != "settings" || !l.isAttachedToWindow) return
+            val on = Messenger.connected
+            l.text = if (on) "✓ active" else if (Messenger.direct) "connecting…" else Tor.status()
+            l.setTextColor(if (on) green else amber)
+            l.postDelayed(this, 1000)
+        }
+    }
+
     private fun showSettings() {
         screen = "settings"
+        connLabel = null
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(gap(8))
         col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
@@ -3900,7 +3953,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(2)); background = pressable()
             addView(tv(if (picked) "◉" else "○", 18f, if (picked) blue else dim).apply { setPadding(0, 0, dp(12), 0) })
             addView(tv(title, 16f, white), LinearLayout.LayoutParams(0, -2, 1f))
-            if (picked) addView(tv(state, 13.5f, if (on) green else amber))
+            if (picked) addView(tv(state, 13.5f, if (on) green else amber).also { connLabel = it })
             setOnClickListener { go() }
         })
         choice("Tor (most private)", if (on) "✓ active" else Tor.status(), !direct) { if (direct) { Messenger.useDirect(false); showSettings() } }
@@ -3936,6 +3989,7 @@ class MainActivity : Activity() {
         col.addView(tv("quipu ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
             13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })
         setContentView(page(topBar("Settings", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
+        connLabel?.post(connTick)
     }
 
     // ---------- storage ----------
@@ -3963,6 +4017,9 @@ class MainActivity : Activity() {
             addView(tv("used by photos, videos and files on this phone. Your messages themselves take almost nothing.", 14f, dim).apply { setPadding(0, dp(2), 0, 0) })
         })
 
+        col.addView(tv("AUTO-DOWNLOAD", 14f, dim, true).apply { setPadding(dp(20), dp(12), dp(20), dp(2)) })
+        col.addView(settingSwitch("Download photos, GIFs and videos automatically", Messenger.autoMedia) { on -> Messenger.autoMedia = on; Messenger.settingsChanged(); Messenger.kick() })
+        col.addView(settingNote("When off, each one shows as a box until you tap it, so nothing big downloads without you saying so. Voice messages and files still download."))
         col.addView(tv("AUTO-DELETE MEDIA", 14f, dim, true).apply { setPadding(dp(20), dp(12), dp(20), dp(8)) })
         val opts = listOf("Never" to 0, "1 year" to 365, "30 days" to 30)
         col.addView(LinearLayout(this).apply {
@@ -4082,6 +4139,6 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(24), dp(20), dp(24))
             setOnClickListener { Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second; Messenger.settingsChanged(); showAppearance() }
         })
-        setContentView(page(topBar("Appearance", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
+        setContentView(page(topBar("Appearance", left = icon(R.drawable.ic_back) { showSettings() }), ScrollView(this).apply { addView(col) }))
     }
 }

@@ -313,9 +313,13 @@ class CallService : Service() {
         // Android requires a notification while a call uses the mic; keep it silent and out of the way
         // (no pop-up, no status-bar icon), it only shows in the pulled-down shade
         CallActivity.quietChannel(this)
+        val hangUp = PendingIntent.getService(this, 24, Intent(this, CallService::class.java).setAction(DECLINE), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, CallActivity.CH_ONGOING).setSmallIcon(R.drawable.ic_call)
-            .setContentTitle("Call with $name").setOngoing(true)
-            .setCategory(Notification.CATEGORY_CALL).setContentIntent(open).build()
+            .setContentTitle("Call with $name").setContentText("Tap to return to the call").setOngoing(true)
+            .setCategory(Notification.CATEGORY_CALL).setContentIntent(open)
+            .addAction(Notification.Action.Builder(null, "Return to call", open).build())
+            .addAction(Notification.Action.Builder(null, "Hang up", hangUp).build())
+            .build()
         if (Build.VERSION.SDK_INT >= 30) startForeground(NOTE, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) else startForeground(NOTE, n)
         return START_NOT_STICKY
     }

@@ -315,6 +315,7 @@ class ScreenshotTest {
         shoot(scr, "61-call-active")
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         call(a, "showChats"); shoot(a, "62-call-bar")
+        call(a, "showChat", "sam_r"); shadowOf(Looper.getMainLooper()).idle(); shoot(a, "62b-call-bar-chat")
         core.hangUp("ok"); shadowOf(Looper.getMainLooper()).idle()
         assert(core.call == null) { "hang up should end the call" }
         val inc = Core.Call("b".repeat(32), "sam_r", false, "c".repeat(64), "d".repeat(64)).apply { phase = Core.Call.INCOMING }
@@ -322,6 +323,10 @@ class ScreenshotTest {
         val scr2 = Robolectric.buildActivity(CallActivity::class.java).setup().get()
         shoot(scr2, "63-call-incoming")
         core.endCall(inc, "declined")
+        // auto-download off: the received photo waits for a tap and shows no preview
+        Messenger.autoMedia = false
+        call(a, "showChat", "sam_r"); shadowOf(Looper.getMainLooper()).idle(); shoot(a, "64-tap-to-download")
+        Messenger.autoMedia = true
     }
 
     /** Tapping call opens the call screen at once (even before the invite is out). */
