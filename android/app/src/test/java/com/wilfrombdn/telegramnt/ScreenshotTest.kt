@@ -297,6 +297,29 @@ class ScreenshotTest {
         File("build/shots/48-forward-picker.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** "Share" from another app: quipu asks which chat, then the shared text lands there. */
+    @Test fun shareFromAnotherApp() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val share = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, "look at this https://example.com")
+        val a = Robolectric.buildActivity(MainActivity::class.java, share).setup().get()
+        shadowOf(Looper.getMainLooper()).idle()
+        val dlg = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+        assert(dlg != null && dlg.isShowing) { "share should ask which chat" }
+        fun find(v: android.view.View, text: String): android.view.View? {
+            if (v is android.widget.TextView && v.text.toString() == text) return v
+            if (v is android.view.ViewGroup) for (i in 0 until v.childCount) find(v.getChildAt(i), text)?.let { return it }
+            return null
+        }
+        val root = dlg.window!!.decorView
+        assert(find(root, "Send message to…") != null) { "picker title" }
+        (find(root, "Sam Rivera")!!.parent as android.view.View).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        val sam = Messenger.core.contact("sam_r")!!
+        assert(sam.msgs.any { it.text == "look at this https://example.com" }) { "shared text should be sent to Sam" }
+        assert(!dlg.isShowing) { "picker closes after choosing" }
+        shoot(a, "65-shared-text")
+    }
+
     /** The Telegram-style call screen through a whole call, and the green "return to call" bar in the app. */
     @Test fun callScreenStates() {
         CallActivity.animations = false

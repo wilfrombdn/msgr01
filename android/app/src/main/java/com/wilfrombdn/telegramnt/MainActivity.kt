@@ -136,6 +136,7 @@ class MainActivity : Activity() {
     }
 
     private fun handle(i: Intent?) {
+        if (i?.action == Intent.ACTION_SEND || i?.action == Intent.ACTION_SEND_MULTIPLE) return shared(i)
         i?.getStringExtra("chat")?.let { u -> if (Messenger.core.contact(u) != null) showChat(u) }
         i?.getStringExtra("group")?.let { g -> if (Messenger.core.group(g) != null) showGroup(g) }
     }
@@ -2586,30 +2587,57 @@ class MainActivity : Activity() {
     /** Pick a chat to forward [m] to; it keeps who first wrote it. Then opens that chat. */
     private fun forwardPicker(m: Msg, author: String) {
         val from = m.fwd ?: author
+        chatPicker("Forward to…") { t ->
+            Messenger.run({ Messenger.forward(m, from, t as? Contact, t as? Group) }, {
+                stick = true
+                if (t is Contact) showChat(t.user) else showGroup((t as Group).id)
+            }) { e -> toast(errorText(e)) }
+        }
+    }
+
+    /** Something shared from another app ("Share" > quipu): pick a chat, then send the photos/videos/files and text there. */
+    private fun shared(i: Intent) {
+        if (!Messenger.signedIn) { toast("Log in to quipu first, then share again"); return }
+        @Suppress("DEPRECATION")
+        val uris = if (i.action == Intent.ACTION_SEND_MULTIPLE) i.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM).orEmpty()
+            else listOfNotNull(i.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))
+        val text = i.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim().orEmpty()
+        if (uris.isEmpty() && text.isEmpty()) return
+        setIntent(Intent(this, MainActivity::class.java))   // don't share it again on rotate/reopen
+        val what = when {
+            uris.size > 1 -> "${uris.size} items"
+            uris.size == 1 -> contentResolver.getType(uris[0]).orEmpty().let { if (it.startsWith("image/")) "photo" else if (it.startsWith("video/")) "video" else "file" }
+            else -> "message"
+        }
+        chatPicker("Send $what to…") { t ->
+            attachTo = (t as? Contact)?.user; attachGroupId = (t as? Group)?.id
+            uris.forEach { attachPicked(it, asPhoto = false) }
+            if (text.isNotEmpty()) { if (t is Contact) Messenger.send(t, text) else Messenger.sendGroup(t as Group, text) }
+            stick = true
+            if (t is Contact) showChat(t.user) else showGroup((t as Group).id)
+        }
+    }
+
+    /** A pop-up list of chats and groups you can write to, newest first; [pick] gets a Contact or a Group. */
+    private fun chatPicker(title: String, pick: (Any) -> Unit) {
         val core = Messenger.core
         val me = core.me?.user ?: ""
         val targets = synchronized(core) {
             core.contacts.filter { it.canChat }.map { Triple(it.name, it.lastTs, it as Any) } +
                 core.groups.filter { it.canPost(me) }.map { Triple(it.name, it.lastTs, it as Any) }
         }.sortedByDescending { it.second }
-        if (targets.isEmpty()) { toast("No chats to forward to yet"); return }
+        if (targets.isEmpty()) { toast("No chats yet: add a friend first"); return }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val d = android.app.Dialog(this)
         for ((name, _, t) in targets) col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)); background = pressable()
             addView(avatar(name, 40, (t as? Contact)?.avatar))
             addView(tv(name, 16f, white).apply { setPadding(dp(14), 0, 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-            setOnClickListener {
-                d.dismiss()
-                Messenger.run({ Messenger.forward(m, from, t as? Contact, t as? Group) }, {
-                    stick = true
-                    if (t is Contact) showChat(t.user) else showGroup((t as Group).id)
-                }) { e -> toast(errorText(e)) }
-            }
+            setOnClickListener { d.dismiss(); pick(t) }
         })
         val wrap = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; background = round(bar, 4); setPadding(0, dp(14), 0, dp(6))
-            addView(tv("Forward to…", 17.5f, white, true).apply { setPadding(dp(20), 0, dp(20), dp(8)) })
+            addView(tv(title, 17.5f, white, true).apply { setPadding(dp(20), 0, dp(20), dp(8)) })
             addView(col)
         }
         d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
