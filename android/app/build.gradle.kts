@@ -19,8 +19,8 @@ android {
         applicationId = "com.wilfrombdn.telegramnt"
         minSdk = 26
         targetSdk = 34
-        versionCode = 46
-        versionName = "5.8"
+        versionCode = 47
+        versionName = "5.9"
     }
     signingConfigs {
         create("release") {
@@ -81,7 +81,7 @@ dependencies {
     implementation("org.signal:libsignal-android:0.105.0") // Signal's encryption (Double Ratchet, sender keys) // FileProvider, to open attachments in other apps
     // Embedded Tor: the app reaches the relay's .onion through Tor, so there's no middleman that sees IPs.
     implementation("io.matthewnelson.kmp-tor:runtime:2.6.0")
-    implementation("io.matthewnelson.kmp-tor:resource-exec-tor:408.22.0") // bundles the tor binary per ABI
+    implementation("io.matthewnelson.kmp-tor:resource-exec-tor:409.5.0") // bundles the tor binary per ABI
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.signal:libsignal-client:0.105.0") // same library with desktop native code, for tests
     testImplementation("org.json:json:20240303")

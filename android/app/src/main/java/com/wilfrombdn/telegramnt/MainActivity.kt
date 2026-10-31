@@ -189,7 +189,7 @@ class MainActivity : Activity() {
 
     /** Once Tor is up, look for a newer version (at most every 6 hours) and offer it. */
     private fun maybeCheckUpdate() {
-        if (Tor.socksPort() == null) return
+        if (Tor.socksPort() == null && !Messenger.direct && !Tor.outdated) return   // Tor still starting
         if (System.currentTimeMillis() - updateChecked < 10 * 60_000L) return   // every app open, at most every 10 minutes
         updateChecked = System.currentTimeMillis()
         var u: Updater.Update? = null
@@ -561,6 +561,7 @@ class MainActivity : Activity() {
                 setSpan(android.text.style.ForegroundColorSpan(Color.TRANSPARENT), 10 + dots, 13, 0)
             }
             st.setTextColor(dim)
+            if (Tor.outdated) maybeCheckUpdate()   // a newer app (with a newer Tor) is the only fix
             if (System.currentTimeMillis() - connectStart >= 30_000) {
                 welcomeTorNote?.visibility = if (Messenger.direct) View.GONE else View.VISIBLE
                 welcomeTorLine?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) "Trying a direct connection…" else Tor.status() }

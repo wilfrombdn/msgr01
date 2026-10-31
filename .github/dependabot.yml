@@ -1,0 +1,10 @@
+# Opens a pull request when a newer Tor (kmp-tor) comes out. The Tor network eventually refuses old
+# Tor versions ("missing protocols"), so the app's built-in Tor has to be kept current.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-name: "io.matthewnelson.kmp-tor:*"

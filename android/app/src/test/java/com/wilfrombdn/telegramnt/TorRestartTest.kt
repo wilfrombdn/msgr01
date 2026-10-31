@@ -32,4 +32,11 @@ class TorRestartTest {
         assertTrue(Tor.startStuck(now = 1_000 + 120_000, ready = false, lastProgress = 1_000))
         assertFalse(Tor.startStuck(now = 1_000 + 900_000, ready = true, lastProgress = 1_000))
     }
+
+    @Test fun spotsTorTooOldForTheNetwork() {
+        assertTrue(Tor.tooOld("[warn] At least one protocol listed as required in the consensus is not supported by this version of Tor. " +
+            "You should upgrade. This version of Tor will not work as a client on the Tor network. The missing protocols are: Desc=3 Microdesc=3"))
+        assertFalse(Tor.tooOld("Bootstrapped 45% (requesting_descriptors): Asking for relay descriptors"))
+        assertFalse(Tor.tooOld("[warn] Guard lasinurme is failing more circuits than usual."))
+    }
 }

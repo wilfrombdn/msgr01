@@ -1,39 +1,20 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-  <!-- one white 3D round chat bubble on black; scaled and centred so the round icon mask can't clip it -->
-  <group android:scaleX="0.507" android:scaleY="0.507" android:pivotX="54" android:pivotY="54" android:translateX="2" android:translateY="-1.3">
-    <!-- soft drop shadow -->
-    <group android:translateX="3" android:translateY="7">
-      <path android:pathData="M28,65 Q27,78 21,85 Q33,84 43.7,78.2 A30,30 0 1,0 28,65 Z" android:fillAlpha="0.5">
-        <aapt:attr name="android:fillColor">
-          <gradient android:type="linear" android:startX="54" android:startY="20" android:endX="54" android:endY="85"
-              android:startColor="#00FFFFFF" android:endColor="#33FFFFFF" />
-        </aapt:attr>
-      </path>
+  <!-- one white rounded-square chat bubble on black; scaled and centred so the round icon mask can't clip it -->
+  <group android:scaleX="0.52" android:scaleY="0.52" android:pivotX="54" android:pivotY="54" android:translateX="0" android:translateY="-1">
+    <!-- soft shadow -->
+    <group android:translateY="3">
+      <path android:pathData="M40,24 L68,24 Q84,24 84,40 L84,60 Q84,76 68,76 L45,76 C39,80.5 33,86 26,88 C29,84 30.5,79.5 29.5,75 Q24,71 24,60 L24,40 Q24,24 40,24 Z" android:fillColor="#33FFFFFF" />
     </group>
-    <!-- the bubble's thickness: a darker copy pushed down-right -->
-    <group android:translateX="2.2" android:translateY="4">
-      <path android:pathData="M28,65 Q27,78 21,85 Q33,84 43.7,78.2 A30,30 0 1,0 28,65 Z">
-        <aapt:attr name="android:fillColor">
-          <gradient android:type="linear" android:startX="24" android:startY="20" android:endX="84" android:endY="85"
-              android:startColor="#FF9C9CA2" android:endColor="#FF4A4A50" />
-        </aapt:attr>
-      </path>
-    </group>
-    <!-- the face: white fading to a cool light grey -->
-    <path android:pathData="M28,65 Q27,78 21,85 Q33,84 43.7,78.2 A30,30 0 1,0 28,65 Z">
+    <!-- the bubble: white fading to a cool light grey -->
+    <path android:pathData="M40,24 L68,24 Q84,24 84,40 L84,60 Q84,76 68,76 L45,76 C39,80.5 33,86 26,88 C29,84 30.5,79.5 29.5,75 Q24,71 24,60 L24,40 Q24,24 40,24 Z">
       <aapt:attr name="android:fillColor">
-        <gradient android:type="linear" android:startX="30" android:startY="22" android:endX="80" android:endY="78"
+        <gradient android:type="linear" android:startX="30" android:startY="24" android:endX="78" android:endY="84"
             android:startColor="#FFFFFFFF" android:endColor="#FFC6C6CC" />
       </aapt:attr>
     </path>
-    <!-- glossy highlight along the top -->
-    <path android:pathData="M31,44 A24,24 0 0,1 77,44 Q54,35 31,44 Z">
-      <aapt:attr name="android:fillColor">
-        <gradient android:type="linear" android:startX="54" android:startY="22" android:endX="54" android:endY="44"
-            android:startColor="#CCFFFFFF" android:endColor="#00FFFFFF" />
-      </aapt:attr>
-    </path>
+    <!-- three typing dots -->
+    <path android:pathData="M41,50 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z M50,50 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z M59,50 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z" android:fillColor="#FF2A2A2E" />
   </group>
 </vector>

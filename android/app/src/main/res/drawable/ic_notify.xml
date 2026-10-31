@@ -1,6 +1,6 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp" android:viewportWidth="108" android:viewportHeight="108" android:tint="#FFFFFF">
-    <!-- single round chat bubble silhouette; the three dots are cut out so they survive the status-bar tint -->
+    <!-- single rounded-square chat bubble silhouette; the three dots are cut out so they survive the status-bar tint -->
     <path android:fillColor="#FFFFFF" android:fillType="evenOdd"
-        android:pathData="M30,66 Q29,79 22,87 Q35,86 45.7,79.2 A31,31 0 1,0 30,66 Z M41,51 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z M53,51 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z M65,51 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z" />
+        android:pathData="M40,24 L68,24 Q84,24 84,40 L84,60 Q84,76 68,76 L45,76 C39,80.5 33,86 26,88 C29,84 30.5,79.5 29.5,75 Q24,71 24,60 L24,40 Q24,24 40,24 Z M41,50 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z M50,50 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z M59,50 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z" />
 </vector>

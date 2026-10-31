@@ -31,7 +31,7 @@ object Updater {
         else @Suppress("DEPRECATION") ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionCode.toLong()
 
     // Direct mode (Settings > Connection) skips Tor here too, so updates still arrive where Tor is blocked
-    private fun route(): Net.Route = Net.Route(HOST, 443, true, if (Messenger.direct) null else Tor.socksPort() ?: throw IOException("Tor not ready"))
+    private fun route(): Net.Route = Net.Route(HOST, 443, true, if (Messenger.direct || Tor.outdated) null else Tor.socksPort() ?: throw IOException("Tor not ready"))
 
     /** The newer version on offer, or null. Off the main thread. */
     fun check(ctx: Context): Update? {

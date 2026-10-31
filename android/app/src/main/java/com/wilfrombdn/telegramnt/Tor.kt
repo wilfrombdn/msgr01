@@ -26,6 +26,12 @@ object Tor {
     @Volatile private var boot: String = ""        // last "Bootstrapped X%" line
     @Volatile private var err: String? = null       // last error (start failure or runtime error)
     @Volatile private var started = false
+    /**
+     * The Tor network told us this app's built-in Tor is too old ("missing protocols"). Retrying can't fix
+     * that; only an app update with a newer Tor can, so the updater then fetches without Tor.
+     */
+    @Volatile var outdated = false
+        private set
     @Volatile private var tries = 0                // failed starts since the last success
     @Volatile private var lastProgress = 0L         // last start, or last new bootstrap step
     private var base: java.io.File? = null
@@ -38,6 +44,7 @@ object Tor {
 
     /** Short line for the UI, so the user (and I) can see where Tor is. */
     fun status(): String = when {
+        outdated -> "Tor in this app is out of date. Update quipu, or use Direct for now."
         socks != null -> "Tor ready"
         err != null -> "Tor problem" + (if (tries > 1) " (try $tries)" else "") + ": $err"
         boot.isNotEmpty() -> "Starting Tor… $boot"
@@ -123,6 +130,12 @@ object Tor {
         }
     }, "tor-watchdog").apply { isDaemon = true; start() }
 
+    /** Tor's warning that the network now needs protocols this Tor version doesn't have. */
+    fun tooOld(line: String): Boolean {
+        val l = line.lowercase()
+        return "protocol" in l && ("missing" in l || "upgrade" in l || "not supported" in l || "will not work" in l)
+    }
+
     /** True when Tor isn't ready and nothing has moved for 2 minutes. */
     fun startStuck(now: Long, ready: Boolean, lastProgress: Long): Boolean =
         !ready && lastProgress > 0 && now - lastProgress >= 2 * 60_000L
@@ -154,6 +167,7 @@ object Tor {
 
     private fun note(line: String) {
         synchronized(recent) { recent.addLast(line.take(200)); while (recent.size > 30) recent.removeFirst() }
+        if (tooOld(line)) outdated = true
         if (line.contains("Bootstrapped")) {
             val b = line.substringAfter("Bootstrapped ").substringBefore(" (").take(12)
             if (b != boot) { boot = b; lastProgress = System.currentTimeMillis() }
