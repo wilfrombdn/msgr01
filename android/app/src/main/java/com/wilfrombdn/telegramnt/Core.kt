@@ -859,12 +859,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 g.typing.remove(u)
                 addGroupMsg(g, u, id, String(text), Msg.replyRef(inner.optJSONObject("r")), Msg.fwdOf(inner), LinkPreview.clean(inner.optJSONObject("lp")), Msg.locOf(inner.optJSONObject("loc")))
             }
-            "gdel" -> {
-                val id = inner.optString("id")
-                // only the original sender may erase a group message
-                synchronized(this) { g.msgs.removeAll { it.id == id && it.sender == u } }
-                onChange()
-            }
+            // The outer "gdel" trusts the forgeable "u", so any member could erase anyone's message with it.
+            // Deletes now come only through the authenticated gctl "gdel" (handleCtl); this one is ignored.
+            "gdel" -> {}
             // The outer "leave" trusts the forgeable "u", so in owner-anchored groups it must NOT change
             // membership (a member could forge a leave for anyone). Those groups rely on the authenticated
             // gctl "leave" instead. Legacy groups (no owner) keep the old behaviour.
@@ -886,6 +883,12 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     private fun handleCtl(m: Me, g: Group, u: String, p: JSONObject) {
         synchronized(this) { g.members.add(u) }
         when (p.optString("t")) {
+            "gdel" -> {
+                val id = p.optString("id")
+                // u is proven by the sender key, and only the original sender may erase a group message
+                synchronized(this) { g.msgs.removeAll { it.id == id && it.sender == u } }
+                onChange()
+            }
             "file" -> {
                 if (!g.canPost(u)) return   // read-only: ignore posts from non-leaders
                 val id = p.optString("id")
@@ -1408,7 +1411,11 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         synchronized(this) { g.msgs.remove(msg) }
         if (forEveryone && msg.mine) {
             val m = me
-            if (m != null) runCatching { relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gdel").put("u", m.user).put("id", msg.id))) }
+            if (m != null) runCatching {
+                gctl(g, m, JSONObject().put("t", "gdel").put("id", msg.id))   // authenticated: can't be forged
+                // the old unsigned form too, so members still on 6.3 or older also remove it
+                relay.gsend(g.addr, gseal(g, JSONObject().put("t", "gdel").put("u", m.user).put("id", msg.id)))
+            }
         }
         changed()
     }
@@ -1766,21 +1773,25 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     fun fullBackup(): ByteArray {
         val m = me ?: throw UserError("Not signed in")
         val cipher = Crypto.gcmSeal(m.backupKey, "msgr01-device|${m.user}", toJson().toString().toByteArray())
-        return ("MSGR01\n${m.user}\n").toByteArray() + cipher
+        // "MSGR02": the username is no longer written on the outside (MSGR01 files had it in plain text)
+        return "MSGR02\n".toByteArray() + cipher
     }
 
-    /** Reads who a backup file belongs to (from its cleartext header), or null if it isn't one. */
+    /** Who a backup file belongs to: the username for old MSGR01 files, "" for MSGR02 (you type it), null if it isn't one. */
     fun backupOwner(bytes: ByteArray): String? {
         val head = String(bytes.copyOf(minOf(bytes.size, 80)))
+        if (head.startsWith("MSGR02\n")) return ""
         if (!head.startsWith("MSGR01\n")) return null
         val nl = head.indexOf('\n', 7)
         return if (nl > 7) head.substring(7, nl) else null
     }
 
-    /** Restores a device backup with the account password. Returns true on success. */
-    fun restoreFull(bytes: ByteArray, password: String): Boolean {
-        val user = backupOwner(bytes) ?: return false
-        val header = "MSGR01\n$user\n".toByteArray()
+    /** Restores a device backup with the account [password] ([username] is needed for MSGR02 files). Returns true on success. */
+    fun restoreFull(bytes: ByteArray, password: String, username: String = ""): Boolean {
+        val owner = backupOwner(bytes) ?: return false
+        val user = owner.ifEmpty { username.trim().removePrefix("@").lowercase() }
+        if (user.isEmpty()) return false
+        val header = (if (owner.isEmpty()) "MSGR02\n" else "MSGR01\n$user\n").toByteArray()
         if (bytes.size <= header.size) return false
         val key = Crypto.passwordKeys(user, password).backup
         val plain = Crypto.gcmOpen(key, "msgr01-device|$user", bytes.copyOfRange(header.size, bytes.size)) ?: return false

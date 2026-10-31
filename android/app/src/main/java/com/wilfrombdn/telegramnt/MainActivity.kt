@@ -3458,7 +3458,9 @@ class MainActivity : Activity() {
                 out(name.substringBeforeLast('.') + ".jpg", "image/jpeg", jpeg(bmp, 1600, 85), thumbOf(bmp))
             } else {
                 if (size > Core.MAX_FILE) throw UserError("Files can be up to ${Core.MAX_FILE / 1024 / 1024} MB")
-                val data = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError("Couldn't read that file")
+                val raw = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError("Couldn't read that file")
+                // videos: blank out where/when it was filmed and the phone's tags (photos are re-saved above for the same reason)
+                val data = if (mime.startsWith("video/")) Mp4Clean.strip(raw) else raw
                 out(name, mime, data, if (mime == "image/gif") decodeSmall(data, 400)?.let { thumbOf(it) } else null)
             }
             // the camera's unencrypted temp file has now been read into memory; don't leave it on disk
@@ -3861,7 +3863,7 @@ class MainActivity : Activity() {
 
     private fun chooseRecoveryFile() {
         val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "quipu-recovery-${Messenger.core.me?.user}.m01")
+            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "quipu-recovery.m01")   // no username in the name either
         @Suppress("DEPRECATION") startActivityForResult(i, CREATE_RECOVERY)
     }
 
@@ -3883,10 +3885,13 @@ class MainActivity : Activity() {
             val owner = b?.let { Messenger.core.backupOwner(it) }
             if (b == null || owner == null) { toast("That isn't a quipu recovery file."); return@run }
             val pass = field("Password", password = true)
-            popup("Restore @$owner", "Enter the account password to unlock this backup. Your chats will be restored on this phone.", pass,
+            // newer files don't carry the username on the outside, so it's typed in
+            val user = if (owner.isEmpty()) field("Username") else null
+            val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; user?.let { addView(it) }; addView(pass) }
+            popup(if (owner.isEmpty()) "Restore your chats" else "Restore @$owner", "Enter the account ${if (owner.isEmpty()) "username and password" else "password"} to unlock this backup. Your chats will be restored on this phone.", box,
                 "Cancel" to dim, "Restore" to white) { i ->
                 if (i == 1) Messenger.run({
-                    if (!Messenger.core.restoreFull(b, pass.text.toString())) throw UserError("Wrong password, or the file is damaged")
+                    if (!Messenger.core.restoreFull(b, pass.text.toString(), user?.text?.toString().orEmpty())) throw UserError("Wrong username or password, or the file is damaged")
                     takePersist(uri); Messenger.recoveryUri = uri.toString(); Messenger.save()
                 }, {
                     Messenger.signedOutReason = null

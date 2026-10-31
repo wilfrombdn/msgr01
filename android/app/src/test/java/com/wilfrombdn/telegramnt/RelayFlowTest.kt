@@ -279,6 +279,34 @@ class RelayFlowTest {
         assertTrue(gtexts(gc).any { it == "$bu:on my way" })
     }
 
+    /** A member can't erase someone else's group message by faking a delete; the real author still can. */
+    @Test fun groupDeleteCantBeForged() {
+        assumeTrue(Relay(server).ping())
+        val al = Core(server); val bo = Core(server); val ci = Core(server)
+        val au = "gal_$tag"; val bu = "gbo_$tag"; val cu = "gci_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo"); ci.signup(cu, "cis long password", "Ci")
+        fun befriend(a: Core, au: String, b: Core, bu: String) { a.addFriend(bu); b.poll(5); b.accept(b.contact(au)!!); a.poll(5) }
+        befriend(al, au, bo, bu); befriend(al, au, ci, cu)
+        val g = al.createGroup("Crew", public = false, invite = listOf(bu, cu))
+        bo.poll(5); ci.poll(5); al.poll(5); bo.poll(5); ci.poll(5)
+        val msg = al.sendGroup(g, "al wrote this")
+        bo.poll(5); ci.poll(5)
+        val gb = bo.groups.first { it.secret == g.secret }; val gc = ci.groups.first { it.secret == g.secret }
+        assertTrue(gc.msgs.any { it.id == msg.id })
+
+        // bo forges the old unsigned delete, claiming to be al
+        val seal = Core::class.java.getDeclaredMethod("gseal", Group::class.java, org.json.JSONObject::class.java).apply { isAccessible = true }
+        val forged = seal.invoke(bo, gb, org.json.JSONObject().put("t", "gdel").put("u", au).put("id", msg.id)) as ByteArray
+        Relay(server).gsend(gb.addr, forged)
+        ci.poll(5)
+        assertTrue("a forged delete must not erase al's message", gc.msgs.any { it.id == msg.id })
+
+        // al's own delete still works (signed with al's sender key)
+        al.deleteGroupMessage(g, msg, forEveryone = true)
+        ci.poll(5)
+        assertFalse("the real author's delete goes through", gc.msgs.any { it.id == msg.id })
+    }
+
     @Test fun publicGroupJoinByLinkAndNoImpersonation() {
         assumeTrue(Relay(server).ping())
         val host = Core(server); val guest = Core(server); val faker = Core(server)
@@ -328,15 +356,22 @@ class RelayFlowTest {
         al.addFriend(bu); bo.poll(5); bo.accept(bo.contact(au)!!); al.poll(5)
         al.deliver(al.contact(bu)!!, al.queue(al.contact(bu)!!, "keep this message"))
         val file = al.fullBackup()
-        assertEquals(au, al.backupOwner(file))
+        assertEquals("the username is not written on the outside", "", al.backupOwner(file))
+        assertFalse(String(file, Charsets.ISO_8859_1).contains(au))
 
-        // a fresh install: new Core, restore only from the file + password (no server login)
+        // a fresh install: new Core, restore only from the file + username + password (no server login)
         val fresh = Core(server)
-        assertTrue(fresh.restoreFull(file, "als long password"))
+        assertFalse("needs the username", Core(server).restoreFull(file, "als long password"))
+        assertTrue(fresh.restoreFull(file, "als long password", "@$au"))
         assertEquals(au, fresh.me!!.user)
         assertTrue(fresh.contact(bu)!!.msgs.any { it.text == "keep this message" })
         // wrong password fails cleanly
-        assertFalse(Core(server).restoreFull(file, "not the password"))
+        assertFalse(Core(server).restoreFull(file, "not the password", au))
+        // old MSGR01 files (username on the outside) still restore without typing it
+        val m = al.me!!
+        val old = "MSGR01\n$au\n".toByteArray() + Crypto.gcmSeal(m.backupKey, "msgr01-device|$au", al.toJson().toString().toByteArray())
+        assertEquals(au, al.backupOwner(old))
+        assertTrue(Core(server).restoreFull(old, "als long password"))
     }
 
     /** A large attachment (like a video) must survive pad -> seal -> upload -> download -> open. */
