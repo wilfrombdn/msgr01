@@ -125,6 +125,8 @@ class ScreenshotTest {
         call(a, "showCrop", testBitmap(0xFF6A1B9A.toInt(), 0xFFFFB74D.toInt(), 1200, 800)); shoot(a, "6-crop")
         Messenger.initForPreview(fakeCore(signedIn = false))
         call(a, "showWelcome"); shoot(a, "0-welcome")
+        MainActivity::class.java.getDeclaredField("connectStart").apply { isAccessible = true }.setLong(a, 1L)
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2)); shoot(a, "0c-welcome-slow")
         call(a, "showSignup"); shoot(a, "0b-signup")
     }
 
@@ -146,6 +148,8 @@ class ScreenshotTest {
         Messenger.folders += Folder("f2", "Work", false, mutableListOf("u:jordan_k"))
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         call(a, "showChats"); shoot(a, "21-folders")
+        val online = Messenger::class.java.getDeclaredField("connected").apply { isAccessible = true }
+        online.set(null, true); call(a, "showChats"); shoot(a, "21b-tor-title"); online.set(null, false)
         call(a, "showChat", "sam_r"); shadowOf(Looper.getMainLooper()).idle()
         call(a, "startReply", Messenger.core.contact("sam_r")!!.msgs.first { it.id == "4" }); shoot(a, "23-reply")
         call(a, "cancelReply")

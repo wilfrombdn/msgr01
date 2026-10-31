@@ -484,7 +484,8 @@ object Messenger {
         // Direct: the tunnel address changes when the server restarts; look up the new one and try again
         if (!ok && direct && refreshDirect()) ok = core.relay.ping()
         val now = System.currentTimeMillis()
-        if (ok) { lastServerOk = now; torRestarts = 0 }
+        if (ok || Tor.socksPort() == null) lastServerOk = now   // only count time Tor was ready and the server still didn't answer
+        if (ok) torRestarts = 0
         else if (Tor.socksPort() != null && core.call.let { it == null || it.phase == Core.Call.ENDED } &&
             Tor.restartDue(now, lastServerOk, lastTorRestart, torRestarts)) {
             // Tor is up but the server still doesn't answer: Tor may be stuck on dead routes from an outage

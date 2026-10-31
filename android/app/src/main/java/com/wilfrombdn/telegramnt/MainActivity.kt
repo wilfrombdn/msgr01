@@ -385,14 +385,14 @@ class MainActivity : Activity() {
         typeface = Typeface.DEFAULT
     }
 
-    private fun topBar(title: String, sub: CharSequence? = null, left: View? = null, vararg right: View) = LinearLayout(this).apply {
+    private fun topBar(title: CharSequence, sub: CharSequence? = null, left: View? = null, vararg right: View) = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setBackgroundColor(bar)
         setPadding(dp(4), dp(4), dp(4), dp(4))
         minimumHeight = dp(56)
         left?.let { addView(it) } ?: addView(View(context), LinearLayout.LayoutParams(dp(12), 1))
         val titles = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), 0, 0, 0) }
-        titles.addView(tv(title, 19f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        titles.addView(tv("", 19f, white, true).apply { text = title; maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         sub?.let { titles.addView(tv("", 13.5f, dim).apply { text = it; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }) }
         addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
         right.forEach { addView(it) }
@@ -514,6 +514,14 @@ class MainActivity : Activity() {
             visibility = View.GONE
         }
         col.addView(welcomeTorNote)
+        // what Tor is doing right now, and a way out if Tor can't get through (the Settings menu needs an account)
+        welcomeTorLine = tv("", 13f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(12), dp(10), dp(12), 0); visibility = View.GONE }
+        col.addView(welcomeTorLine)
+        welcomeDirect = tv("", 15f, white, true).apply {
+            gravity = Gravity.CENTER; setPadding(dp(8), dp(14), dp(8), dp(8)); visibility = View.GONE
+            setOnClickListener { Messenger.useDirect(!Messenger.direct) }
+        }
+        col.addView(welcomeDirect)
         setContentView(ScrollView(this).apply {
             background = texturedBg(listBg)
             fitsSystemWindows = true
@@ -535,7 +543,7 @@ class MainActivity : Activity() {
             val st = welcomeStatus ?: return
             if (screen !in listOf("welcome") || celebrating) return
             if (Messenger.connected) {
-                welcomeTorNote?.visibility = View.GONE
+                welcomeTorNote?.visibility = View.GONE; welcomeTorLine?.visibility = View.GONE; welcomeDirect?.visibility = View.GONE
                 if (st.text.isEmpty()) return   // already connected when the screen opened: nothing to show
                 celebrating = true
                 st.text = "Connected!"; st.setTextColor(green)
@@ -553,7 +561,11 @@ class MainActivity : Activity() {
                 setSpan(android.text.style.ForegroundColorSpan(Color.TRANSPARENT), 10 + dots, 13, 0)
             }
             st.setTextColor(dim)
-            if (System.currentTimeMillis() - connectStart >= 30_000) welcomeTorNote?.visibility = View.VISIBLE
+            if (System.currentTimeMillis() - connectStart >= 30_000) {
+                welcomeTorNote?.visibility = if (Messenger.direct) View.GONE else View.VISIBLE
+                welcomeTorLine?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) "Trying a direct connection…" else Tor.status() }
+                welcomeDirect?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) "Use Tor instead" else "Connect directly instead" }
+            }
             st.postDelayed(this, 1000)
         }
     }
@@ -568,6 +580,8 @@ class MainActivity : Activity() {
 
     private var welcomeStatus: TextView? = null
     private var welcomeTorNote: TextView? = null
+    private var welcomeTorLine: TextView? = null
+    private var welcomeDirect: TextView? = null
     private val TOR_WAIT_NOTE = "First connection can take a minute. The app is building a private route through the Tor network — hopping your connection through several relays around the world and setting up fresh encryption at each one. That's slower than a normal connection, but it's what hides where you are. It's quicker after this."
     private var pendingNext: (() -> Unit)? = null
 
@@ -763,7 +777,7 @@ class MainActivity : Activity() {
 
         val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
         else if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
-            if (Messenger.connected) "quipu" else "Connecting…",
+            if (!Messenger.connected) "Connecting…" else if (Messenger.direct) "quipu" else torTitle(),
             if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
@@ -781,6 +795,12 @@ class MainActivity : Activity() {
         if (keepOpen) d.openDrawer(GravityCompat.START, false)
         // while still connecting over Tor, refresh so the status line (bootstrap %, ready, error) updates live
         if (!Messenger.connected) d.postDelayed({ if (screen == "chats" && !Messenger.connected) redraw() }, 3000)
+    }
+
+    /** "quipu" with a small raised "TOR" after it, like a squared number: shows the app is talking through Tor. */
+    private fun torTitle() = android.text.SpannableString("quipu TOR").apply {
+        setSpan(android.text.style.SuperscriptSpan(), 6, 9, 0)
+        setSpan(android.text.style.RelativeSizeSpan(0.5f), 5, 9, 0)
     }
 
     private var screenSearch = false
