@@ -515,7 +515,7 @@ class MainActivity : Activity() {
         }
         col.addView(welcomeTorNote)
         // what Tor is doing right now, and a way out if Tor can't get through (the Settings menu needs an account)
-        welcomeTorLine = tv("", 13f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(12), dp(10), dp(12), 0); visibility = View.GONE }
+        welcomeTorLine = tv("", 13f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(12), dp(10), dp(12), 0); visibility = View.GONE; setOnClickListener { torDetails() } }
         col.addView(welcomeTorLine)
         welcomeDirect = tv("", 15f, white, true).apply {
             gravity = Gravity.CENTER; setPadding(dp(8), dp(14), dp(8), dp(8)); visibility = View.GONE
@@ -801,6 +801,14 @@ class MainActivity : Activity() {
     private fun torTitle() = android.text.SpannableString("quipu TOR").apply {
         setSpan(android.text.style.SuperscriptSpan(), 6, 9, 0)
         setSpan(android.text.style.RelativeSizeSpan(0.5f), 5, 9, 0)
+    }
+
+    /** Tor's latest messages in a pop-up, with Copy, so a stuck connection can be sent to whoever is fixing it. */
+    private fun torDetails() {
+        val text = (listOf(Tor.status()) + Tor.log()).joinToString("\n")
+        popup("Tor details", text, null, "Close" to dim, "Copy" to white) { i ->
+            if (i == 1) { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("tor", text)); toast("Copied") }
+        }
     }
 
     private var screenSearch = false
@@ -3874,6 +3882,7 @@ class MainActivity : Activity() {
         })
         choice("Tor (most private)", if (on) "✓ active" else Tor.status(), !direct) { if (direct) { Messenger.useDirect(false); showSettings() } }
         col.addView(settingNote("Everything goes through the Tor network, so no one, not even the server, ever sees your phone's internet address."))
+        col.addView(settingRow("Tor details", "What Tor is doing, to copy and send if it won't connect") { torDetails() })
         choice("Direct (faster)", if (on) "✓ active" else "connecting…", direct) {
             if (!direct) popup("Use Direct?", "Faster, and works on networks that block Tor (like some work Wi-Fi). Your messages stay end-to-end encrypted, but Cloudflare and the server can see your phone's internet address. Calls still go through Tor.",
                 null, "Cancel" to dim, "Use Direct" to white) { i -> if (i == 1) { Messenger.useDirect(true); showSettings() } }

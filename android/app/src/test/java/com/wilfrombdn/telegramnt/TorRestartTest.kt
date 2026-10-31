@@ -25,4 +25,11 @@ class TorRestartTest {
     @Test fun neverRestartsSoonAfterServerAnswered() {
         assertFalse(Tor.restartDue(now = 100 * min, lastOk = 99 * min, lastRestart = 0, restarts = 0))
     }
+
+    @Test fun startIsStuckAfterTwoQuietMinutes() {
+        assertFalse(Tor.startStuck(now = 119_000, ready = false, lastProgress = 0))        // never started yet
+        assertFalse(Tor.startStuck(now = 1_000 + 119_000, ready = false, lastProgress = 1_000))
+        assertTrue(Tor.startStuck(now = 1_000 + 120_000, ready = false, lastProgress = 1_000))
+        assertFalse(Tor.startStuck(now = 1_000 + 900_000, ready = true, lastProgress = 1_000))
+    }
 }
