@@ -146,6 +146,7 @@ class MainActivity : Activity() {
         Messenger.visible = true
         Messenger.appShown()
         Messenger.listen(refresh)
+        Messenger.callListeners.add(callWatch); callTicker.post(callTick)
         if (Messenger.signedIn) startForegroundService(Intent(this, SyncService::class.java))
         redraw()
     }
@@ -157,6 +158,7 @@ class MainActivity : Activity() {
         Messenger.visible = false
         Messenger.appHidden()
         Messenger.unlisten(refresh)
+        Messenger.callListeners.remove(callWatch); callTicker.removeCallbacks(callTick)
         if (!Messenger.background) stopService(Intent(this, SyncService::class.java))
         super.onStop()
     }
@@ -402,8 +404,28 @@ class MainActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         background = texturedBg(bg)
         fitsSystemWindows = true
+        // Telegram-style green bar while a call is going: tap it to get back to the call screen
+        addView(tv("", 14f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER; setBackgroundColor(Color.parseColor("#3CC261")); setPadding(dp(12), dp(9), dp(12), dp(9))
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            setOnClickListener { startActivity(Intent(this@MainActivity, CallActivity::class.java)) }
+        }.also { callBar = it; updateCallBar() })
         addView(top)
         addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+    }
+
+    private var callBar: TextView? = null
+    private val callTicker = android.os.Handler(android.os.Looper.getMainLooper())
+    private val callTick = object : Runnable { override fun run() { updateCallBar(); callTicker.postDelayed(this, 1000) } }
+    private val callWatch: (Core.Call) -> Unit = { runOnUiThread { updateCallBar() } }
+
+    private fun updateCallBar() {
+        val b = callBar ?: return
+        val k = Messenger.core.call
+        if (k == null || k.phase == Core.Call.ENDED) { b.visibility = View.GONE; return }
+        val name = Messenger.core.contact(k.user)?.name ?: "@${k.user}"
+        b.text = "$name · ${CallActivity.statusText(k, Messenger.connected)} · Tap to return"
+        b.visibility = View.VISIBLE
     }
 
     private fun gap(h: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(h)) }
@@ -485,7 +507,7 @@ class MainActivity : Activity() {
             addView(tv("quipu", 34f, white, true).apply { typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(dp(12), 0, 0, 0) })
         }, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
         col.addView(gap(18))
-        col.addView(tv("The world's most private messaging app.\nEvery chat is end-to-end encrypted.\nNo phone number or email needed.", 16f, dim).apply {
+        col.addView(tv("Features or privacy? Pick one?\nThat's a hostage situation.\nHave both. Free, forever.", 16f, dim).apply {
             gravity = Gravity.CENTER
             setLineSpacing(0f, 1.2f)
         })

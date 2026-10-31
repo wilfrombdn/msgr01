@@ -297,6 +297,33 @@ class ScreenshotTest {
         File("build/shots/48-forward-picker.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** The Telegram-style call screen through a whole call, and the green "return to call" bar in the app. */
+    @Test fun callScreenStates() {
+        CallActivity.animations = false
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val core = Messenger.core
+        val k = core.prepareCall(core.contact("sam_r")!!)
+        val scr = Robolectric.buildActivity(CallActivity::class.java).setup().get()
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(700))
+        assert(!scr.isFinishing) { "call screen closed while calling" }
+        shoot(scr, "60-call-requesting")
+        val render = CallActivity::class.java.getDeclaredMethod("render").apply { isAccessible = true }
+        core.offerDelivered(k); shadowOf(Looper.getMainLooper()).idle(); render.invoke(scr)
+        shoot(scr, "60b-call-ringing")
+        k.connectedAt = System.currentTimeMillis() - 83_000; core.callConnected(); shadowOf(Looper.getMainLooper()).idle(); render.invoke(scr)
+        assert(!scr.isFinishing) { "call screen closed during the call" }
+        shoot(scr, "61-call-active")
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        call(a, "showChats"); shoot(a, "62-call-bar")
+        core.hangUp("ok"); shadowOf(Looper.getMainLooper()).idle()
+        assert(core.call == null) { "hang up should end the call" }
+        val inc = Core.Call("b".repeat(32), "sam_r", false, "c".repeat(64), "d".repeat(64)).apply { phase = Core.Call.INCOMING }
+        Core::class.java.getDeclaredField("call").apply { isAccessible = true }.set(core, inc)
+        val scr2 = Robolectric.buildActivity(CallActivity::class.java).setup().get()
+        shoot(scr2, "63-call-incoming")
+        core.endCall(inc, "declined")
+    }
+
     /** Tapping call opens the call screen at once (even before the invite is out). */
     @Test fun callButtonOpensCallScreen() {
         Messenger.initForPreview(fakeCore(signedIn = true))

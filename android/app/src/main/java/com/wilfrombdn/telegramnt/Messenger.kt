@@ -121,6 +121,9 @@ object Messenger {
         load()
         applyRoute()
         PushService.register(app)
+        // once only: every screen and service calls init, and running it again swapped in a fresh Core,
+        // which dropped a call in progress (the call screen saw "no call" and closed; Hang up did nothing)
+        ready = true
     }
 
     /** For screenshots/tests: no Keystore, nothing saved. */
