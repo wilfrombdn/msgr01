@@ -386,7 +386,8 @@ class MainActivity : Activity() {
         super.onResume()
         // back from "allow installs from Tellem": carry on with the update
         pendingApk?.let { f -> if (packageManager.canRequestPackageInstalls()) { pendingApk = null; Messenger.run({ Updater.install(this, f) }) } }
-        if (screen == "settings") showSettings()   // back from a phone setting (battery, full-screen alerts): show what changed
+        // back from a phone setting (battery, full-screen alerts, default texting app): show what changed
+        if (screen == "settings" || screen == "textthread" && textMadeDefault != Texts.isDefault(this)) rebuildTextScreen()
     }
 
     private fun redraw() {
@@ -1148,7 +1149,14 @@ class MainActivity : Activity() {
             null, "Cancel" to dim, "Open App info" to white) { b ->
             if (b == 1) startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", packageName, null)))
         }
-        if (screen == "settings") showSettings() else redraw()
+        rebuildTextScreen()
+    }
+
+    /** The texting-app state decides the bottom of a text chat (message box or "make Tellem…"), so rebuild it. */
+    private fun rebuildTextScreen() = when (screen) {
+        "settings" -> showSettings()
+        "textthread" -> showTextThread(textThread, textPeople.ifEmpty { null })
+        else -> redraw()
     }
 
     private fun textsUnread() = Texts.threads.sumOf { it.unread }
@@ -1283,8 +1291,11 @@ class MainActivity : Activity() {
     private var textList: LinearLayout? = null
     private var textScroll: ScrollView? = null
 
+    private var textMadeDefault = false   // texting-app state when the open text chat was drawn
+
     private fun showTextThread(id: Long, people: List<String>? = null) {
         screen = "textthread"
+        textMadeDefault = Texts.isDefault(this)
         textThread = id
         Texts.openThread = id
         textPeople = people ?: Texts.threads.firstOrNull { it.id == id }?.addresses ?: emptyList()
@@ -1300,7 +1311,7 @@ class MainActivity : Activity() {
         val call = textPeople.singleOrNull()?.let { n -> icon(R.drawable.ic_call) { runCatching { startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", n, null))) } } }
         val top = topBar(title, if (group) "Group text · ${textPeople.size} people · not encrypted" else "Text message · not encrypted",
             icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(call).toTypedArray())
-        val bottom: View = if (!Texts.isDefault(this)) tv("Make $APP_NAME your texting app to send", 16f, blue, true).apply {
+        val bottom: View = if (!textMadeDefault) tv("Make $APP_NAME your texting app to send", 16f, blue, true).apply {
             gravity = Gravity.CENTER; setPadding(dp(16), dp(16), dp(16), dp(16)); setBackgroundColor(listBg)
             setOnClickListener { askTextRole() }
         } else LinearLayout(this).apply {

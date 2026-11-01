@@ -48,7 +48,11 @@ object Texts {
     /** The thread on screen right now (no notification for it). */
     @Volatile var openThread = 0L
 
-    fun isDefault(ctx: Context) = runCatching { Telephony.Sms.getDefaultSmsPackage(ctx) == ctx.packageName }.getOrDefault(false)
+    /** Tellem is the phone's texting app (only that app may send and save texts). */
+    fun isDefault(ctx: Context) = runCatching {
+        if (Build.VERSION.SDK_INT >= 29) ctx.getSystemService(android.app.role.RoleManager::class.java).isRoleHeld(android.app.role.RoleManager.ROLE_SMS)
+        else Telephony.Sms.getDefaultSmsPackage(ctx) == ctx.packageName
+    }.getOrDefault(false)
     fun canRead(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
 
     // ---------- settings the receivers need (they never open Tellem's locked store) ----------
