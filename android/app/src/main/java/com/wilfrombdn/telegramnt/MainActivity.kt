@@ -271,7 +271,7 @@ class MainActivity : Activity() {
             emojiPopup != null -> { emojiPopup?.dismiss(); emojiPopup = null }
             (replyTo != null || editing != null) && (screen == "chat" || screen == "group") -> cancelReply()
             drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
-            screen == "textthread" || screen == "newtext" -> leaveTexts()
+            screen == "textthread" || screen == "newtext" || screen == "textspam" -> leaveTexts()
             !Messenger.signedIn && screen != "welcome" -> showWelcome()
             screen == "viewer" -> leaveViewer()
             screen == "storage" -> showSettings()
@@ -395,6 +395,7 @@ class MainActivity : Activity() {
         maybeCheckUpdate()
         if (screen == "textthread") return fillTextThread()   // texts work signed in or not
         if (screen == "textlist") return showTextList()
+        if (screen == "textspam") return showTextSpam()
         if (!Messenger.signedIn) {
             if (screen != "welcome" && screen != "signup" && screen != "login" && screen != "newtext") showWelcome()
             return
@@ -847,8 +848,9 @@ class MainActivity : Activity() {
         val requests = all.filter { it.status == Contact.ASKING }
         val textsOn = Texts.canRead(this)
         val mixed = textsOn && Texts.mixed(this)
-        if (!textsOn || mixed) textsTab = false
-        val textsOnly = textsTab && !showArchive
+        if (mixed && phoneSub == "texts") phoneSub = "calls"   // texts already sit among the chats
+        val phoneOnly = textsTab && !showArchive
+        val textsOnly = phoneOnly && phoneSub == "texts"
         // everything else, keyed "u:<user>" / "g:<group>" so folders can hold either
         val rows = (all - requests.toSet()).map { Triple("u:${it.user}", it.lastTs, it as Any) } + grps.map { Triple("g:${it.id}", it.lastTs, it as Any) }
         fun rowFor(t: Triple<String, Long, Any>, bg: Int = listBg) = (t.third as? Contact)?.let { chatRow(it, t.first, bg) } ?: groupRow(t.third as Group, t.first, bg)
@@ -857,7 +859,11 @@ class MainActivity : Activity() {
         val inFolder = HashSet<String>()
         val arch = Messenger.archived
         if (q.isEmpty()) arch.retainAll { it in byKey || it.startsWith("u:") && core.contact(it.drop(2)) != null }   // forget deleted chats
-        if (textsOnly) addTextRows(list, q)
+        if (phoneOnly) when (phoneSub) {
+            "calls" -> addCallRows(list, q)
+            "contacts" -> addContactRows(list, q)
+            else -> addTextRows(list, q)
+        }
         else if (showArchive && q.isEmpty()) {
             // the Archived chats page: just those, newest first
             for (t in rows.filter { it.first in arch }.sortedByDescending { it.second }) list.addView(rowFor(t))
@@ -888,11 +894,12 @@ class MainActivity : Activity() {
         }
         // with "show texts together with chats", text threads sit among the chats (never in pins or folders)
         val loose: List<Pair<Long, () -> View>> = rows.filter { it.first !in inFolder }.map { t -> t.second to { rowFor(t) } } +
-            (if (mixed) Texts.threads.filter { textMatches(it, q) }.map { t -> t.date to { textRow(t) } } else emptyList())
+            (if (mixed) Texts.threads.filter { !it.spam && textMatches(it, q) }.map { t -> t.date to { textRow(t) } } else emptyList())
         for ((_, make) in loose.sortedByDescending { it.first }) list.addView(make())
+        if (mixed && q.isEmpty()) spamRow()?.let { list.addView(it) }
         }
-        if (q.length >= 2 && !textsOnly) messageResults(list, q)
-        if (!textsOnly && all.isEmpty() && grps.isEmpty() && (!mixed || Texts.threads.isEmpty()) && (q.length < 2 || list.childCount == 0)) {
+        if (q.length >= 2 && !phoneOnly) messageResults(list, q)
+        if (!phoneOnly && all.isEmpty() && grps.isEmpty() && (!mixed || Texts.threads.isEmpty()) && (q.length < 2 || list.childCount == 0)) {
             list.addView(tv(
                 if (q.isNotEmpty()) "No chats match \"$search\""
                 else "Welcome, ${core.me?.name}!\n\nTap the pencil to add a friend by their @username.\n\nYour username is @${core.me?.user}. Share it so friends can add you.",
@@ -918,7 +925,7 @@ class MainActivity : Activity() {
             background = circle(white)
             elevation = dp(6).toFloat()
             setOnClickListener { showNewChat() }
-        }.let { if (textsOnly) newTextButton() else it }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
+        }.let { if (phoneOnly) phoneButton() else it }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
 
         val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
         else if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
@@ -930,9 +937,9 @@ class MainActivity : Activity() {
         // Content + a left slide-out drawer (opens by tapping the lines or swiping from the edge).
         val keepOpen = refreshing && drawer?.isDrawerOpen(GravityCompat.START) == true   // refreshes rebuild the screen; don't snap the menu shut
         val d = DrawerLayout(this)
-        val body = if (textsOn && !mixed && !showArchive) LinearLayout(this).apply {
+        val body = if (!showArchive) LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(textTabs(all.sumOf { it.unread } + grps.sumOf { it.unread }))
+            addView(textTabs(all.sumOf { it.unread } + grps.sumOf { it.unread }, mixed))
             addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         } else frame
         d.addView(page(top, body), DrawerLayout.LayoutParams(-1, -1))
@@ -1159,20 +1166,167 @@ class MainActivity : Activity() {
         else -> redraw()
     }
 
-    private fun textsUnread() = Texts.threads.sumOf { it.unread }
+    private fun textsUnread() = Texts.threads.filter { !it.spam }.sumOf { it.unread }
 
-    /** Chats | Texts, under the top bar (separate mode only). */
-    private fun textTabs(chatsUnread: Int): View = LinearLayout(this).apply {
+    /** Chats | Phone under the top bar; Phone has its own row: Texts · Calls · Contacts (carrier things, not private). */
+    private fun textTabs(chatsUnread: Int, mixed: Boolean): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
         setBackgroundColor(bar)
-        fun tab(label: String, n: Int, on: Boolean, go: () -> Unit) = addView(LinearLayout(context).apply {
+        fun row() = LinearLayout(context)
+        fun LinearLayout.tab(label: String, n: Int, on: Boolean, size: Float, go: () -> Unit) = addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             background = pressable()
             setOnClickListener { go() }
-            addView(tv(label + if (n > 0) "  $n" else "", 15f, if (on) white else dim, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(8)) }, LinearLayout.LayoutParams(-1, -2))
+            addView(tv(label + if (n > 0) "  $n" else "", size, if (on) white else dim, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(8)) }, LinearLayout.LayoutParams(-1, -2))
             addView(View(context).apply { setBackgroundColor(if (on) white else Color.TRANSPARENT) }, LinearLayout.LayoutParams(-1, dp(2)))
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        tab("Chats", chatsUnread, !textsTab) { if (textsTab) { textsTab = false; chatsScrollY = 0; showChats() } }
-        tab("Texts", textsUnread(), textsTab) { if (!textsTab) { textsTab = true; chatsScrollY = 0; showChats() } }
+        val main = row()
+        main.tab("Chats", chatsUnread, !textsTab, 15f) { if (textsTab) { textsTab = false; chatsScrollY = 0; showChats() } }
+        main.tab("Phone", if (mixed) 0 else textsUnread(), textsTab, 15f) { if (!textsTab) { textsTab = true; chatsScrollY = 0; showChats() } }
+        addView(main)
+        if (textsTab) {
+            val sub = row().apply { setBackgroundColor(listBg) }
+            fun go(k: String) { if (phoneSub != k) { phoneSub = k; chatsScrollY = 0; showChats() } }
+            if (!mixed) sub.tab("Texts", textsUnread(), phoneSub == "texts", 14f) { go("texts") }
+            sub.tab("Calls", 0, phoneSub == "calls", 14f) { go("calls") }
+            sub.tab("Contacts", 0, phoneSub == "contacts", 14f) { go("contacts") }
+            addView(sub)
+        }
+    }
+
+    private var phoneSub = "texts"
+    private var phoneCalls: List<Phone.Call>? = null
+    private var phonePeople: List<Phone.Person>? = null
+    private var phoneLoaded = 0L
+
+    /** Call history and contacts, read in the background (again when older than 15 s); redraws when they arrive. */
+    private fun loadPhone() {
+        if (System.currentTimeMillis() - phoneLoaded < 15_000 && phoneCalls != null) return
+        phoneLoaded = System.currentTimeMillis()
+        var calls: List<Phone.Call> = emptyList(); var people: List<Phone.Person> = emptyList()
+        Messenger.run({ calls = Phone.calls(this); people = Phone.people(this); calls.mapNotNull { it.number }.forEach { Texts.name(this, it) } }, {
+            val changed = calls.size != phoneCalls?.size || calls.firstOrNull()?.date != phoneCalls?.firstOrNull()?.date || people.size != phonePeople?.size
+            phoneCalls = calls; phonePeople = people
+            if (changed && screen == "chats" && textsTab) showChats()
+        })
+    }
+
+    /** The pencil of the Phone tab: new text, dial pad, or new contact. */
+    private fun phoneButton() = newTextButton().apply {
+        when (phoneSub) {
+            "calls" -> { setImageResource(R.drawable.ic_call); setOnClickListener { runCatching { startActivity(Intent(Intent.ACTION_DIAL)) } } }
+            "contacts" -> setOnClickListener { runCatching { startActivity(Intent(Intent.ACTION_INSERT, android.provider.ContactsContract.Contacts.CONTENT_URI)) } }
+        }
+    }
+
+    private fun permissionNote(text: String, perm: String, code: Int) =
+        note(text) { requestPermissions(arrayOf(perm), code) }
+
+    /** Phone and Tellem calls in one list, newest first. Tap to call back the same way. */
+    private fun addCallRows(list: LinearLayout, q: String) {
+        loadPhone()
+        if (!Phone.canReadCalls(this)) list.addView(permissionNote("Tap to show your phone's call history here. It's read on this phone only.", Manifest.permission.READ_CALL_LOG, CALL_LOG_PERM))
+        val core = Messenger.core
+        val tellem = synchronized(core) {
+            core.contacts.flatMap { c -> c.msgs.mapNotNull { m -> m.call?.let { k ->
+                val inc = k.optString("d") != "out"
+                Phone.Call(m.ts, inc, inc && k.optString("s") != "ok", k.optInt("dur"), friend = c.user)
+            } } }
+        }
+        val all = (tellem + (phoneCalls ?: emptyList())).sortedByDescending { it.date }.filter { k ->
+            q.isEmpty() || callName(k).lowercase().contains(q) || k.number?.contains(q) == true
+        }.take(300)
+        for (k in all) list.addView(callRow(k))
+        if (all.isEmpty() && Phone.canReadCalls(this)) list.addView(tv(if (q.isEmpty()) "No calls yet" else "No calls match \"$search\"", 15.5f, dim)
+            .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)) })
+    }
+
+    private fun callName(k: Phone.Call) = k.friend?.let { Messenger.core.contact(it)?.name ?: "@$it" } ?: Texts.name(this, k.number ?: "")
+
+    private fun callRow(k: Phone.Call): View {
+        val name = callName(k)
+        val row = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(8), dp(14), dp(8))
+            background = pressable()
+            setOnClickListener {
+                k.friend?.let { u -> Messenger.core.contact(u)?.takeIf { it.canChat }?.let { callFriend(it) } ?: toast("Can't call them on $APP_NAME") }
+                    ?: runCatching { startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", k.number, null))) }
+            }
+            setOnLongClickListener {
+                val n = k.number
+                if (n != null) longPressMenu(null, null, listOf(
+                    "Text" to { var id = 0L; Messenger.run({ id = Texts.threadFor(this@MainActivity, listOf(n)) }, { showTextThread(id, listOf(n)) }) },
+                    "Copy number" to { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("number", n)); toast("Copied") },
+                )) else k.friend?.let { showChat(it) }
+                true
+            }
+        }
+        val friend = k.friend?.let { Messenger.core.contact(it) }
+        row.addView(avatar(if (name.any(Char::isLetter)) name else "#", 48, friend?.avatar))
+        val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+        val l1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        l1.addView(tv(name, 16f, if (k.missed) red else white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        l1.addView(tv(if (k.friend != null) APP_NAME else "Phone", 10.5f, Color.WHITE, true).apply {
+            setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(if (k.friend != null) Color.parseColor("#3A6EA5") else smsGreen, 4)
+        })
+        l1.addView(tv(time(k.date), 13f, dim).apply { setPadding(dp(6), 0, 0, 0) })
+        mid.addView(l1)
+        val what = when {
+            k.missed -> "↙ Missed"
+            k.incoming -> "↙ Incoming"
+            else -> "↗ Outgoing"
+        } + if (k.seconds > 0) " · ${callDuration(k.seconds)}" else ""
+        mid.addView(tv(what, 14f, if (k.missed) red else dim).apply { setPadding(0, dp(2), 0, 0) })
+        row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(row, LinearLayout.LayoutParams(-1, -2))
+            addView(View(context).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(70) })
+        }
+    }
+
+    /** The phone's contacts, A to Z; tap for a card with Call and Text. */
+    private fun addContactRows(list: LinearLayout, q: String) {
+        loadPhone()
+        if (!Phone.canReadContacts(this)) return list.addView(permissionNote("Tap to show your phone's contacts here. They're read on this phone only and never sent anywhere.", Manifest.permission.READ_CONTACTS, CONTACTS_PERM))
+        val people = (phonePeople ?: emptyList()).filter { p -> q.isEmpty() || p.name.lowercase().contains(q) || p.numbers.any { it.first.contains(q) } }
+        var letter = ""
+        for (p in people) {
+            val l = p.name.take(1).uppercase().let { if (it.firstOrNull()?.isLetter() == true) it else "#" }
+            if (l != letter) { letter = l; list.addView(tv(l, 14f, dim, true).apply { setPadding(dp(20), dp(12), dp(20), dp(4)) }) }
+            list.addView(LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                background = pressable()
+                setOnClickListener { contactCard(p) }
+                addView(avatar(p.name, 44))
+                addView(tv(p.name, 16f, white).apply { setPadding(dp(14), 0, 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+            })
+        }
+        if (people.isEmpty() && phonePeople != null) list.addView(tv(if (q.isEmpty()) "No contacts with phone numbers" else "No contacts match \"$search\"", 15.5f, dim)
+            .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)) })
+    }
+
+    /** Name, each number, and Call / Text for each. */
+    private fun contactCard(p: Phone.Person) {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var dialog: android.app.Dialog? = null
+        for ((n, label) in p.numbers) col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(tv(n, 16f, white))
+                addView(tv(label, 13f, dim))
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(icon(R.drawable.ic_call, white, 22) { runCatching { startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", n, null))) } })
+            addView(icon(R.drawable.ic_send, smsGreen, 22) {
+                var id = 0L
+                Messenger.run({ id = Texts.threadFor(this@MainActivity, listOf(n)) }, { showTextThread(id, listOf(n)) })
+            })
+        })
+        popup(p.name, "Call or text (through your carrier, not private)", col, "Close" to dim)
     }
 
     private fun textMatches(t: Texts.Thread, q: String) = q.isEmpty() || Texts.title(this, t.addresses).lowercase().contains(q) ||
@@ -1181,9 +1335,10 @@ class MainActivity : Activity() {
     /** The text threads, newest first (the Texts tab and the signed-out texts screen). */
     private fun addTextRows(list: LinearLayout, q: String) {
         if (!Texts.isDefault(this)) list.addView(note("$APP_NAME isn't your texting app right now, so texts can't be sent or received here. Tap to change that.") { askTextRole() })
-        val ts = Texts.threads.filter { textMatches(it, q) }
+        val ts = Texts.threads.filter { !it.spam && textMatches(it, q) }
         for (t in ts) list.addView(textRow(t))
-        if (ts.isEmpty()) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
+        spamRow()?.let { list.addView(it) }
+        if (ts.isEmpty() && Texts.threads.none { it.spam }) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
             .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
     }
 
@@ -1221,6 +1376,52 @@ class MainActivity : Activity() {
         }
     }
 
+    /** "Spam & blocked · N" at the end of the texts, or null if there's none. */
+    private fun spamRow(): View? {
+        val n = Texts.threads.count { it.spam }
+        if (n == 0) return null
+        return LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(22), dp(16), dp(16), dp(16))
+            background = pressable()
+            setOnClickListener { showTextSpam() }
+            addView(tv("🚫", 18f, dim).apply { setPadding(0, 0, dp(18), 0) })
+            addView(tv("Spam & blocked", 16f, dim), LinearLayout.LayoutParams(0, -2, 1f))
+            addView(tv("$n", 14f, dim))
+        }
+    }
+
+    /** Texts the filter set aside, and conversations with blocked numbers. Nothing here is deleted. */
+    private fun showTextSpam() {
+        screen = "textspam"
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        list.addView(settingNote("Texts from numbers that aren't in your contacts and have a link or typical scam wording, plus numbers you blocked. They arrive silently. Open one to mark it Not spam. All of this is decided on your phone; nothing is sent anywhere.").apply { setPadding(dp(20), dp(14), dp(20), dp(10)) })
+        val ts = Texts.threads.filter { it.spam }
+        for (t in ts) list.addView(textRow(t))
+        if (ts.isEmpty()) list.addView(tv("No spam", 15.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(48), dp(32), dp(32)) })
+        setContentView(page(topBar("Spam & blocked", null, icon(R.drawable.ic_back) { leaveTexts() }), ScrollView(this).apply { addView(list) }))
+    }
+
+    /** Block / unblock, spam / not spam, delete: the ⋮ menu of a text conversation. */
+    private fun textThreadMenu(anchor: View) {
+        val id = textThread; val people = textPeople
+        val t = Texts.threads.firstOrNull { it.id == id }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        if (people.isNotEmpty()) items += if (t?.blocked == true) "Unblock" to { Texts.block(this, people, false); toast("Unblocked") }
+            else "Block number" to {
+                popup("Block ${Texts.title(this, people)}?", "Android will stop their texts and calls from reaching this phone (in every app). You can unblock them later from here.",
+                    null, "Cancel" to dim, "Block" to red) { b -> if (b == 1) { Texts.block(this, people, true); Texts.markSpam(this, id, true); leaveTexts() } }
+            }
+        items += if (t?.spam == true) "Not spam" to { Texts.markSpam(this, id, false); toast("Moved back to your texts") }
+            else "Move to spam" to { Texts.markSpam(this, id, true); leaveTexts() }
+        items += "Delete conversation" to {
+            popup("Delete this conversation?", "This deletes these texts from the phone for good.", null, "Cancel" to dim, "Delete" to red) { b ->
+                if (b == 1) { Texts.deleteThread(this, id); leaveTexts() }
+            }
+        }
+        dropdown(anchor, Gravity.END, *items.toTypedArray())
+    }
+
     /** Signed out but Tellem is the texting app: texts still have to be reachable. */
     private fun showTextList() {
         screen = "textlist"
@@ -1240,7 +1441,7 @@ class MainActivity : Activity() {
 
     private fun leaveTexts() {
         Texts.openThread = 0
-        if (Messenger.signedIn) { textsTab = !Texts.mixed(this); showChats() } else showTextList()
+        if (Messenger.signedIn) { textsTab = !Texts.mixed(this); phoneSub = "texts"; showChats() } else showTextList()
     }
 
     /** "To:" numbers (or pick a contact), then the thread. */
@@ -1289,6 +1490,8 @@ class MainActivity : Activity() {
     }
 
     private var textList: LinearLayout? = null
+    private var textKeys: List<String> = emptyList()
+    private val textViews = HashMap<String, View>()
     private var textScroll: ScrollView? = null
 
     private var textMadeDefault = false   // texting-app state when the open text chat was drawn
@@ -1307,10 +1510,27 @@ class MainActivity : Activity() {
             isClickable = true; setOnClickListener { dismissKeyboard() }
         }
         textList = list
+        textKeys = emptyList(); textViews.clear()
         val sc = chatScroller(list); textScroll = sc
         val call = textPeople.singleOrNull()?.let { n -> icon(R.drawable.ic_call) { runCatching { startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", n, null))) } } }
+        val more = icon(R.drawable.ic_more).also { v -> v.setOnClickListener { textThreadMenu(v) } }
         val top = topBar(title, if (group) "Group text · ${textPeople.size} people · not encrypted" else "Text message · not encrypted",
-            icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(call).toTypedArray())
+            icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(call, more).toTypedArray())
+        val info = Texts.threads.firstOrNull { it.id == id }
+        val spamBar: View? = if (info?.spam != true) null else LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(bar)
+            setPadding(dp(16), dp(8), dp(8), dp(8))
+            addView(tv(if (info.blocked) "🚫 This number is blocked" else "⚠ This looks like spam. Don't tap links or reply with personal info.", 13.5f, amber), LinearLayout.LayoutParams(0, -2, 1f))
+            addView(tv(if (info.blocked) "UNBLOCK" else "NOT SPAM", 13.5f, blue, true).apply {
+                setPadding(dp(12), dp(8), dp(8), dp(8))
+                setOnClickListener {
+                    if (info.blocked) Texts.block(this@MainActivity, textPeople, false)
+                    Texts.markSpam(this@MainActivity, id, false)
+                    visibility = View.GONE; (parent as View).visibility = View.GONE
+                }
+            })
+        }
         val bottom: View = if (!textMadeDefault) tv("Make $APP_NAME your texting app to send", 16f, blue, true).apply {
             gravity = Gravity.CENTER; setPadding(dp(16), dp(16), dp(16), dp(16)); setBackgroundColor(listBg)
             setOnClickListener { askTextRole() }
@@ -1336,6 +1556,7 @@ class MainActivity : Activity() {
                 val pic = textImage
                 if (body.isEmpty() && pic == null || textPeople.isEmpty()) return
                 box.setText(""); textImage = null; picBar.visibility = View.GONE
+                stick = true   // your own text always brings you to the bottom
                 Texts.send(this@MainActivity, textPeople, body, pic)
             }
             input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
@@ -1351,6 +1572,7 @@ class MainActivity : Activity() {
             fitsSystemWindows = true
             addView(callBarView(), LinearLayout.LayoutParams(-1, -2))
             addView(top, LinearLayout.LayoutParams(-1, -2))
+            spamBar?.let { addView(it, LinearLayout.LayoutParams(-1, -2)) }
             addView(sc, LinearLayout.LayoutParams(-1, 0, 1f))
             addView(bottom, LinearLayout.LayoutParams(-1, -2))
         }
@@ -1372,13 +1594,18 @@ class MainActivity : Activity() {
         }, {
             val list = textList ?: return@run
             if (screen != "textthread" || textThread != id) return@run
-            val sc = textScroll
-            val follow = stick || sc == null || atBottom(sc)
-            list.removeAllViews()
-            if (msgs.isEmpty()) list.addView(tv("Texts go through your phone carrier, not Tor, and aren't encrypted.", 13.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) })
-            for (t in msgs) list.addView(textBubble(t, textPeople.size > 1))
-            if (follow && sc != null) sc.post { toBottom(sc); stick = false }
             if (Texts.threads.firstOrNull { it.id == id }?.unread ?: 1 > 0) Texts.markRead(this, id)
+            // reuse bubbles that haven't changed: redrawing them all made the chat jump on every send
+            val keys = msgs.map { "${if (it.mms) "m" else "s"}${it.id}:${it.state}:${it.attachments.size}:${it.body.length}" }
+            if (keys == textKeys && list.childCount > 0) return@run
+            textKeys = keys
+            val old = HashMap(textViews); textViews.clear()
+            val want = msgs.zip(keys).map { (t, k) -> (old[k] ?: textBubble(t, textPeople.size > 1)).also { textViews[k] = it } }
+            val keep = want.toHashSet()
+            for (i in list.childCount - 1 downTo 0) if (list.getChildAt(i) !in keep) list.removeViewAt(i)   // only what changed
+            want.forEachIndexed { i, v -> if (list.getChildAt(i) !== v) { (v.parent as? ViewGroup)?.removeView(v); list.addView(v, i) } }
+            if (msgs.isEmpty()) list.addView(tv("Texts go through your phone carrier, not Tor, and aren't encrypted.", 13.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) })
+            // the scroller keeps to the bottom while you're there (see chatScroller)
         })
     }
 
@@ -1496,6 +1723,8 @@ class MainActivity : Activity() {
         private const val PICK_CONTACT = 21
         private const val TEXT_IMAGE = 22
         private const val TEXT_PERMS = 23
+        private const val CALL_LOG_PERM = 24
+        private const val CONTACTS_PERM = 25
 
         /** Fixed reactions, then the most-used emoji not already in the bar, padded with [filler]. */
         fun quickReactions(use: Map<String, Int>, fixed: List<String>, filler: List<String>): List<String> {
@@ -2343,7 +2572,11 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == TEXT_PERMS) { Texts.forgetNames(); Texts.reload(this); return }
+        if (requestCode == TEXT_PERMS || requestCode == CALL_LOG_PERM || requestCode == CONTACTS_PERM) {
+            Texts.forgetNames(); Texts.reload(this); phoneLoaded = 0; phoneCalls = null
+            if (screen == "chats") showChats()
+            return
+        }
         if (requestCode == LOCATION_FOR_SHARE) {
             if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) shareLocation() else toast("$APP_NAME needs location access to share where you are")
             return

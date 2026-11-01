@@ -33,7 +33,8 @@ import java.util.concurrent.Executors
  * other: a private message never falls back to a text, and a text is never sent as a private message.
  */
 object Texts {
-    class Thread(val id: Long, val addresses: List<String>, val snippet: String, val date: Long, val unread: Int)
+    class Thread(val id: Long, val addresses: List<String>, val snippet: String, val date: Long, val unread: Int,
+                 val spam: Boolean = false, val blocked: Boolean = false)
     class Attachment(val uri: Uri, val mime: String)
     class Text(
         val id: Long, val mms: Boolean, val mine: Boolean, val from: String?, val body: String, val date: Long,
@@ -109,6 +110,9 @@ object Texts {
                 while (c.moveToNext()) c.getLong(0).let { unread[it] = (unread[it] ?: 0) + 1 }
             }
         }
+        val replied = HashSet<Long>()   // threads you've written in are never spam
+        cr.query(Telephony.Sms.CONTENT_URI, arrayOf("thread_id"), "type != ${Telephony.Sms.MESSAGE_TYPE_INBOX}", null, null)?.use { c -> while (c.moveToNext()) replied += c.getLong(0) }
+        cr.query(Telephony.Mms.CONTENT_URI, arrayOf("thread_id"), "msg_box != ${Telephony.Mms.MESSAGE_BOX_INBOX}", null, null)?.use { c -> while (c.moveToNext()) replied += c.getLong(0) }
         val out = ArrayList<Thread>()
         cr.query(Uri.parse("content://mms-sms/conversations?simple=true"),
             arrayOf("_id", "date", "recipient_ids", "snippet", "snippet_cs", "message_count", "has_attachment"), null, null, "date DESC")?.use { c ->
@@ -119,7 +123,8 @@ object Texts {
                 var snip = c.getString(3) ?: ""
                 if (c.getInt(4) != 0 && snip.isNotEmpty()) snip = String(snip.toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8)
                 if (snip.isEmpty() && c.getInt(6) != 0) snip = "📷 Picture"
-                out += Thread(id, people, snip, c.getLong(1), unread[id] ?: 0)
+                val blocked = people.any { isBlocked(ctx, it) }
+                out += Thread(id, people, snip, c.getLong(1), unread[id] ?: 0, blocked || spamVerdict(ctx, id, people, snip, id in replied), blocked)
             }
         }
         out.forEach { t -> t.addresses.forEach { name(ctx, it) } }   // look names up here, not while drawing the list
@@ -207,24 +212,78 @@ object Texts {
             }
         }.getOrNull().orEmpty()
 
+    // ---------- spam (decided on this phone only; nothing is sent anywhere) ----------
+
+    private val LINK = Regex("""(https?://|www\.|\b[a-z0-9-]+\.(ly|link|xyz|top|info|club|site|online|shop|cc|me|io|co)/)""", RegexOption.IGNORE_CASE)
+    private val SCAM = Regex(
+        """\b(congrat\w*|you('ve| have)? won|winner|prize|gift ?card|claim (your|now)|reward points?|""" +
+        """package|parcel|delivery (attempt|failed|issue)|redeliver\w*|usps|fedex|canada ?post|purolator|""" +
+        """unpaid|overdue|outstanding (toll|balance)|toll (fee|bill)|final notice|""" +
+        """(account|card) (has been |is |was )?(locked|suspended|restricted|disabled)|verify your|confirm your (identity|account)|""" +
+        """refund|crypto|bitcoin|investment opportunit\w*|pre-?approved|loan offer|""" +
+        """act now|limited time|urgent(ly)?|reply stop|txt stop|text stop)\b""", RegexOption.IGNORE_CASE)
+
+    /** A text that reads like a typical scam or ad: has a link, or scam wording. */
+    fun looksLikeSpam(text: String) = LINK.containsMatchIn(text) || SCAM.containsMatchIn(text)
+
+    private fun idSet(ctx: Context, key: String) = prefs(ctx).getStringSet(key, emptySet())!!.mapNotNull { it.toLongOrNull() }.toSet()
+    private fun setId(ctx: Context, key: String, id: Long, on: Boolean) {
+        val now = prefs(ctx).getStringSet(key, emptySet())!!.toMutableSet()
+        if (on) now += "$id" else now -= "$id"
+        prefs(ctx).edit().putStringSet(key, now).apply()
+    }
+
+    /** Careful filter: strangers only (not in contacts, never replied to), with a link or scam wording. Your choice always wins. */
+    fun spamVerdict(ctx: Context, thread: Long, people: List<String>, latest: String, replied: Boolean): Boolean {
+        if (thread in idSet(ctx, "notspam")) return false
+        if (thread in idSet(ctx, "spam")) return true
+        return !replied && people.none { contact(ctx, it) != null } && looksLikeSpam(latest)
+    }
+
+    /** Move a conversation to Spam, or back out of it (and keep it out). */
+    fun markSpam(ctx: Context, thread: Long, spam: Boolean) {
+        setId(ctx, "spam", thread, spam)
+        setId(ctx, "notspam", thread, !spam)
+        reload(ctx)
+    }
+
+    /** Numbers on the phone's own block list (shared with the Phone app; Google Messages blocks land here too). */
+    fun isBlocked(ctx: Context, number: String) = runCatching { android.provider.BlockedNumberContract.isBlocked(ctx, number) }.getOrDefault(false)
+
+    /** Block or unblock everyone in a conversation. Android then drops their texts and calls before they reach any app. */
+    fun block(ctx: Context, numbers: List<String>, on: Boolean) = io.execute {
+        val uri = android.provider.BlockedNumberContract.BlockedNumbers.CONTENT_URI
+        for (n in numbers) runCatching {
+            if (on) ctx.contentResolver.insert(uri, ContentValues().apply { put(android.provider.BlockedNumberContract.BlockedNumbers.COLUMN_ORIGINAL_NUMBER, n) })
+            else android.provider.BlockedNumberContract.unblock(ctx, n)
+        }
+        ui.post { reload(ctx) }
+    }
+
     // ---------- names ----------
 
     private val names = HashMap<String, String>()
+    private val contacts = HashMap<String, String?>()
+
+    /** The contact's name, or null if they aren't in your contacts (or Tellem may not read them). */
+    fun contact(ctx: Context, address: String): String? = synchronized(contacts) {
+        if (address in contacts) return contacts[address]
+        val n = if (ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) runCatching {
+            ctx.contentResolver.query(Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(address)),
+                arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull() else null
+        contacts[address] = n
+        n
+    }
 
     /** The contact's name if Tellem may read contacts, else the number, nicely spaced. */
     fun name(ctx: Context, address: String): String = synchronized(names) {
-        names.getOrPut(address) {
-            val n = if (ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) runCatching {
-                ctx.contentResolver.query(Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(address)),
-                    arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-            }.getOrNull() else null
-            n ?: PhoneNumberUtils.formatNumber(address, Locale.getDefault().country) ?: address
-        }
+        names.getOrPut(address) { contact(ctx, address) ?: PhoneNumberUtils.formatNumber(address, Locale.getDefault().country) ?: address }
     }
 
     fun title(ctx: Context, addresses: List<String>) = addresses.joinToString(", ") { name(ctx, it) }.ifEmpty { "Unknown" }
 
-    fun forgetNames() = synchronized(names) { names.clear() }
+    fun forgetNames() { synchronized(names) { names.clear() }; synchronized(contacts) { contacts.clear() } }
 
     // ---------- sending ----------
 
@@ -366,8 +425,12 @@ object Texts {
     const val CHANNEL = "texts"
     const val NOTE_TAG = "text"
 
-    fun channel(ctx: Context) = ctx.getSystemService(NotificationManager::class.java)
-        .createNotificationChannel(NotificationChannel(CHANNEL, "Text messages", NotificationManager.IMPORTANCE_HIGH))
+    const val SPAM_CHANNEL = "texts_spam"
+
+    fun channel(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).createNotificationChannels(listOf(
+        NotificationChannel(CHANNEL, "Text messages", NotificationManager.IMPORTANCE_HIGH),
+        NotificationChannel(SPAM_CHANNEL, "Possible spam texts", NotificationManager.IMPORTANCE_MIN),   // no sound, no pop-up
+    ))
 
     /** A new text, shown like Tellem's messages and following the same privacy choices. Blocking. */
     fun notify(ctx: Context, thread: Long) {
@@ -377,10 +440,12 @@ object Texts {
         val showNames = pr.getBoolean("names", true)
         val showText = pr.getBoolean("text", true) && !pr.getBoolean("lock", false)
         val people = addressesOf(ctx, thread)
-        val title = if (showNames) title(ctx, people) else APP_NAME
+        val recent = messages(ctx, thread, 30)
+        val spam = spamVerdict(ctx, thread, people, recent.lastOrNull { !it.mine }?.body.orEmpty(), recent.any { it.mine })
+        val title = (if (spam) "Possible spam · " else "") + if (showNames) title(ctx, people) else APP_NAME
         val open = PendingIntent.getActivity(ctx, ("t$thread").hashCode(), Intent(ctx, MainActivity::class.java).putExtra("textThread", thread),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val b = Notification.Builder(ctx, CHANNEL)
+        val b = Notification.Builder(ctx, if (spam) SPAM_CHANNEL else CHANNEL)
             .setSmallIcon(R.drawable.ic_notify)
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
@@ -389,7 +454,7 @@ object Texts {
             .setAutoCancel(true)
             .setContentTitle(title)
         // what they sent since your last reply (at most 6 lines)
-        val unread = if (showNames && showText) messages(ctx, thread, 30).takeLastWhile { !it.mine }.takeLast(6) else emptyList()
+        val unread = if (showNames && showText) recent.takeLastWhile { !it.mine }.takeLast(6) else emptyList()
         if (unread.isEmpty()) b.setContentText("New text message")
         else {
             @Suppress("DEPRECATION")
@@ -405,7 +470,7 @@ object Texts {
             }
             b.setStyle(style).setContentText(unread.last().body)
         }
-        if (showNames && people.isNotEmpty()) {
+        if (showNames && people.isNotEmpty() && !spam) {
             val pi = PendingIntent.getBroadcast(ctx, ("r$thread").hashCode(), Intent(ctx, TextReplyReceiver::class.java).putExtra("thread", thread),
                 PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)   // mutable: Android fills in the typed reply
             b.addAction(Notification.Action.Builder(null, "Reply", pi).addRemoteInput(RemoteInput.Builder(TextReplyReceiver.KEY).setLabel("Text message").build()).build())

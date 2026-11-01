@@ -150,6 +150,30 @@ class ScreenshotTest {
         Texts.setMixed(app, false)
         call(a, "showSettings"); shoot(a, "t4-settings")
         call(a, "showNewText"); shoot(a, "t5-new-text")
+        Texts.threads = Texts.threads + listOf(
+            Texts.Thread(13, listOf("+15553334444"), "USPS: package could not be delivered, update at usps-redeliver.top", now - 60_000, 1, spam = true),
+            Texts.Thread(14, listOf("+15556667777"), "hi", now - 9_000_000, 0, spam = true, blocked = true),
+        )
+        MainActivity::class.java.getDeclaredField("textsTab").apply { isAccessible = true }.setBoolean(a, true)
+        call(a, "showChats"); shoot(a, "t6-texts-with-spam-row")
+        call(a, "showTextSpam"); shoot(a, "t7-spam-folder")
+        call(a, "showTextThread", 13L); shoot(a, "t8-spam-thread")
+        // Phone tab: calls (phone + Tellem) and contacts
+        val f = MainActivity::class.java
+        f.getDeclaredField("phoneCalls").apply { isAccessible = true }.set(a, listOf(
+            Phone.Call(now - 300_000, true, true, 0, number = "+15551234567"),
+            Phone.Call(now - 4_000_000, false, false, 312, number = "+15559876543"),
+        ))
+        f.getDeclaredField("phonePeople").apply { isAccessible = true }.set(a, listOf(
+            Phone.Person(1, "Alex Martin", listOf("+15551112222" to "Mobile")),
+            Phone.Person(2, "Mom", listOf("+15553334444" to "Mobile", "+15555556666" to "Home")),
+        ))
+        f.getDeclaredField("phoneLoaded").apply { isAccessible = true }.setLong(a, System.currentTimeMillis())
+        shadowOf(app).grantPermissions(android.Manifest.permission.READ_CALL_LOG, android.Manifest.permission.READ_CONTACTS)
+        f.getDeclaredField("phoneSub").apply { isAccessible = true }.set(a, "calls")
+        call(a, "showChats"); shoot(a, "t9-calls")
+        f.getDeclaredField("phoneSub").apply { isAccessible = true }.set(a, "contacts")
+        call(a, "showChats"); shoot(a, "t10-contacts")
         Texts.threads = emptyList()
     }
 
