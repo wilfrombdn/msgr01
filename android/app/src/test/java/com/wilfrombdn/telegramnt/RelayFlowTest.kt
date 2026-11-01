@@ -624,6 +624,26 @@ class RelayFlowTest {
         assertEquals(-1, b!!.getInputStream().read())   // one hangs up: the other's line closes
     }
 
+    /**
+     * One phone on Tor, one on Direct: the server's two entrances share the call rooms, so the call still pairs.
+     * Needs the server started with --proxy-port too (RELAY2, default port 8100); skipped otherwise.
+     */
+    @Test fun callRoomPairsAcrossEntrances() {
+        val second = System.getenv("RELAY2") ?: "http://127.0.0.1:8100"
+        assumeTrue(Relay(server).ping() && Relay(second).ping())
+        val room = Crypto.randomHex(32)
+        val a = Relay(server).pipe(room)
+        var b: java.net.Socket? = null
+        val t = Thread { b = Relay(second).pipe(room) }.apply { start() }
+        assertEquals(1, a.getInputStream().read())
+        t.join(10_000)
+        assertEquals(1, b!!.getInputStream().read())
+        a.getOutputStream().apply { write("hello".toByteArray()); flush() }
+        val got = ByteArray(5); java.io.DataInputStream(b!!.getInputStream()).readFully(got)
+        assertEquals("hello", String(got))
+        a.close()
+    }
+
     /** Typing and online/last seen go friend to friend; switching them off stops them. */
     @Test fun typingAndLastSeen() {
         assumeTrue(Relay(server).ping())
@@ -690,6 +710,53 @@ class RelayFlowTest {
         assertEquals("declined", last(bo, au).getString("s")); assertEquals("declined", last(al, bu).getString("s"))
         assertNull(al.call); assertNull(bo.call)
         assertEquals("declined", Msg.from(al.contact(bu)!!.msgs.last { it.call != null }.json()).call!!.getString("s"))   // persists
+    }
+
+    /** A call that never reached the other phone (or was cancelled) still shows there as missed, once. */
+    @Test fun unansweredCallShowsMissedOnBothPhones() {
+        assumeTrue(Relay(server).ping())
+        val al = Core(server); val bo = Core(server)
+        val au = "cna_$tag"; val bu = "cnb_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo")
+        al.addFriend(bu); bo.poll(5); bo.accept(bo.contact(au)!!, friend = true); al.poll(5)
+        fun calls(c: Core, u: String) = c.contact(u)!!.msgs.mapNotNull { it.call }
+
+        // the invite never went out (no network on the caller): Bo only learns of it from the notice
+        val k = al.prepareCall(al.contact(bu)!!)
+        al.endCall(k, "failed")
+        Thread.sleep(1500); al.sendCallNotes()
+        bo.poll(5)
+        assertEquals(listOf("missed"), calls(bo, au).map { it.getString("s") })
+        assertEquals(k.id, calls(bo, au).single().getString("id"))
+        assertEquals("in", calls(bo, au).single().getString("d"))
+
+        // cancelled while it rang: the hang-up and the notice both arrive, but it's logged once
+        al.startCall(al.contact(bu)!!); bo.poll(5)
+        al.hangUp(); Thread.sleep(1500); al.sendCallNotes(); bo.poll(5); bo.poll(2)
+        assertEquals(listOf("missed", "missed"), calls(bo, au).map { it.getString("s") })
+        assertNull(bo.call)
+    }
+
+    /** Messages someone sent while there was no chat with them here (request deleted) come back when you add them. */
+    @Test fun earlyMessagesComeBackWhenYouAddThem() {
+        assumeTrue(Relay(server).ping())
+        val al = Core(server); val bo = Core(server)
+        val au = "ema_$tag"; val bu = "emb_$tag"
+        al.signup(au, "als long password", "Al"); bo.signup(bu, "bos long password", "Bo")
+        val toBo = al.addFriend(bu)
+        al.deliver(toBo, al.queue(toBo, "one"))
+        bo.poll(5)
+        bo.remove(bo.contact(au)!!)                       // Bo deletes the request...
+        al.deliver(toBo, al.queue(toBo, "two"))           // ...and Al keeps writing
+        bo.poll(5)
+        assertNull(bo.contact(au))                        // no chat appears by itself
+        val back = bo.addFriend(au)                       // later Bo adds Al after all
+        assertEquals(listOf("two"), texts(back))
+        al.poll(5)                                        // both asked: that's a yes
+        assertEquals(Contact.FRIENDS, al.contact(bu)!!.status)
+        // kept across a restart too
+        val saved = bo.toJson()
+        assertEquals(listOf("two"), texts(Core(server).apply { loadJson(saved) }.contact(au)))
     }
 
     /** 4.8 GIF search goes through our server (skipped where the server has no GIPHY key, e.g. CI). */

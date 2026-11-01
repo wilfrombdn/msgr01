@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Telegramn't server.
+"""Tellem server (the name in the code and the "telegramnt" reply below are kept so existing apps keep working).
 
 What it keeps (in one SQLite file):
   - accounts: @username, the public keys friends need, the address of the
@@ -20,6 +20,7 @@ Python 3.9+ standard library only. Run:  python3 relay.py --port 8080 --db teleg
 """
 
 import argparse
+import contextlib
 import concurrent.futures
 import urllib.parse
 import urllib.error
@@ -67,6 +68,7 @@ MAX_CONNECTIONS = 2000
 MAX_FILE = 25 * 1024 * 1024     # biggest attachment (already encrypted by the phone)
 UPLOAD_PER_HOUR = 300 * 1024 * 1024  # attachment bytes per hour from one address
 
+APP_NAME = "Tellem"
 USERNAME = re.compile(r"^[a-z0-9_]{5,32}$")
 HEX = set("0123456789abcdef")
 
@@ -329,6 +331,8 @@ class Handler(BaseHTTPRequestHandler):
         return blind(self._address())
 
     def _address(self):
+        # Only the listener that sits behind Cloudflare may say who the client is. Anything else (the
+        # .onion comes in from 127.0.0.1 with no proxy) could put any address in these headers.
         if self.server.behind_proxy:
             cf = self.headers.get("CF-Connecting-IP", "")
             if cf:
@@ -357,7 +361,7 @@ class Handler(BaseHTTPRequestHandler):
         srv = self.server
         who = self.client_id()
         gif = self.path in ("/gifs", "/gif", "/pipe")   # GIFs and calls have their own budget, apart from messages
-        if not (srv.gif_rate if gif else srv.rate).add(who, 1, GIF_RATE_PER_MIN if gif else srv.rate_per_min):
+        if not (srv.shared.gif_rate if gif else srv.shared.rate).add(who, 1, GIF_RATE_PER_MIN if gif else srv.shared.rate_per_min):
             return self.reply(429, {"error": "slow down"})
         if self.path == "/upload":
             return self.upload(who)
@@ -391,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
         blob = b64(req["blob"], MAX_BLOB)
         if not is_hex32(to) or blob is None:
             return self.reply(400, {"error": "bad request"})
-        err = self.server.store.put(to, blob)
+        err = self.server.shared.store.put(to, blob)
         if err:
             return self.reply(404 if err == "no such mailbox" else 507, {"error": err})
         self.reply(200, {"ok": True})
@@ -408,8 +412,8 @@ class Handler(BaseHTTPRequestHandler):
         addresses = [hashlib.sha256(bytes.fromhex(t)).hexdigest() for t in tokens]
         push = req.get("push")
         if isinstance(push, str) and len(push) <= 400 and re.match(r"^[A-Za-z0-9_:\-]*$", push):
-            self.server.store.set_push(addresses, push)
-        msgs = self.server.store.take(addresses, acks, wait, who, self.server.new_boxes)
+            self.server.shared.store.set_push(addresses, push)
+        msgs = self.server.shared.store.take(addresses, acks, wait, who, self.server.shared.new_boxes)
         if isinstance(msgs, str):
             return self.reply(429 if msgs == "slow down" else 507, {"error": msgs})
         self.reply(200, {"msgs": msgs})
@@ -418,7 +422,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def upload(self, who):
         """Raw body = one encrypted attachment. Returns its id."""
-        srv, store = self.server, self.server.store
+        srv, store = self.server, self.server.shared.store
         try:
             n = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -426,7 +430,7 @@ class Handler(BaseHTTPRequestHandler):
         if n <= 0 or n > MAX_FILE:
             self.close_connection = True
             return self.reply(413, {"error": "file too big"})
-        if not srv.uploads.add(who, n, UPLOAD_PER_HOUR):
+        if not srv.shared.uploads.add(who, n, UPLOAD_PER_HOUR):
             self.close_connection = True
             return self.reply(429, {"error": "too many files, try later"})
         if store.files_used() + n > store.files_cap:
@@ -462,21 +466,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_download(self, req, who):
         fid = req["id"]
-        if not isinstance(fid, str) or len(fid) != 32 or not set(fid) <= HEX or not self.server.store.q("SELECT 1 FROM files WHERE id=?", fid):
+        if not isinstance(fid, str) or len(fid) != 32 or not set(fid) <= HEX or not self.server.shared.store.q("SELECT 1 FROM files WHERE id=?", fid):
             return self.reply(404, {"error": "no such file"})
-        path = self.server.store.file_path(fid)
-        size = os.path.getsize(path)
+        try:   # it can be deleted (picked up / expired) between the check above and here
+            f = open(self.server.shared.store.file_path(fid), "rb")
+        except OSError:
+            return self.reply(404, {"error": "no such file"})
+        with f:
+            self._send_file(f)
+
+    def _send_file(self, f):
+        size = os.fstat(f.fileno()).st_size
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(size))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        with open(path, "rb") as f:
-            while True:
-                chunk = f.read(256 * 1024)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
+        while chunk := f.read(256 * 1024):
+            self.wfile.write(chunk)
 
     # ---- voice calls: pair the two phones by a random room id and pass their (already encrypted) audio ----
 
@@ -491,8 +498,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(400, {"error": "bad request"})
         side = self.headers.get("X-Side", "")[:8]   # "caller" / "callee"; older apps send nothing
         me = {"sock": self.connection, "paired": threading.Event(), "done": threading.Event(), "side": side}
-        with srv.pipe_lock:
-            partner = srv.pipe_wait.pop(room, None)
+        with srv.shared.pipe_lock:
+            partner = srv.shared.pipe_wait.pop(room, None)
             if partner is not None and side and partner.get("side") == side:
                 # the same phone trying again (its earlier attempt dropped): retire that one, wait afresh
                 try:
@@ -503,11 +510,11 @@ class Handler(BaseHTTPRequestHandler):
                 partner["done"].set()
                 partner = None
             if partner is None:
-                if len(srv.pipe_wait) + srv.pipe_active >= PIPE_MAX_ACTIVE:
+                if len(srv.shared.pipe_wait) + srv.shared.pipe_active >= PIPE_MAX_ACTIVE:
                     return self.reply(503, {"error": "busy"})
-                srv.pipe_wait[room] = me
+                srv.shared.pipe_wait[room] = me
             else:
-                srv.pipe_active += 1
+                srv.shared.pipe_active += 1
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Cache-Control", "no-store")
@@ -516,9 +523,9 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
         if partner is None:   # first one here: wait for the other phone, then let its thread do the relaying
             if not me["paired"].wait(PIPE_WAIT):
-                with srv.pipe_lock:
-                    if srv.pipe_wait.get(room) is me:
-                        del srv.pipe_wait[room]
+                with srv.shared.pipe_lock:
+                    if srv.shared.pipe_wait.get(room) is me:
+                        del srv.shared.pipe_wait[room]
                 if not me["paired"].is_set():
                     return
             me["done"].wait(PIPE_MAX_SECONDS + 60)
@@ -556,15 +563,15 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             pass
         finally:
-            with srv.pipe_lock:
-                srv.pipe_active -= 1
+            with srv.shared.pipe_lock:
+                srv.shared.pipe_active -= 1
             partner["done"].set()
 
     # ---- GIF search (GIPHY), proxied so GIPHY never sees users' addresses and the key stays here ----
 
     def api_gifs(self, req, who):
         """Trending (empty q) or search results, each with a small animated preview inlined."""
-        key = self.server.giphy_key
+        key = self.server.shared.giphy_key
         if not key:
             return self.reply(503, {"error": "GIFs aren't set up on this server"})
         q = str(req.get("q", ""))[:60].strip()
@@ -586,7 +593,7 @@ class Handler(BaseHTTPRequestHandler):
             gid = g.get("id", "")
             if not (isinstance(gid, str) and GIF_ID.match(gid) and prev.get("url") and full.get("url")):
                 continue
-            self.server.gif_urls[gid] = full["url"]
+            self.server.shared.gif_urls[gid] = full["url"]
             items.append((gid, prev["url"], int(full.get("width") or 200), int(full.get("height") or 200)))
         def fetch(it):
             try:
@@ -594,7 +601,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return it, None
         out = []
-        for (gid, _, w, h), b in self.server.gif_pool.map(fetch, items):
+        for (gid, _, w, h), b in self.server.shared.gif_pool.map(fetch, items):
             if b:
                 out.append({"id": gid, "w": w, "h": h, "p": b})
         self.reply(200, {"gifs": out})
@@ -602,7 +609,7 @@ class Handler(BaseHTTPRequestHandler):
     def api_gif(self, req, who):
         """The full GIF to send (only ids we handed out in a recent search)."""
         gid = req["id"]
-        url = self.server.gif_urls.get(gid) if isinstance(gid, str) else None
+        url = self.server.shared.gif_urls.get(gid) if isinstance(gid, str) else None
         if not url:
             return self.reply(404, {"error": "no such GIF"})
         try:
@@ -620,7 +627,7 @@ class Handler(BaseHTTPRequestHandler):
         """The receiver has the file: forget it."""
         fid = req["id"]
         if isinstance(fid, str) and len(fid) == 32 and set(fid) <= HEX:
-            self.server.store.drop_file(fid)
+            self.server.shared.store.drop_file(fid)
         self.reply(200, {"ok": True})
 
     # ---- group mailboxes ----
@@ -630,7 +637,7 @@ class Handler(BaseHTTPRequestHandler):
         blob = b64(req["blob"], MAX_BLOB)
         if not is_hex32(to) or blob is None:
             return self.reply(400, {"error": "bad request"})
-        self.server.store.gput(to, blob)
+        self.server.shared.store.gput(to, blob)
         self.reply(200, {"ok": True})
 
     def api_gfetch(self, req, who):
@@ -639,7 +646,7 @@ class Handler(BaseHTTPRequestHandler):
         wait = max(0, min(MAX_WAIT, int(req.get("wait", 0))))
         if not is_hex32(addr) or not isinstance(since, int) or since < 0:
             return self.reply(400, {"error": "bad request"})
-        self.reply(200, {"msgs": self.server.store.gtake(addr, since, wait)})
+        self.reply(200, {"msgs": self.server.shared.store.gtake(addr, since, wait)})
 
     # ---- accounts ----
 
@@ -653,9 +660,9 @@ class Handler(BaseHTTPRequestHandler):
         if (not isinstance(user, str) or not USERNAME.match(user) or len(auth) != 32
                 or None in (enc, sig, backup) or not is_hex32(inbox_token)):
             return self.reply(400, {"error": "bad request"})
-        if not self.server.signups.add(who, 1, self.server.signups_per_hour):
+        if not self.server.shared.signups.add(who, 1, self.server.shared.signups_per_hour):
             return self.reply(429, {"error": "too many new accounts, try later"})
-        store = self.server.store
+        store = self.server.shared.store
         salt = secrets.token_bytes(16)
         device = secrets.token_hex(32)
         inbox = hashlib.sha256(bytes.fromhex(inbox_token)).hexdigest()
@@ -665,14 +672,14 @@ class Handler(BaseHTTPRequestHandler):
             store.db.execute("INSERT INTO accounts(user, salt, auth, enc, sig, inbox, backup, device) "
                              "VALUES(?,?,?,?,?,?,?,?)",
                              (user, salt, hashlib.sha256(salt + auth).digest(), enc, sig, inbox, backup, device))
-            store.db.execute("INSERT OR REPLACE INTO boxes VALUES(?,?)", (inbox, time.time()))
+            store.db.execute("INSERT OR REPLACE INTO boxes VALUES(?,?)", (inbox, day()))
         self.reply(200, {"device": device})
 
     def api_login(self, req, who):
         user, auth = req["user"], bytes.fromhex(req["auth"])
         if not isinstance(user, str) or not USERNAME.match(user) or len(auth) != 32:
             return self.reply(400, {"error": "bad request"})
-        r = self.server.store.check(user, auth)
+        r = self.server.shared.store.check(user, auth)
         if isinstance(r, str):
             return self.reply(403, {"error": r})
         if not r["backup"]:
@@ -681,11 +688,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "no cloud backup for this account"})
         # Signing in signs out the previous phone (both can't pick up the same mail).
         device = secrets.token_hex(32)
-        self.server.store.q("UPDATE accounts SET device=? WHERE user=?", device, user)
+        self.server.shared.store.q("UPDATE accounts SET device=? WHERE user=?", device, user)
         self.reply(200, {"device": device, "backup": base64.b64encode(r["backup"]).decode()})
 
     def api_session(self, req, who):
-        if self.server.store.device_ok(req["user"], req["device"]):
+        if self.server.shared.store.device_ok(req["user"], req["device"]):
             return self.reply(200, {"ok": True})
         self.reply(401, {"error": "signed in on another phone"})
 
@@ -694,16 +701,16 @@ class Handler(BaseHTTPRequestHandler):
         backup = b"" if raw_backup == "" else b64(raw_backup, MAX_BACKUP)  # "" = wipe the cloud backup
         if backup is None:
             return self.reply(400, {"error": "bad request"})
-        if not self.server.store.device_ok(req["user"], req["device"]):
+        if not self.server.shared.store.device_ok(req["user"], req["device"]):
             return self.reply(401, {"error": "signed in on another phone"})
-        self.server.store.q("UPDATE accounts SET backup=? WHERE user=?", backup, req["user"])
+        self.server.shared.store.q("UPDATE accounts SET backup=? WHERE user=?", backup, req["user"])
         self.reply(200, {"ok": True})
 
     def api_lookup(self, req, who):
         user = req["user"]
         if not isinstance(user, str) or not USERNAME.match(user):
             return self.reply(404, {"error": "no such user"})
-        r = self.server.store.q("SELECT enc, sig, inbox, ident FROM accounts WHERE user=?", user)
+        r = self.server.shared.store.q("SELECT enc, sig, inbox, ident FROM accounts WHERE user=?", user)
         if not r:
             return self.reply(404, {"error": "no such user"})
         enc, sig, inbox, ident = r[0]
@@ -716,7 +723,7 @@ class Handler(BaseHTTPRequestHandler):
     def api_keys(self, req, who):
         """Publish my Signal keys (needs this phone's device token)."""
         user = req["user"]
-        store = self.server.store
+        store = self.server.shared.store
         if not store.device_ok(user, req["device"]):
             return self.reply(401, {"error": "signed in on another phone"})
         ident = b64(req["ident"], 64)
@@ -751,7 +758,7 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, {"count": count})
 
     def api_keycount(self, req, who):
-        store = self.server.store
+        store = self.server.shared.store
         if not store.device_ok(req["user"], req["device"]):
             return self.reply(401, {"error": "signed in on another phone"})
         self.reply(200, {"count": store.q("SELECT COUNT(*) FROM otpk WHERE user=?", req["user"])[0][0]})
@@ -761,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
         user = req["user"]
         if not isinstance(user, str) or not USERNAME.match(user):
             return self.reply(404, {"error": "no such user"})
-        store = self.server.store
+        store = self.server.shared.store
         with store.lock:
             r = store.db.execute("SELECT ident, reg, spk, kpk FROM accounts WHERE user=?", (user,)).fetchone()
             if not r or not r[0]:
@@ -769,7 +776,7 @@ class Handler(BaseHTTPRequestHandler):
             ident, reg, spk, kpk = r
             one = None
             # stop anyone draining someone's one-time keys: a few per hour per target
-            if self.server.bundles.add(blind("bundle:" + user), 1, self.server.store.bundle_limit):
+            if self.server.shared.bundles.add(blind("bundle:" + user), 1, self.server.shared.store.bundle_limit):
                 row = store.db.execute("SELECT id, pub FROM otpk WHERE user=? ORDER BY id LIMIT 1", (user,)).fetchone()
                 if row:
                     store.db.execute("DELETE FROM otpk WHERE user=? AND id=?", (user, row[0]))
@@ -779,10 +786,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_delete(self, req, who):
         user, auth = req["user"], bytes.fromhex(req["auth"])
-        r = self.server.store.check(user, auth) if isinstance(user, str) and len(auth) == 32 else "bad"
+        r = self.server.shared.store.check(user, auth) if isinstance(user, str) and len(auth) == 32 else "bad"
         if isinstance(r, str):
             return self.reply(403, {"error": "wrong username or password"})
-        store = self.server.store
+        store = self.server.shared.store
         with store.lock:
             inbox = store.db.execute("SELECT inbox FROM accounts WHERE user=?", (user,)).fetchone()[0]
             store.db.execute("DELETE FROM accounts WHERE user=?", (user,))
@@ -800,7 +807,7 @@ def giphy_get(url, cap):
     host = urllib.parse.urlparse(url).hostname or ""
     if not (host == "giphy.com" or host.endswith(".giphy.com")):
         raise ValueError("not giphy")
-    r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "quipu-relay"}), timeout=15)
+    r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tellem-relay"}), timeout=15)
     body = r.read(cap + 1)
     if len(body) > cap:
         raise ValueError("too big")
@@ -824,10 +831,11 @@ class GifUrls:
             return self.d.get(k)
 
 
-class Server(ThreadingHTTPServer):
-    daemon_threads = True
+class Shared:
+    """Everything the listeners have in common: data, rate limits, call rooms, GIF lookups. Each listener
+    differs only in whether it may trust a proxy's client-address header."""
 
-    def __init__(self, addr, store, behind_proxy):
+    def __init__(self, store):
         self.store = store
         self.rate = Counter(60)
         self.gif_rate = Counter(60)
@@ -838,7 +846,8 @@ class Server(ThreadingHTTPServer):
         self.gif_pool = concurrent.futures.ThreadPoolExecutor(8)
         key = os.environ.get("GIPHY_KEY", "")
         if not key and os.path.exists(GIPHY_KEY_FILE):
-            key = open(GIPHY_KEY_FILE).read().strip()
+            with open(GIPHY_KEY_FILE) as f:
+                key = f.read().strip()
         self.giphy_key = key
         self.new_boxes = Counter(60)
         self.signups = Counter(3600)
@@ -846,12 +855,19 @@ class Server(ThreadingHTTPServer):
         self.bundles = Counter(3600)
         self.signups_per_hour = SIGNUPS_PER_HOUR
         self.rate_per_min = RATE_PER_MIN
-        self.behind_proxy = behind_proxy
         self.slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, addr, shared, behind_proxy):
+        self.shared = shared
+        self.behind_proxy = behind_proxy
         super().__init__(addr, Handler)
 
     def process_request(self, request, client_address):
-        if not self.slots.acquire(blocking=False):
+        if not self.shared.slots.acquire(blocking=False):
             self.shutdown_request(request)
             return
         super().process_request(request, client_address)
@@ -860,7 +876,7 @@ class Server(ThreadingHTTPServer):
         try:
             super().process_request_thread(request, client_address)
         finally:
-            self.slots.release()
+            self.shared.slots.release()
 
     def handle_error(self, request, client_address):
         pass  # no tracebacks with client addresses in them
@@ -941,12 +957,14 @@ class Pusher:
 
 
 def main():
-    p = argparse.ArgumentParser(description="Telegramn't server (keeps no logs)")
+    p = argparse.ArgumentParser(description=f"{APP_NAME} server (keeps no logs)")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--db", default="telegramnt.db", help="SQLite file for accounts and waiting messages")
     p.add_argument("--behind-proxy", action="store_true",
-                   help="trust X-Forwarded-For (only when Caddy/nginx is in front)")
+                   help="trust CF-Connecting-IP / X-Forwarded-For on --port (only when a proxy is the sole way in)")
+    p.add_argument("--proxy-port", type=int, default=0,
+                   help="a second port, for the Cloudflare tunnel only: client-address headers are trusted there and nowhere else")
     p.add_argument("--files-gb", type=float, default=2, help="space for waiting attachments")
     p.add_argument("--signups-per-hour", type=int, default=SIGNUPS_PER_HOUR, help="new accounts per address (tests raise it)")
     p.add_argument("--test-limits", action="store_true", help="lift per-address rate limits (local tests only)")
@@ -968,18 +986,23 @@ def main():
             print("Wake-up pings on (Firebase project %s)" % store.pusher.project, flush=True)
         except Exception as e:
             print("Wake-up pings off: %s" % e, flush=True)
-    srv = Server((a.host, a.port), store, a.behind_proxy)
-    srv.signups_per_hour = a.signups_per_hour
+    shared = Shared(store)
+    shared.signups_per_hour = a.signups_per_hour
     if a.test_limits:
-        srv.rate_per_min = 10 ** 9
-        srv.signups_per_hour = 10 ** 9
+        shared.rate_per_min = 10 ** 9
+        shared.signups_per_hour = 10 ** 9
+    servers = [Server((a.host, a.port), shared, a.behind_proxy)]
+    if a.proxy_port:
+        servers.append(Server((a.host, a.proxy_port), shared, True))
+    if a.test_limits:
         store.new_boxes_limit = 10 ** 9
         store.bundle_limit = 10 ** 9
-    print(f"Telegramn't server on {a.host}:{a.port}, data in {a.db} (no logs kept)", flush=True)
-    try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        pass
+    for srv in servers[1:]:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    ports = ", ".join(str(srv.server_address[1]) for srv in servers)
+    print(f"{APP_NAME} server on {a.host} port {ports}, data in {a.db} (no logs kept)", flush=True)
+    with contextlib.suppress(KeyboardInterrupt):
+        servers[0].serve_forever()
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeWriter
 import java.util.concurrent.Executors
 
-/** Scans a friend's quipu QR code (or a group invite) and hands the text back to the chat list. */
+/** Scans a friend's Tellem QR code (or a group invite) and hands the text back to the chat list. */
 class QrActivity : ComponentActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     @Volatile private var done = false
@@ -57,7 +57,7 @@ class QrActivity : ComponentActivity() {
                 orientation = android.widget.LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
                 setBackgroundColor(0x99000000.toInt()); setPadding(0, (20 * d).toInt(), 0, (36 * d).toInt())
                 addView(TextView(context).apply {
-                    text = "Scan a friend's quipu QR code to add them"; setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER
+                    text = "Scan a friend's $APP_NAME QR code to add them"; setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER
                     setPadding((24 * d).toInt(), 0, (24 * d).toInt(), 0)
                 })
             }, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))

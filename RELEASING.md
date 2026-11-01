@@ -1,4 +1,4 @@
-# Releasing a quipu update
+# Releasing a Tellem update
 
 Every release goes out the same way: as a normal **in-app update**. Phones on 4.7 or newer see an
 "Update available" pop-up with a short "What's new" list, download the update through Tor and install it.
@@ -17,14 +17,14 @@ The same APK is also posted at the usual download link for new installs.
    `PATH=~/opt/jdk21/bin:$PATH ~/Android/Sdk/build-tools/36.0.0/apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk`
 3. **Publish to the download site** (repo `~/wilfrombdn.github.io`, folder `telegramnt/`):
    - `git pull --rebase` first, because the server script also pushes to this repo.
-   - Copy the APK to `telegramnt/msgr01.apk` (the download-page link) **and** to `telegramnt/msngr-<version>.apk`.
-   - Remove the previous `telegramnt/msngr-*.apk` (`git rm`). Only the newest one is kept.
+   - Copy the APK to `telegramnt/msgr01.apk` (the download-page link) **and** to `telegramnt/tellem-<version>.apk`.
+   - Remove the previous `telegramnt/msngr-*.apk` / `telegramnt/tellem-*.apk` (`git rm`). Only the newest one is kept.
    - Write `telegramnt/update.json`:
      ```json
      {
-      "code": 36,
-      "name": "4.9.1",
-      "apk": "/telegramnt/msngr-4.9.1.apk",
+      "code": 53,
+      "name": "6.5",
+      "apk": "/telegramnt/tellem-6.5.apk",
       "sha256": "<sha256sum of the APK>",
       "notes": ["Short plain-words line per change", "2–4 lines, no jargon"]
      }
@@ -39,7 +39,7 @@ The same APK is also posted at the usual download link for new installs.
    cd android && UPDATE_CHECK=1 JAVA_HOME=~/opt/jdk21 ANDROID_HOME=~/Android/Sdk bash ./gradlew testDebugUnitTest --tests '*CryptoTest.publishedUpdateIsConsistent'
    ```
    This downloads `update.json` and the APK and checks the SHA-256 matches.
-6. If `server/relay.py` changed, restart the server: `systemctl --user restart telegramnt`.
+6. If `server/relay.py` changed, copy it to the droplet and restart: `scp server/relay.py tellem:/opt/tellem/server/ && ssh tellem systemctl restart tellem`.
    Server and app changes must stay compatible with phones that haven't updated yet.
 
 ## Rules

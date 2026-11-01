@@ -10,5 +10,5 @@ dependencyResolutionManagement {
         maven("https://build-artifacts.signal.org/libraries/maven/") { content { includeGroup("org.signal") } }
     }
 }
-rootProject.name = "Telegramnt"
+rootProject.name = "Tellem"
 include(":app")

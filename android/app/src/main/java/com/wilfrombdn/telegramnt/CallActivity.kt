@@ -212,7 +212,7 @@ class CallActivity : Activity() {
         if (k.phase == Core.Call.ACTIVE && proximity == null) {
             val pm = getSystemService(PowerManager::class.java)
             if (pm.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK))
-                proximity = pm.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "quipu:call").apply { acquire(4 * 3600_000L) }
+                proximity = pm.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "tellem:call").apply { acquire(4 * 3600_000L) }
         }
     }
 
@@ -234,7 +234,7 @@ class CallActivity : Activity() {
         if (!answerWhenAllowed) return
         answerWhenAllowed = false
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) Messenger.answer(this)
-        else { status.text = "quipu needs the microphone for calls"; Messenger.hangUp() }
+        else { status.text = "$APP_NAME needs the microphone for calls"; Messenger.hangUp() }
     }
 
     companion object {
@@ -256,13 +256,14 @@ class CallActivity : Activity() {
             Messenger.core.call.let { it != null && it.phase != Core.Call.ENDED }   // nothing to animate once it's over
 
         /** Four emoji from the call's shared key; both phones show the same four. */
+        // "quipu-call|" is part of the call protocol: both phones must use the same tag, so it never changes with the app name.
         fun keyEmoji(key: String): String = Crypto.sha256(("quipu-call|" + key).toByteArray()).take(4).joinToString(" ") { EMOJI[(it.toInt() and 0xFF) % EMOJI.size] }
 
         /** What the call screen (and the green bar) says under the name. */
         fun statusText(k: Core.Call, connected: Boolean): String = when (k.phase) {
             Core.Call.DIALING -> if (connected) "Requesting…" else "Connecting…"
             Core.Call.RINGING -> "Ringing…"
-            Core.Call.INCOMING -> "quipu voice call"
+            Core.Call.INCOMING -> "$APP_NAME voice call"
             Core.Call.CONNECTING -> "Exchanging encryption keys…"
             Core.Call.ACTIVE -> ((System.currentTimeMillis() - k.connectedAt) / 1000).let { "%d:%02d".format(it / 60, it % 60) }
             else -> "Call ended"

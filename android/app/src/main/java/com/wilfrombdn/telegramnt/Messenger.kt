@@ -33,7 +33,7 @@ object Messenger {
 
     fun setPushToken(t: String) { core.pushToken = t; kick() }
 
-    /** Asked once to set the phone up so calls ring when quipu is closed. */
+    /** Asked once to set the phone up so calls ring when Tellem is closed. */
     var ringSetupAsked = false
     val look = Look()
     /** A user-chosen file (via the system picker) we keep an encrypted full backup in, so chats
@@ -78,12 +78,14 @@ object Messenger {
     var keepMediaDays = 0
     /** Download photos, GIFs and videos as they arrive (off = each waits for a tap, to save data). */
     var autoMedia = true
-    /** Say who a message is from in notifications (off = just "quipu · New message"). Text is never shown either way. */
+    /** Say who a message is from in notifications (off = just "Tellem · New message", and no text either). */
     var notifyNames = true
+    /** Show the message itself in notifications, like a normal text. The lock screen follows the phone's own setting. */
+    var notifyText = true
 
     // ---------- app lock (Settings > Privacy; off by default) ----------
 
-    /** Ask for the phone's fingerprint / PIN when quipu opens. */
+    /** Ask for the phone's fingerprint / PIN when Tellem opens. */
     var appLock = false
     /** Minutes away before it locks again (1 at least: photo pickers and the camera briefly leave the app). */
     var lockAfterMin = 1
@@ -98,13 +100,22 @@ object Messenger {
 
     fun unlock() { locked = false }
 
-    /** Counts quipu's screens on show, app-wide, so moving between our own screens never relocks. */
+    /** Counts Tellem's screens on show, app-wide, so moving between our own screens never relocks. */
     private fun watchForeground(a: android.app.Application) = a.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
         override fun onActivityStarted(act: android.app.Activity) {
-            if (startedActivities++ == 0 && lockDue(appLock, awaySince, System.currentTimeMillis(), lockAfterMin)) locked = true
+            if (startedActivities++ == 0) {
+                if (lockDue(appLock, awaySince, System.currentTimeMillis(), lockAfterMin)) locked = true
+                // opened past the self-destruct deadline (its alarm can be held back by battery saving): wipe now.
+                // Not when a call brought it up: that's the phone in use.
+                if (core.call == null) Destruct.check(app, inUse = false)
+                if (!locked) Destruct.touch(app)   // behind app lock it counts once unlocked
+            }
         }
         override fun onActivityStopped(act: android.app.Activity) {
-            if (--startedActivities <= 0) { startedActivities = 0; awaySince = System.currentTimeMillis() }
+            if (--startedActivities <= 0) {
+                startedActivities = 0; awaySince = System.currentTimeMillis()
+                if (!locked) Destruct.touch(app)   // the countdown runs from when you leave
+            }
         }
         override fun onActivityCreated(act: android.app.Activity, b: android.os.Bundle?) {}
         override fun onActivityResumed(act: android.app.Activity) {}
@@ -146,6 +157,7 @@ object Messenger {
     @Synchronized
     fun init(ctx: Context) {
         if (ready) return
+        if (Destruct.check(ctx)) return   // self-destruct is due: wipe before anything is unlocked
         Crypto.ensureInit()
         app = ctx.applicationContext
         disk = AndroidKeysetManager.Builder()
@@ -288,6 +300,7 @@ object Messenger {
             if (ringback == null) ringback = runCatching { android.media.ToneGenerator(android.media.AudioManager.STREAM_VOICE_CALL, 70).apply { startTone(android.media.ToneGenerator.TONE_SUP_RINGTONE) } }.getOrNull()
         } else { ringback?.release(); ringback = null }
         if (k.phase == Core.Call.ENDED) {
+            if (!locked) Destruct.touch(app)   // a call (even with the app in the background) is the phone in use
             CallAudio.stop()
             app.stopService(Intent(app, CallService::class.java))
         }
@@ -410,7 +423,7 @@ object Messenger {
     private fun extras(o: JSONObject): JSONObject {
         o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
-        o.put("keepMediaDays", keepMediaDays).put("autoMedia", autoMedia).put("notifyNames", notifyNames).put("appLock", appLock).put("lockAfterMin", lockAfterMin)
+        o.put("keepMediaDays", keepMediaDays).put("autoMedia", autoMedia).put("notifyNames", notifyNames).put("notifyText", notifyText).put("appLock", appLock).put("lockAfterMin", lockAfterMin)
         o.put("direct", direct).put("directUrl", directUrl).put("ringSetupAsked", ringSetupAsked).put("pushOn", pushOn)
         o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
         o.put("stickers", JSONObject().also { j -> synchronized(allStickers) { allStickers.forEach { (u, ss) -> j.put(u, org.json.JSONArray(ss)) } } })
@@ -424,7 +437,7 @@ object Messenger {
         o.optJSONObject("emojiUse")?.let { j -> synchronized(emojiUse) { j.keys().forEach { emojiUse[it] = j.optInt(it) } } }
         o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
         o.optJSONObject("spot")?.let { spot = Spot.from(it) }
-        keepMediaDays = o.optInt("keepMediaDays", 0); autoMedia = o.optBoolean("autoMedia", true); notifyNames = o.optBoolean("notifyNames", true)
+        keepMediaDays = o.optInt("keepMediaDays", 0); autoMedia = o.optBoolean("autoMedia", true); notifyNames = o.optBoolean("notifyNames", true); notifyText = o.optBoolean("notifyText", true)
         appLock = o.optBoolean("appLock"); lockAfterMin = o.optInt("lockAfterMin", 1).coerceAtLeast(1)
         direct = o.optBoolean("direct"); directUrl = o.optString("directUrl"); ringSetupAsked = o.optBoolean("ringSetupAsked"); pushOn = o.optBoolean("pushOn", true)
         o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->
@@ -687,6 +700,7 @@ object Messenger {
             var lastCheck = 0L
             while (!Thread.currentThread().isInterrupted) {
                 try {
+                    if (Destruct.check(app)) return@Thread   // self-destruct is due (never while in use)
                     if (!signedIn) { Thread.sleep(3_000); continue }
                     if (System.currentTimeMillis() - lastCheck > 5 * 60_000) {
                         lastCheck = System.currentTimeMillis()

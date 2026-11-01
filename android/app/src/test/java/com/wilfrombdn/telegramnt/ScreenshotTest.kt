@@ -306,7 +306,13 @@ class ScreenshotTest {
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         shoot(a, "66-locked")
         assert(Messenger.locked) { "still locked until the phone's check passes" }
-        Messenger.unlock(); call(a, "showSettings"); shoot(a, "67-privacy-settings")
+        Destruct.setHours(a, 168)
+        Messenger.unlock(); call(a, "showSettings")
+        fun scroller(x: android.view.View): android.widget.ScrollView? = if (x is android.widget.ScrollView) x
+            else if (x is android.view.ViewGroup) (0 until x.childCount).firstNotNullOfOrNull { scroller(x.getChildAt(it)) } else null
+        scroller(a.findViewById(android.R.id.content))?.scrollTo(0, 100_000)
+        shoot(a, "67-privacy-settings")
+        Destruct.setHours(a, 0)
         Messenger.appLock = false
         val sam = Messenger.core.contact("sam_r")!!
         val now = System.currentTimeMillis()
@@ -319,7 +325,7 @@ class ScreenshotTest {
         call(a, "showChat", "sam_r"); shadowOf(Looper.getMainLooper()).idle(); shoot(a, "68-view-once")
     }
 
-    /** "Share" from another app: quipu asks which chat, then the shared text lands there. */
+    /** "Share" from another app: Tellem asks which chat, then the shared text lands there. */
     @Test fun shareFromAnotherApp() {
         Messenger.initForPreview(fakeCore(signedIn = true))
         val share = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, "look at this https://example.com")

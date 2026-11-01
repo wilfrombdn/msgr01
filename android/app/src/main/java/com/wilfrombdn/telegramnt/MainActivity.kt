@@ -132,7 +132,7 @@ class MainActivity : Activity() {
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; background = texturedBg(listBg); fitsSystemWindows = true
             addView(ImageView(context).apply { setImageResource(R.drawable.ic_bubble_logo) }, LinearLayout.LayoutParams(dp(72), dp(72)))
-            addView(tv("quipu is locked", 20f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(18), 0, dp(28)) })
+            addView(tv("$APP_NAME is locked", 20f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(18), 0, dp(28)) })
             addView(cta("Unlock") { askToUnlock() }, ctaParams())
         })
         // ask straight away the first time; after a cancel, wait for a tap on Unlock
@@ -141,11 +141,12 @@ class MainActivity : Activity() {
 
     private fun askToUnlock() {
         lockAsked = true
-        confirmIdentity("Unlock quipu") { unlocked() }
+        confirmIdentity("Unlock $APP_NAME") { unlocked() }
     }
 
     private fun unlocked() {
         Messenger.unlock(); lockAsked = false
+        Destruct.touch(this)   // only someone who can unlock it restarts the self-destruct countdown
         screen = ""
         if (Messenger.signedIn) reopenSpot() else showWelcome()
         afterUnlock?.let { afterUnlock = null; handle(it) }
@@ -153,6 +154,7 @@ class MainActivity : Activity() {
 
     /** The phone's own check: fingerprint/face or PIN/pattern on Android 11+, PIN/pattern before that. */
     private fun confirmIdentity(title: String, ok: () -> Unit) {
+        if (!getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure) return ok()   // no screen lock: nothing to check against
         if (Build.VERSION.SDK_INT >= 30) {
             val prompt = android.hardware.biometrics.BiometricPrompt.Builder(this).setTitle(title)
                 .setAllowedAuthenticators(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK or
@@ -171,6 +173,25 @@ class MainActivity : Activity() {
     }
     private var pendingIdentity: (() -> Unit)? = null
 
+    private fun destructLabel(h: Int) = when (h) { 1 -> "1 hour"; 24 -> "1 day"; 168 -> "1 week"; 720 -> "1 month"; 8760 -> "1 year"; else -> "$h hours" }
+
+    /** Settings > Privacy > Self-destruct: off, or wipe everything after 1 hour / day / week / month / year unopened. */
+    private fun selfDestructMenu() {
+        val opts = listOf(1, 24, 168, 720, 8760)
+        pickList("Self-destruct", "If $APP_NAME isn't opened for this long, everything in it on this phone is wiped for good:",
+            (opts.map { "After " + destructLabel(it) } + "Off").toTypedArray()) { i ->
+            if (i == opts.size) { Destruct.setHours(this, 0); showSettings(); return@pickList }
+            val h = opts[i]
+            popup("Turn on self-destruct?",
+                "If you don't open $APP_NAME for ${destructLabel(h)}, every chat, photo, key and setting in it on this phone is erased. " +
+                "There is no undo and no warning first. (Photos you saved to the phone's gallery are outside $APP_NAME and stay.)\n\n" +
+                "Opening $APP_NAME starts the countdown again. Your account itself stays: with cloud backup on you could log in again and get your friends back, but not your chats.",
+                null, "Cancel" to dim, "Turn on" to red) { b ->
+                if (b == 1) confirmIdentity("Turn on self-destruct") { Destruct.setHours(this, h); showSettings() }
+            }
+        }
+    }
+
     /** Settings > Privacy > App lock: turn on (after one check), pick the delay, or turn off. */
     private fun appLockMenu() {
         if (!Messenger.appLock) {
@@ -179,7 +200,7 @@ class MainActivity : Activity() {
             return confirmIdentity("Turn on app lock") { Messenger.appLock = true; Messenger.lockAfterMin = 1; Messenger.settingsChanged(); showSettings() }
         }
         val opts = listOf(1 to "After 1 minute away", 5 to "After 5 minutes away", 60 to "After 1 hour away")
-        pickList("App lock", "quipu asks for your fingerprint, face or PIN when you come back after:", (opts.map { it.second } + "Turn off app lock").toTypedArray()) { i ->
+        pickList("App lock", "$APP_NAME asks for your fingerprint, face or PIN when you come back after:", (opts.map { it.second } + "Turn off app lock").toTypedArray()) { i ->
             if (i < opts.size) Messenger.lockAfterMin = opts[i].first else Messenger.appLock = false
             Messenger.settingsChanged(); showSettings()
         }
@@ -299,7 +320,7 @@ class MainActivity : Activity() {
             layoutTransition = android.animation.LayoutTransition()   // the panel grows smoothly when it expands
         }
         col.addView(tv("Update available", 17.5f, white, true).apply { setPadding(0, 0, dp(8), dp(6)) })
-        col.addView(tv("quipu ${u.name} is ready. Update now?", 14.5f, dim).apply { setPadding(0, 0, dp(8), dp(4)) })
+        col.addView(tv("$APP_NAME ${u.name} is ready. Update now?", 14.5f, dim).apply { setPadding(0, 0, dp(8), dp(4)) })
         fun buttons(vararg b: Pair<Pair<String, Int>, () -> Unit>) = LinearLayout(this).apply {
             gravity = Gravity.END; setPadding(0, dp(4), 0, 0)
             b.forEach { (lc, act) -> addView(tv(lc.first.uppercase(), 14f, lc.second, true).apply { setPadding(dp(12), dp(10), dp(12), dp(10)); setOnClickListener { act() } }) }
@@ -324,12 +345,12 @@ class MainActivity : Activity() {
                 apk = Updater.download(this, u) { p -> runOnUiThread { fill.scaleX = p; status.text = "Downloading… ${(p * 100).toInt()}%" } }
             }, {
                 fill.scaleX = 1f
-                status.text = "Installing… quipu will close and reopen."
+                status.text = "Installing… $APP_NAME will close and reopen."
                 val f = apk!!
                 if (!packageManager.canRequestPackageInstalls()) {
-                    // Android asks once whether quipu may install its own updates
+                    // Android asks once whether Tellem may install its own updates
                     pendingApk = f
-                    status.text = "Allow quipu to install updates, then come back here."
+                    status.text = "Allow $APP_NAME to install updates, then come back here."
                     startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:$packageName")))
                 } else Messenger.run({ Updater.install(this, f) }, {}) { e -> status.text = "Couldn't update: ${e.message}"; go.visibility = View.VISIBLE; d.setCancelable(true) }
             }) { e ->
@@ -358,7 +379,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // back from "allow installs from quipu": carry on with the update
+        // back from "allow installs from Tellem": carry on with the update
         pendingApk?.let { f -> if (packageManager.canRequestPackageInstalls()) { pendingApk = null; Messenger.run({ Updater.install(this, f) }) } }
         if (screen == "settings") showSettings()   // back from a phone setting (battery, full-screen alerts): show what changed
     }
@@ -584,7 +605,7 @@ class MainActivity : Activity() {
         col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(ImageView(context).apply { setImageResource(R.drawable.ic_bubble_logo) }, LinearLayout.LayoutParams(dp(64), dp(64)))
-            addView(tv("quipu", 34f, white, true).apply { typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(dp(12), 0, 0, 0) })
+            addView(tv(APP_NAME, 34f, white, true).apply { typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(dp(12), 0, 0, 0) })
         }, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
         col.addView(gap(18))
         col.addView(tv("Features or privacy? Pick one?\nThat's a hostage situation.\nHave both. Free, forever.", 16f, dim).apply {
@@ -762,20 +783,20 @@ class MainActivity : Activity() {
     // ---------- ringing when the app is closed ----------
 
     /**
-     * What the phone still needs so a call rings like a normal phone call when quipu is closed:
+     * What the phone still needs so a call rings like a normal phone call when Tellem is closed:
      * each item is (what, why, fix). Empty = all set.
      */
     private fun ringFixes(): List<Triple<String, String, () -> Unit>> {
         val out = mutableListOf<Triple<String, String, () -> Unit>>()
         val nm = getSystemService(android.app.NotificationManager::class.java)
-        if (!Messenger.background) out.add(Triple("Get messages when the app is closed", "Without it, nothing can reach this phone while quipu is closed.") {
+        if (!Messenger.background) out.add(Triple("Get messages when the app is closed", "Without it, nothing can reach this phone while $APP_NAME is closed.") {
             Messenger.background = true; Messenger.settingsChanged(); startForegroundService(Intent(this, SyncService::class.java)); showSettings()
         })
         if (!nm.areNotificationsEnabled()) out.add(Triple("Notifications", "Calls and messages show as notifications.") {
             startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
         })
         if (!getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)) out.add(Triple("Battery: unrestricted",
-            "Otherwise Android cuts quipu's internet when the screen is off, and calls never arrive.") {
+            "Otherwise Android cuts $APP_NAME's internet when the screen is off, and calls never arrive.") {
             @android.annotation.SuppressLint("BatteryLife")
             val i = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:$packageName"))
             runCatching { startActivity(i) }.onFailure { startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
@@ -787,13 +808,13 @@ class MainActivity : Activity() {
         return out
     }
 
-    /** Once, after signing in: offer to set the phone up so calls ring when quipu is closed. */
+    /** Once, after signing in: offer to set the phone up so calls ring when Tellem is closed. */
     private fun maybeAskRingSetup() {
         if (Messenger.ringSetupAsked || !Messenger.signedIn) return
         val fixes = ringFixes()
         Messenger.ringSetupAsked = true; Messenger.settingsChanged()
         if (fixes.isEmpty()) return
-        popup("Ring like a phone call", "So calls ring this phone even when quipu is closed, allow: " + fixes.joinToString(", ") { it.first } +
+        popup("Ring like a phone call", "So calls ring this phone even when $APP_NAME is closed, allow: " + fixes.joinToString(", ") { it.first } +
             ". You can do this later in Settings > Calls.", null, "Later" to dim, "Set up" to white) { i -> if (i == 1) showSettings() }
     }
 
@@ -880,7 +901,7 @@ class MainActivity : Activity() {
 
         val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
         else if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
-            if (!Messenger.connected) "Connecting…" else if (Messenger.direct) "quipu" else torTitle(),
+            if (!Messenger.connected) "Connecting…" else if (Messenger.direct) APP_NAME else torTitle(),
             if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
@@ -900,10 +921,10 @@ class MainActivity : Activity() {
         if (!Messenger.connected) d.postDelayed({ if (screen == "chats" && !Messenger.connected) redraw() }, 3000)
     }
 
-    /** "quipu" with a small raised "TOR" after it, like a squared number: shows the app is talking through Tor. */
-    private fun torTitle() = android.text.SpannableString("quipu TOR").apply {
-        setSpan(android.text.style.SuperscriptSpan(), 6, 9, 0)
-        setSpan(android.text.style.RelativeSizeSpan(0.5f), 5, 9, 0)
+    /** "Tellem" with a small raised "TOR" after it, like a squared number: shows the app is talking through Tor. */
+    private fun torTitle() = android.text.SpannableString("$APP_NAME TOR").apply {
+        setSpan(android.text.style.SuperscriptSpan(), APP_NAME.length + 1, length, 0)
+        setSpan(android.text.style.RelativeSizeSpan(0.5f), APP_NAME.length, length, 0)
     }
 
     /** Tor's latest messages in a pop-up, with Copy, so a stuck connection can be sent to whoever is fixing it. */
@@ -1593,7 +1614,7 @@ class MainActivity : Activity() {
                 setPadding(0, dp(8), dp(8), dp(8))
                 setOnClickListener {
                     startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
-                        "Add me on quipu: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
+                        "Add me on $APP_NAME: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
                 }
             })
         })
@@ -1931,37 +1952,18 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == LOCATION_FOR_SHARE) {
-            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) shareLocation() else toast("quipu needs location access to share where you are")
+            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) shareLocation() else toast("$APP_NAME needs location access to share where you are")
             return
         }
         if (requestCode == MIC_FOR_VOICE) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toast("Hold the mic to record, let go to send")
-            else toast("quipu needs the microphone for voice messages")
+            else toast("$APP_NAME needs the microphone for voice messages")
             return
         }
         if (requestCode != MIC_FOR_CALL) return
         val c = callAfterMic; callAfterMic = null
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) c?.let { callFriend(it) }
-        else toast("quipu needs the microphone for calls")
-    }
-
-    private fun callTitle(k: org.json.JSONObject): String {
-        val out = k.optString("d") == "out"
-        return when (k.optString("s")) {
-            "ok" -> if (out) "Outgoing call" else "Incoming call"
-            "missed" -> "Missed call"
-            "declined" -> if (out) "Call declined" else "Declined call"
-            "cancelled" -> "Cancelled call"
-            "busy" -> "Line busy"
-            "noanswer" -> "No answer"
-            else -> "Call failed"
-        }
-    }
-
-    private fun callDuration(sec: Int) = when {
-        sec >= 3600 -> "%d h %d min".format(sec / 3600, sec % 3600 / 60)
-        sec >= 60 -> "%d min %d s".format(sec / 60, sec % 60)
-        else -> "$sec s"
+        else toast("$APP_NAME needs the microphone for calls")
     }
 
     /** Telegram-style call summary in the chat; tap the phone to call back. */
@@ -2147,8 +2149,6 @@ class MainActivity : Activity() {
     private var videoMode = false
     private var roundHeld = false
 
-    private fun isRound(m: Msg) = m.file?.optString("m") == "video/mp4" && m.file?.optString("n")?.startsWith("Video message") == true
-
     /** A recorded round video: read it, make a round-ish preview frame, delete the file, send it to the open chat. */
     private fun sendRound(path: String) {
         val c = chatUser?.let { Messenger.core.contact(it) }.takeIf { screen == "chat" }
@@ -2312,10 +2312,10 @@ class MainActivity : Activity() {
 
     private var pendingSave: Msg? = null
 
-    /** Saves the photo to the phone's Pictures/quipu folder (only when you ask; outside the app it isn't locked). */
+    /** Saves the photo to the phone's Pictures/Tellem folder (only when you ask; outside the app it isn't locked). */
     private fun downloadImage(m: Msg) {
         val f = m.file ?: return
-        val name = "quipu_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(m.ts)) + if (isGif(m)) ".gif" else ".jpg"
+        val name = "${APP_NAME}_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(m.ts)) + if (isGif(m)) ".gif" else ".jpg"
         if (Build.VERSION.SDK_INT < 29) {
             pendingSave = m
             val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(f.optString("m")).putExtra(Intent.EXTRA_TITLE, name)
@@ -2327,7 +2327,7 @@ class MainActivity : Activity() {
             val values = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
                 put(android.provider.MediaStore.Images.Media.MIME_TYPE, f.optString("m", "image/jpeg"))
-                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/quipu")
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/$APP_NAME")
                 put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
             }
             val r = contentResolver
@@ -2335,7 +2335,7 @@ class MainActivity : Activity() {
             r.openOutputStream(uri)?.use { it.write(bytes) } ?: throw UserError("Couldn't save the photo")
             values.clear(); values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
             r.update(uri, values, null, null)
-        }, { toast("Saved to Pictures/quipu") }) { e -> toast(errorText(e)) }
+        }, { toast("Saved to Pictures/$APP_NAME") }) { e -> toast(errorText(e)) }
     }
 
     private fun saveImageTo(uri: android.net.Uri) {
@@ -2427,7 +2427,7 @@ class MainActivity : Activity() {
         val opts = mutableListOf("In 30 minutes" to now + 30 * 60_000L, "In 1 hour" to now + 3_600_000L, "In 3 hours" to now + 3 * 3_600_000L)
         if (at(0, 21) > now + 30 * 60_000L) opts.add("Tonight at 21:00" to at(0, 21))
         opts.add("Tomorrow at 08:00" to at(1, 8)); opts.add("Tomorrow at 18:00" to at(1, 18))
-        pickList("Schedule message", "It waits on this phone and goes out at that time (quipu needs to be running in the background).",
+        pickList("Schedule message", "It waits on this phone and goes out at that time ($APP_NAME needs to be running in the background).",
             opts.map { it.first }.toTypedArray()) { i -> done(opts[i].second) }
     }
 
@@ -2449,7 +2449,7 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(dp(230), dp(230)))
             addView(tv("@${me.user}", 17f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(12), 0, 0) })
         }
-        popup("My QR code", "A friend taps New Message > Scan QR code in quipu and points the camera at this to add you.", col, "Close" to dim, "Scan a code" to white) { i ->
+        popup("My QR code", "A friend taps New Message > Scan QR code in $APP_NAME and points the camera at this to add you.", col, "Close" to dim, "Scan a code" to white) { i ->
             if (i == 1) @Suppress("DEPRECATION") startActivityForResult(Intent(this, QrActivity::class.java), SCAN_QR)
         }
     }
@@ -2461,7 +2461,7 @@ class MainActivity : Activity() {
             return
         }
         val user = text.removePrefix(QrActivity.ADD).trim().lowercase()
-        if (!Core.USERNAME.matches(user)) return toast("That isn't a quipu code")
+        if (!Core.USERNAME.matches(user)) return toast("That isn't a $APP_NAME code")
         if (user == Messenger.core.me?.user) return toast("That's your own code")
         Messenger.core.contact(user)?.let { return showChat(it.user) }
         popup("Add @$user?", "Sends them a friend request.", null, "Cancel" to dim, "Add" to white) { i ->
@@ -2673,9 +2673,9 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Something shared from another app ("Share" > quipu): pick a chat, then send the photos/videos/files and text there. */
+    /** Something shared from another app ("Share" > Tellem): pick a chat, then send the photos/videos/files and text there. */
     private fun shared(i: Intent) {
-        if (!Messenger.signedIn) { toast("Log in to quipu first, then share again"); return }
+        if (!Messenger.signedIn) { toast("Log in to $APP_NAME first, then share again"); return }
         @Suppress("DEPRECATION")
         val uris = if (i.action == Intent.ACTION_SEND_MULTIPLE) i.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM).orEmpty()
             else listOfNotNull(i.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))
@@ -3001,7 +3001,7 @@ class MainActivity : Activity() {
         divider()
         item(R.drawable.ic_menu, "Settings") { showSettings() }
         col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
-        col.addView(tv("quipu ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
+        col.addView(tv("$APP_NAME ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
             setPadding(dp(22), dp(14), dp(22), dp(16))
         })
         return LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(listBg); addView(col, LinearLayout.LayoutParams(-1, -1)) }
@@ -3078,18 +3078,6 @@ class MainActivity : Activity() {
     private var emojiPopup: android.widget.PopupWindow? = null
     private var emojiData: List<Pair<String, List<String>>>? = null
     private val pictures = HashMap<String, android.graphics.Bitmap?>()
-
-    private fun preview(m: Msg): String = Format.plain(previewRaw(m))
-
-    private fun previewRaw(m: Msg): String {
-        if (m.loc != null) return "📍 Location"
-        if (isRound(m)) return "📹 Video message"
-        m.poll?.let { return "📊 " + it.optString("q") }
-        m.call?.let { return callTitle(it) + if (it.optString("s") == "ok") " (${callDuration(it.optInt("dur"))})" else "" }
-        val f = m.file ?: return m.text
-        if (Voice.isVoice(f)) return "🎤 Voice message" + (Voice.unpack(f.optString("th"))?.let { " (${Voice.clock(it.first)})" } ?: "")
-        return if (f.optString("m") == "image/gif") "GIF" else if (f.optString("m") == "image/webp") "Sticker" else if (f.optString("m").startsWith("image/")) "Photo" else "File: " + f.optString("n")
-    }
 
     private fun attachMenu(anchor: View) {   // target already set in attachTo / attachGroupId
         sendOnce = false   // only the "View once photo" row turns it on, for the photo picked right after
@@ -3863,7 +3851,7 @@ class MainActivity : Activity() {
 
     private fun chooseRecoveryFile() {
         val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "quipu-recovery.m01")   // no username in the name either
+            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "tellem-recovery.m01")   // no username in the name either
         @Suppress("DEPRECATION") startActivityForResult(i, CREATE_RECOVERY)
     }
 
@@ -3883,7 +3871,7 @@ class MainActivity : Activity() {
         Messenger.run({ bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } }, {
             val b = bytes
             val owner = b?.let { Messenger.core.backupOwner(it) }
-            if (b == null || owner == null) { toast("That isn't a quipu recovery file."); return@run }
+            if (b == null || owner == null) { toast("That isn't a $APP_NAME recovery file."); return@run }
             val pass = field("Password", password = true)
             // newer files don't carry the username on the outside, so it's typed in
             val user = if (owner.isEmpty()) field("Username") else null
@@ -4045,7 +4033,7 @@ class MainActivity : Activity() {
         col.addView(settingRow(if (me.avatar == null) "Set profile photo" else "Change profile photo", "Only your friends can see it") { v -> photoMenu(v) })
         col.addView(settingRow("Share username", "Invite a friend to add you") {
             startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                .putExtra(Intent.EXTRA_TEXT, "Add me on quipu: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
+                .putExtra(Intent.EXTRA_TEXT, "Add me on $APP_NAME: @${me.user}\nGet the app: https://wilfrombdn.github.io/"), "Share username"))
         })
         col.addView(gap(8))
         col.addView(settingRow("Cloud backup", if (me.cloudBackup) "On: you can log in on a new phone. The backup is locked with your password; the server can't read it." else "Off: this account only works on this phone, and the server keeps nothing to restore.") {
@@ -4062,10 +4050,10 @@ class MainActivity : Activity() {
         col.addView(settingRow("Recovery backup", if (Messenger.recoveryUri.isEmpty()) "Off. Save an encrypted backup file so your chats survive reinstalling the app." else "On. Your chats are saved, encrypted, to the file you chose. The server still keeps nothing.") {
             if (Messenger.recoveryUri.isEmpty()) popup("Turn on recovery backup",
                 "Here's exactly what this does:\n\n" +
-                "• quipu keeps a copy of all your chats in one file and keeps it up to date as you message.\n\n" +
+                "• $APP_NAME keeps a copy of all your chats in one file and keeps it up to date as you message.\n\n" +
                 "• You choose where that file goes next — your phone's storage, an SD card, or a cloud folder like Drive. It never goes to the server; only you hold it.\n\n" +
                 "• The file is locked with your account password (AES-256). Without that password it can't be read — not by us, not by the server, not by anyone who finds the file.\n\n" +
-                "• To get your chats back after reinstalling: open quipu → Restore from a backup file → enter your password.\n\n" +
+                "• To get your chats back after reinstalling: open $APP_NAME → Restore from a backup file → enter your password.\n\n" +
                 "One caveat: if you save it into a synced folder like Drive, that service may keep older versions of the file. For zero copies anywhere, leave this off.", null,
                 "Not now" to dim, "Choose file" to white) { i -> if (i == 1) chooseRecoveryFile() }
             else popup("Recovery backup", "Your chats are being saved to your chosen file, encrypted with your password. The server keeps nothing.", null,
@@ -4121,7 +4109,7 @@ class MainActivity : Activity() {
         col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
         col.addView(settingRow("Storage", "Photos, videos and files on this phone") { showStorage() })
         val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")
-        col.addView(settingRow("Check for updates", "You have quipu $ver") { checkUpdateNow() })
+        col.addView(settingRow("Check for updates", "You have $APP_NAME $ver") { checkUpdateNow() })
         col.addView(tv("Connection", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
         val direct = Messenger.direct
         val on = Messenger.connected
@@ -4146,16 +4134,20 @@ class MainActivity : Activity() {
         col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged(); showSettings() })
         col.addView(tv("Privacy", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
         col.addView(settingRow("App lock", if (Messenger.appLock) "On: asks for your fingerprint, face or PIN after ${when (Messenger.lockAfterMin) { 1 -> "1 minute"; 60 -> "1 hour"; else -> "${Messenger.lockAfterMin} minutes" }} away" else "Off") { appLockMenu() })
+        val sd = Destruct.hours(this)
+        col.addView(settingRow("Self-destruct", if (sd == 0) "Off" else "On: everything in $APP_NAME on this phone is wiped if it isn't opened for ${destructLabel(sd)}", if (sd == 0) white else red) { selfDestructMenu() })
         col.addView(settingSwitch("Show names in notifications", Messenger.notifyNames) { on -> Messenger.notifyNames = on; Messenger.settingsChanged() })
-        col.addView(settingNote("Message text never shows in notifications. Turn this off to hide who it's from too: you'll just see \"quipu · New message\"."))
+        col.addView(settingSwitch("Show message text in notifications", Messenger.notifyText) { on -> Messenger.notifyText = on; Messenger.settingsChanged() })
+        col.addView(settingNote("Like a normal text: who wrote and what they said (not while app lock is on). On the lock screen your phone's own setting decides how much shows. " +
+            "Turn names off to just see \"$APP_NAME · New message\"."))
         // Calls when closed: each missing phone setting, tap to fix
         col.addView(tv("Calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
         col.addView(settingSwitch("Wake-up pings", Messenger.pushOn) { on -> Messenger.pushOn = on; Messenger.settingsChanged(); PushService.register(this) })
-        col.addView(settingNote("Lets calls and messages wake quipu when it's closed, like Telegram, through Google's push service. The ping is empty: Google never sees who it's from or what it says."))
+        col.addView(settingNote("Lets calls and messages wake $APP_NAME when it's closed, like Telegram, through Google's push service. The ping is empty: Google never sees who it's from or what it says."))
         val fixes = ringFixes()
-        if (fixes.isEmpty()) col.addView(tv("✓ Calls will ring this phone even when quipu is closed", 15f, green).apply { setPadding(dp(20), dp(6), dp(20), dp(6)) })
+        if (fixes.isEmpty()) col.addView(tv("✓ Calls will ring this phone even when $APP_NAME is closed", 15f, green).apply { setPadding(dp(20), dp(6), dp(20), dp(6)) })
         else {
-            col.addView(settingNote("To ring like a normal phone call when quipu is closed, tap each one:"))
+            col.addView(settingNote("To ring like a normal phone call when $APP_NAME is closed, tap each one:"))
             for ((what, why, fix) in fixes) col.addView(settingRow("⚠  $what", why) { fix() })
         }
         col.addView(settingNote("Keeps a small \"connected\" notification. No Google push service is used."))
@@ -4164,9 +4156,9 @@ class MainActivity : Activity() {
         col.addView(settingSwitch("Show when I'm typing", Messenger.core.showTyping) { on -> Messenger.core.showTyping = on; Messenger.settingsChanged() })
         col.addView(settingNote("When on, a friend sees \"typing…\" while you write to them."))
         col.addView(settingSwitch("Show when I'm online", Messenger.core.showSeen) { on -> Messenger.setShowSeen(on) })
-        col.addView(settingNote("When on, friends see \"online\" while you have quipu open, and \"last seen\" after."))
+        col.addView(settingNote("When on, friends see \"online\" while you have $APP_NAME open, and \"last seen\" after."))
         col.addView(gap(20))
-        col.addView(tv("quipu ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
+        col.addView(tv("$APP_NAME ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
             13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })
         setContentView(page(topBar("Settings", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
         connLabel?.post(connTick)

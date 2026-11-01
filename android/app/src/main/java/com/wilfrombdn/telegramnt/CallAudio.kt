@@ -149,7 +149,7 @@ object CallAudio {
             runCatching { rec?.stop() }; runCatching { rec?.release() }
             runCatching { track?.stop() }; runCatching { track?.release() }
             runCatching { sock?.close() }; sock = null
-            runCatching { am.mode = AudioManager.MODE_NORMAL; @Suppress("DEPRECATION") am.isSpeakerphoneOn = false }
+            runCatching { am.mode = AudioManager.MODE_NORMAL; speakerOff(am) }
             speaker = false
             if (k.phase != Core.Call.ENDED && !stopRequested) Messenger.io.execute { core.hangUp(if (k.connectedAt > 0) "ok" else "failed") }
         }
@@ -179,4 +179,7 @@ object CallAudio {
 
     /** For tests: µ-law round trip of one sample. */
     internal fun roundTrip(pcm: Int): Int = ULAW[lin2ulaw(pcm).toInt() and 0xFF].toInt()
+
+    @Suppress("DEPRECATION")
+    private fun speakerOff(am: AudioManager) { am.isSpeakerphoneOn = false }
 }

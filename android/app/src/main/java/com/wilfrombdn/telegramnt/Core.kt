@@ -23,6 +23,9 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.Base64
 
+/** The app's name as people see it. Change it here and in res/values/strings.xml (the launcher label). */
+const val APP_NAME = "Tellem"
+
 class Msg(val id: String, val mine: Boolean, var text: String, val ts: Long, var state: Int) {
     /** Attachment: id (on server), k (key), n (name), m (type), s (size), th (preview), local (saved here). */
     var file: JSONObject? = null
@@ -469,12 +472,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         if (user == m.user) throw UserError("That's you!")
         contact(user)?.let { return it }
         val p = relay.lookup(user) ?: throw UserError("No one has the username @$user")
-        if (p.ident.isEmpty()) throw UserError("@$user needs to update quipu first")
+        if (p.ident.isEmpty()) throw UserError("@$user needs to update $APP_NAME first")
         val c = Contact(user, "@$user", Contact.ASKED, Crypto.randomHex(), null, p.enc, p.sig, theirInbox = p.inbox, theirIdent = p.ident)
         relay.fetch(listOf(c.myToken), emptyList(), 0) // my mailbox exists before they can answer
         sealSignal(m, c, p.inbox, JSONObject().put("t", "request").put("u", m.user).put("n", m.name).put("a", c.myAddr))
         c.msgs.add(note("Friend request sent. Anything you write now arrives as a message request."))
         synchronized(this) { if (contact(user) == null) contacts.add(c) }
+        contact(user)?.let { takeEarly(it) }
         changed()
         return contact(user)!!
     }
@@ -493,6 +497,27 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         changed()
         flush(c)
         if (friend) runCatching { sendAvatar(c, ask = false) }
+    }
+
+    /**
+     * Answers a request that has already been opened. That can't be read a second time, so if the answer
+     * can't go out now (network), it's kept and sent on a later round instead of losing the request.
+     */
+    private fun acceptSoon(c: Contact, friend: Boolean) {
+        try { accept(c, friend) } catch (e: Exception) {
+            synchronized(this) { acceptDue[c.user] = friend }
+            changed()
+        }
+    }
+
+    /** Answers still to send: username to "also as a friend". */
+    private val acceptDue = HashMap<String, Boolean>()
+
+    private fun sendDueAccepts() {
+        for ((user, friend) in synchronized(this) { acceptDue.toMap() }) {
+            val c = contact(user)
+            if (c == null || runCatching { accept(c, friend) }.isSuccess) { synchronized(this) { acceptDue.remove(user) }; changed() }
+        }
     }
 
     /** From a message-request chat I accepted: add them as a friend after all. */
@@ -543,7 +568,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val g = Group(Crypto.randomHex(8), name, secret, public, owner = owner)
         if (owner.isNotEmpty()) g.leaders.add(owner)   // seed the root of trust from the invite
         g.members.add(m.user)
-        postMyDist(m, g)
+        // the invite is already opened (it can't be read twice), so never lose the group over a network blip:
+        // my sender key goes out later, before my first post (distSent stays false)
+        runCatching { postMyDist(m, g) }
         synchronized(this) { groups.add(g) }
         g.msgs.add(note("You joined \"$name\"."))
         changed()
@@ -1131,13 +1158,22 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         if (c != null) runCatching { callCtl(c, JSONObject().put("t", if (s == "declined") "dec" else "end").put("id", k.id)) }
     }
 
-    /** Ends [k] here and writes this phone's summary into the chat. */
+    /**
+     * Ends [k] here and writes this phone's summary into the chat. Only the live call is reported to the
+     * call screen: a missed call logged while I'm on another one must not hang that one up.
+     */
     fun endCall(k: Call, status: String) {
         if (k.phase == Call.ENDED) return
         k.phase = Call.ENDED
-        if (call === k) call = null
+        val live = call === k
+        if (live) call = null
         val c = contact(k.user)
-        if (c != null) {
+        // never answered: make sure their phone shows the missed call too, even if my invite never reached it
+        if (k.outgoing && status in UNANSWERED) {
+            synchronized(this) { callNotes.add(JSONObject().put("u", k.user).put("id", k.id).put("ts", k.startedAt)) }
+            Thread { sendCallNotes() }.start()
+        }
+        if (c != null && !hasCallRecord(c, k.id)) {
             val dur = if (k.connectedAt > 0) ((System.currentTimeMillis() - k.connectedAt) / 1000).toInt() else 0
             val missed = status == "missed"
             val msg = Msg(Crypto.randomHex(16), k.outgoing, "", System.currentTimeMillis(), if (k.outgoing) Msg.SENT else Msg.RECEIVED)
@@ -1146,7 +1182,37 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             onChange()
             if (missed && openChat != c.user) onNew(c)
         }
-        onCall(k)
+        if (live) onCall(k)
+    }
+
+    private fun hasCallRecord(c: Contact, id: String) = synchronized(this) { c.msgs.any { it.call?.optString("id") == id } }
+
+    /** "You missed a call from me" notices still to send (kept until they go out, for up to a week). */
+    private val callNotes = mutableListOf<JSONObject>()
+
+    /** Sends the waiting missed-call notices. Network: off the main thread. Safe to call any time. */
+    fun sendCallNotes() {
+        val m = me ?: return
+        for (n in synchronized(this) { callNotes.toList() }) {
+            val c = contact(n.optString("u"))
+            val sent = c != null && c.status == Contact.FRIENDS &&
+                runCatching { callCtl(c, JSONObject().put("t", "cnote").put("id", n.optString("id")).put("ts", n.optLong("ts"))) }.isSuccess
+            if (sent || c == null || System.currentTimeMillis() - n.optLong("ts") > 7 * 86_400_000L) {
+                synchronized(this) { callNotes.remove(n) }
+                changed()
+            }
+            if (me !== m) return
+        }
+    }
+
+    /** Their call to me never got answered: log it as missed unless this phone already has it. */
+    private fun onCallNote(c: Contact, o: JSONObject) {
+        val id = o.optString("id")
+        if (id.length != 32 || c.status != Contact.FRIENDS) return
+        val k = call
+        if (k != null && k.id == id) { if (k.phase == Call.INCOMING) endCall(k, "missed"); return }
+        if (!seenCalls.add(id) || hasCallRecord(c, id)) return
+        endCall(Call(id, c.user, false, "", ""), "missed")
     }
 
     private fun onCallCtl(m: Me, c: Contact, o: JSONObject) {
@@ -1155,7 +1221,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val k = call
         when (o.optString("t")) {
             "call" -> {
-                if (!seenCalls.add(id)) return                               // redelivered: ring only once
+                if (!seenCalls.add(id) || hasCallRecord(c, id)) return       // redelivered (or already logged): ring only once
                 val key = o.optString("k"); val room = o.optString("r")
                 if (key.length != 64 || room.length != 64 || !key.all { it in "0123456789abcdef" } || !room.all { it in "0123456789abcdef" }) return
                 o.optString("n").takeIf { it == NET_TOR || it == NET_DIRECT }?.let { c.net = it }
@@ -1461,7 +1527,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     }
 
     private fun startSession(m: Me, c: Contact) {
-        val b = relay.bundle(c.user) ?: throw UserError("@${c.user} needs to update quipu first")
+        val b = relay.bundle(c.user) ?: throw UserError("@${c.user} needs to update $APP_NAME first")
         val ident = b.getString("ident")
         // the identity must match what the directory listed when we added them
         if (c.theirIdent != null && c.theirIdent != ident) throw IOException("@${c.user}'s key changed")
@@ -1520,7 +1586,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             try {
                 if (inc.token == m.inboxToken) onRequest(m, inc.blob) else byToken[inc.token]?.let { onChat(m, it, inc.blob) }
             } catch (e: IOException) {
-                continue // e.g. lookup failed; message stays unacked and comes back next round
+                drop("retry:${e.message}")
+                continue // e.g. lookup failed before it was opened; it stays unacked and comes back next round
             } catch (e: Exception) {
                 // A message we can't handle must never jam the mailbox: before, it threw out of poll(),
                 // the app showed "Connecting…" forever and every retry hit the same message. Skip it.
@@ -1530,6 +1597,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             synchronized(this) { (if (inc.token == m.inboxToken) inboxAcks else acks).add(inc.id) }
         }
         if (got.isNotEmpty()) onChange()
+        if (synchronized(this) { callNotes.isNotEmpty() }) sendCallNotes()
+        if (synchronized(this) { acceptDue.isNotEmpty() }) sendDueAccepts()
         for (g in synchronized(this) { groups.toList() }) runCatching { pollGroup(m, g, 0) }
         purgeExpired()
         for (msg in synchronized(this) { toFetch.toList() }) {
@@ -1573,15 +1642,14 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         if (inner.optString("u") != user || (kind == "request" && !isAddr(addr))) { drop("req:addr"); return }
         drop("req:OK->$kind")
         if (kind == "rmsg") {
-            val c = contact(user) ?: return
-            if (c.theirSig != p.sig || c.status == Contact.ASKED) return
-            val id = inner.optString("id")
-            synchronized(this) {
-                if (id.isEmpty() || c.msgs.any { it.id == id }) return
-                c.msgs.add(incoming(id, inner, c.ttl))
-                if (openChat != c.user) c.unread++
-            }
-            if (openChat != c.user) onNew(c)
+            val c = contact(user)
+            // Arrived before their friend request (or that one is still being retried): keep it here, already
+            // opened, and add it when the chat appears. Signal opens each message only once, so dropping it
+            // would lose it for good.
+            if (c == null) { keepEarly(user, inner); return }
+            if (c.theirSig != p.sig) return
+            // ASKED = I sent them a request too: they're writing to me while theirs crosses mine. Keep it.
+            if (addIncoming(c, inner) && openChat != c.user) onNew(c)
             return
         }
         val name = inner.optString("n").take(60).ifBlank { "@$user" }
@@ -1590,6 +1658,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             existing == null -> {
                 val c = Contact(user, name, Contact.ASKING, Crypto.randomHex(), addr, p.enc, p.sig, theirIdent = p.ident)
                 synchronized(this) { contacts.add(c) }
+                takeEarly(c)
                 changed()
                 if (openChat != user) onNew(c)
             }
@@ -1597,10 +1666,10 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             existing.status == Contact.ASKED -> { // we both asked: that's a yes
                 existing.theirAddr = addr
                 existing.name = name
-                accept(existing)
+                acceptSoon(existing, friend = true)
             }
             existing.status == Contact.ASKING -> { existing.theirAddr = addr; changed() }
-            else -> { existing.theirAddr = addr; accept(existing, friend = existing.status == Contact.FRIENDS) } // they re-added us
+            else -> { existing.theirAddr = addr; acceptSoon(existing, friend = existing.status == Contact.FRIENDS) } // they re-added us
         }
     }
 
@@ -1667,6 +1736,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 onChange()
             }
             "call", "ring", "dec", "busy", "end" -> onCallCtl(m, c, inner)
+            "cnote" -> onCallNote(c, inner)
             "net" -> { val n = inner.optString("n"); if (n == NET_TOR || n == NET_DIRECT) { c.net = n; onChange() } }
             "typing" -> {
                 if (c.status != Contact.FRIENDS) return
@@ -1722,8 +1792,37 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         }
     }
 
-    private fun incoming(id: String, inner: JSONObject, ttl: Int): Msg {
-        val msg = Msg(id, false, inner.optString("x").take(MAX_TEXT), System.currentTimeMillis(), Msg.RECEIVED)
+    /** Adds a received message unless it's already there (redelivered). Returns whether it was new. */
+    private fun addIncoming(c: Contact, inner: JSONObject, at: Long = System.currentTimeMillis()): Boolean = synchronized(this) {
+        val id = inner.optString("id")
+        if (id.isEmpty() || c.msgs.any { it.id == id }) return false
+        c.msgs.add(incoming(id, inner, c.ttl, at))
+        if (openChat != c.user) c.unread++
+        true
+    }
+
+    /** Message requests from people with no chat here yet, by username (opened; kept up to [EARLY_DAYS]). */
+    private val early = HashMap<String, MutableList<JSONObject>>()
+
+    private fun keepEarly(user: String, inner: JSONObject) {
+        synchronized(this) {
+            if (user !in early && early.size >= EARLY_PEOPLE) return
+            val list = early.getOrPut(user) { mutableListOf() }
+            if (list.size < EARLY_PER_PERSON) list.add(JSONObject().put("at", System.currentTimeMillis()).put("m", inner))
+        }
+        changed()
+    }
+
+    /** The chat with [c] now exists: put in what they sent before it did. */
+    private fun takeEarly(c: Contact) {
+        val kept = synchronized(this) { early.remove(c.user) } ?: return
+        val cutoff = System.currentTimeMillis() - EARLY_DAYS * 86_400_000L
+        val added = kept.filter { it.optLong("at") > cutoff }.count { addIncoming(c, it.getJSONObject("m"), it.optLong("at")) }
+        if (added > 0 && openChat != c.user) onNew(c)
+    }
+
+    private fun incoming(id: String, inner: JSONObject, ttl: Int, at: Long = System.currentTimeMillis()): Msg {
+        val msg = Msg(id, false, inner.optString("x").take(MAX_TEXT), at, Msg.RECEIVED)
         msg.file = inner.optJSONObject("f")?.let { checkFile(it) }
         msg.reply = Msg.replyRef(inner.optJSONObject("r"))
         msg.fwd = Msg.fwdOf(inner)
@@ -1837,6 +1936,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         }
         return o.put("contacts", JSONArray(contacts.map { it.json(withMsgs = true) })).put("backupDirty", backupDirty)
             .put("readReceipts", readReceipts).put("showTyping", showTyping).put("showSeen", showSeen).put("blocked", JSONArray(blocked.toList())).put("groups", JSONArray(groups.map { it.json(withMsgs = true) }))
+            .put("callNotes", JSONArray(callNotes))
+            .put("acceptDue", JSONObject(acceptDue as Map<*, *>))
+            .put("early", JSONObject().apply { early.forEach { (u, l) -> put(u, JSONArray(l)) } })
     }
 
     @Synchronized
@@ -1857,7 +1959,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         if (signal == null) for (c in contacts) {
             // upgrading from 2.x: new encryption, so new safety codes
             c.verified = false
-            c.msgs.add(note("quipu now uses Signal's encryption. Your safety code with ${c.name} changed; check it again."))
+            c.msgs.add(note("$APP_NAME now uses Signal's encryption. Your safety code with ${c.name} changed; check it again."))
         }
         backupDirty = o.optBoolean("backupDirty")
         readReceipts = o.optBoolean("readReceipts", true)
@@ -1866,6 +1968,12 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         blocked.clear(); o.optJSONArray("blocked")?.let { for (i in 0 until it.length()) blocked.add(it.getString(i)) }
         groups.clear()
         o.optJSONArray("groups")?.let { for (i in 0 until it.length()) groups.add(Group.from(it.getJSONObject(i))) }
+        early.clear()
+        o.optJSONObject("early")?.let { e -> for (u in e.keys()) e.optJSONArray(u)?.let { a -> early[u] = MutableList(a.length()) { a.getJSONObject(it) } } }
+        acceptDue.clear()
+        o.optJSONObject("acceptDue")?.let { a -> for (u in a.keys()) acceptDue[u] = a.optBoolean(u, true) }
+        callNotes.clear()
+        o.optJSONArray("callNotes")?.let { for (i in 0 until it.length()) it.optJSONObject(i)?.let(callNotes::add) }
         // attachments that arrived but weren't downloaded yet
         for (c in contacts) for (msg in c.msgs) if (!msg.mine && msg.file?.has("local") == false && msg.file?.optBoolean("cleared") != true) toFetch.add(msg)
     }
@@ -1875,6 +1983,11 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         const val MAX_AVATAR = 8000 // bytes of JPEG; fits in one sealed message
         const val MAX_FILE = 25 * 1024 * 1024
         const val TYPING_MS = 6_000L
+        /** How a call I made can end without them ever picking up (their phone may not even know it rang). */
+        val UNANSWERED = setOf("noanswer", "cancelled", "failed")
+        const val EARLY_PEOPLE = 50        // message requests kept for people whose request hasn't arrived yet
+        const val EARLY_PER_PERSON = 50
+        const val EARLY_DAYS = 30L
         const val RING_MS = 75_000L         // a call rings this long (time for a sleeping phone to be woken and connect)
         const val ONLINE_MS = 5 * 60_000L   // "online" lasts this long unless refreshed (the app re-sends every 4 min)
         const val NET_TOR = "tor"

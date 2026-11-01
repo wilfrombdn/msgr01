@@ -1,4 +1,4 @@
-# quipu
+# Tellem
 
 Private messaging for Android. Messages are end-to-end encrypted on the phone,
 and the relay server only passes along sealed boxes it can't open.
@@ -18,7 +18,7 @@ name has changed.)
 ```
 cd android
 JAVA_HOME=~/opt/jdk21 ANDROID_HOME=~/Android/Sdk bash ./gradlew testDebugUnitTest assembleRelease
-cp app/build/outputs/apk/release/app-release.apk ../dist/Telegramnt.apk
+cp app/build/outputs/apk/release/app-release.apk ../dist/Tellem.apk
 ```
 
 `RelayFlowTest` runs only if a server is up: `python3 server/relay.py --port 8099 --db /tmp/t.db`,

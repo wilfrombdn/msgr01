@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher / system name. Keep in step with APP_NAME in Core.kt. -->
+    <string name="app_name" translatable="false">Tellem</string>
+</resources>

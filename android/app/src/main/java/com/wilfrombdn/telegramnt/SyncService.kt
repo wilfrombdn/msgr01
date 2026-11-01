@@ -7,11 +7,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
 
 /**
  * Keeps the mailbox connection open so messages arrive while the app is closed.
- * No Google push service is used, because that would tell Google who gets messages and when.
+ * (Wake-up pings through Google, see [PushService], are empty: they never say who wrote or what.)
  */
 class SyncService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
@@ -25,7 +26,7 @@ class SyncService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, CH_CONN)
             .setSmallIcon(R.drawable.ic_notify)
-            .setContentTitle("quipu connected")
+            .setContentTitle("$APP_NAME connected")
             .setContentIntent(open)
             .setOngoing(true)
             .build()
@@ -64,29 +65,63 @@ class SyncService : Service() {
             val open = PendingIntent.getActivity(ctx, g.id.hashCode(), Intent(ctx, MainActivity::class.java).putExtra("group", g.id),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val n = Notification.Builder(ctx, CH_MSG).setSmallIcon(R.drawable.ic_notify)
-                .setContentTitle(if (Messenger.notifyNames) g.name else "quipu").setContentText(if (Messenger.notifyNames) "You were mentioned" else "New message")
+                .setContentTitle(if (Messenger.notifyNames) g.name else APP_NAME).setContentText(if (Messenger.notifyNames) "You were mentioned" else "New message")
                 .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open).setAutoCancel(true).build()
             ctx.getSystemService(NotificationManager::class.java).notify(g.id.hashCode(), n)
         }
 
-        /** Shows only who wrote, never the text, so it can't leak onto the lock screen (with "show names" off, not even who). */
+        /**
+         * A new message, shown like a normal text: who wrote and their latest unread messages ([Messenger.notifyText]),
+         * with Reply. The lock screen gets [publicNote] unless the phone is set to show everything there.
+         * With "show names" off it says only "$APP_NAME · New message".
+         */
         fun notifyMessage(ctx: Context, c: Contact) {
             val open = PendingIntent.getActivity(
                 ctx, c.user.hashCode(),
                 Intent(ctx, MainActivity::class.java).putExtra("chat", c.user),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
-            val n = Notification.Builder(ctx, CH_MSG)
+            val last = synchronized(Messenger.core) { c.msgs.lastOrNull() }
+            val summary = when {
+                c.status == Contact.ASKING && last?.mine != false -> "Wants to be your friend"
+                last?.call?.optString("s") == "missed" -> "Missed call"
+                else -> "New message"
+            }
+            val b = Notification.Builder(ctx, CH_MSG)
                 .setSmallIcon(R.drawable.ic_notify)
-                .setContentTitle(if (Messenger.notifyNames) c.name else "quipu")
-                .setContentText(if (!Messenger.notifyNames) "New message" else if (c.status == Contact.ASKING) "Wants to be your friend"
-                    else if (c.msgs.lastOrNull()?.call?.optString("s") == "missed") "Missed call" else "New message")
+                .setCategory(Notification.CATEGORY_MESSAGE)
                 .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(publicNote(ctx, if (Messenger.notifyNames) c.name else APP_NAME, summary))
                 .setContentIntent(open)
                 .setAutoCancel(true)
-                .apply { if (Messenger.notifyNames && c.canChat && c.status != Contact.SAVED) addAction(ReplyReceiver.action(ctx, c)) }
-                .build()
-            ctx.getSystemService(NotificationManager::class.java).notify(c.user.hashCode(), n)
+            if (!Messenger.notifyNames) {
+                b.setContentTitle(APP_NAME).setContentText("New message")
+            } else {
+                b.setContentTitle(c.name)
+                // with app lock on, the chats stay behind it: no text in notifications either
+                val unread = if (Messenger.notifyText && !Messenger.appLock) synchronized(Messenger.core) {
+                    c.msgs.filter { !it.mine && it.state != Msg.NOTE }.takeLast(c.unread.coerceIn(1, 6))
+                } else emptyList()
+                if (unread.isEmpty()) b.setContentText(summary)
+                else b.setStyle(chatStyle(c.name, unread)).setContentText(preview(unread.last()))
+                if (c.canChat && c.status != Contact.SAVED) b.addAction(ReplyReceiver.action(ctx, c))
+            }
+            ctx.getSystemService(NotificationManager::class.java).notify(c.user.hashCode(), b.build())
         }
+
+        /** The conversation look (sender + their recent lines). Person needs Android 9; older phones use names. */
+        @Suppress("DEPRECATION")
+        private fun chatStyle(name: String, msgs: List<Msg>): Notification.MessagingStyle =
+            if (Build.VERSION.SDK_INT >= 28) {
+                val them = android.app.Person.Builder().setName(name).build()
+                Notification.MessagingStyle(android.app.Person.Builder().setName("You").build())
+                    .apply { msgs.forEach { addMessage(preview(it), it.ts, them) } }
+            } else {
+                Notification.MessagingStyle("You").apply { msgs.forEach { addMessage(preview(it), it.ts, name) } }
+            }
+
+        /** What the lock screen shows when the phone hides private notification content. */
+        private fun publicNote(ctx: Context, title: String, text: String): Notification =
+            Notification.Builder(ctx, CH_MSG).setSmallIcon(R.drawable.ic_notify).setContentTitle(title).setContentText(text).build()
     }
 }

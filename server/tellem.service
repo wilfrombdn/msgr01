@@ -1,0 +1,17 @@
+[Unit]
+Description=Tellem server (relay + Cloudflare tunnel for Direct)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=tellem
+RuntimeDirectory=tellem
+ExecStart=/opt/tellem/server/droplet-server.sh
+Restart=always
+RestartSec=30
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target

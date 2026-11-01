@@ -17,6 +17,7 @@ class ReplyReceiver : BroadcastReceiver() {
         val c = Messenger.core.contact(user) ?: return
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (text.isNotEmpty() && c.canChat && user !in Messenger.core.blocked) {
+            Destruct.touch(ctx)   // replying from the notification is using the app
             Messenger.send(c, text.take(Core.MAX_TEXT))
             Messenger.drafts.remove("u:$user")
             Messenger.run({ Messenger.core.markRead(c) })

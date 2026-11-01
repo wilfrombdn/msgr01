@@ -1,4 +1,4 @@
-# quipu: notes for Claude
+# Tellem: notes for Claude
 
 - **Ship every change as an in-app update.** Follow `RELEASING.md` exactly: bump the version, build signed,
   copy the APK + write `update.json` with 2–4 brief plain-words notes in `~/wilfrombdn.github.io/telegramnt/`, push both repos,
@@ -8,7 +8,7 @@
 - Build: `cd android && JAVA_HOME=~/opt/jdk21 ANDROID_HOME=~/Android/Sdk bash ./gradlew assembleRelease`.
   `ScreenshotTest` renders screens to `app/build/shots/` (the way to preview UI here).
   `RelayFlowTest` needs a local server: `python3 server/relay.py --port 8099 --db <tmp>/t.db --test-limits`.
-- The server runs on the owner's laptop (`systemctl --user restart telegramnt` after `relay.py` changes),
-  reached only through its Tor .onion address. Never add a route that bypasses Tor or exposes users' IPs
+- The server runs on a DigitalOcean droplet. After `relay.py` changes: `scp server/relay.py tellem:/opt/tellem/server/ && ssh tellem systemctl restart tellem`. Details in `SERVER-SETUP.md`.
+  The app reaches it only through its Tor .onion address (plus the optional Direct mode). Never add a route that bypasses Tor or exposes users' IPs
   without asking the owner first.
-- **Next server step:** move it off the laptop to a Hetzner cloud server. The checklist is in `SERVER-SETUP.md` (section "NEXT STEP").
+- **Next server step:** regular database backups (not set up yet). See `SERVER-SETUP.md`.
