@@ -170,6 +170,7 @@ object Messenger {
         Tor.start(app)                                  // start the embedded Tor daemon (bootstraps in the background)
         start(Core(ONION) { Tor.socksPort() })          // all traffic goes to the .onion through Tor's SOCKS port
         load()
+        mirrorTexts()
         applyRoute()
         PushService.register(app)
         locked = appLock   // a fresh start always asks
@@ -464,8 +465,12 @@ object Messenger {
 
     fun settingsChanged() {
         save()
+        mirrorTexts()
         changed()
     }
+
+    /** Text notifications follow the same privacy choices; their receivers can't open the locked store. */
+    private fun mirrorTexts() { if (::app.isInitialized) Texts.mirror(app, notifyNames, notifyText, appLock) }
 
     // ---------- account (keeps chats across log out / log in on this phone) ----------
 

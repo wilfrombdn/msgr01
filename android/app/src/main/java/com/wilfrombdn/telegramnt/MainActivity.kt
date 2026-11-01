@@ -184,7 +184,7 @@ class MainActivity : Activity() {
             val h = opts[i]
             popup("Turn on self-destruct?",
                 "If you don't open $APP_NAME for ${destructLabel(h)}, every chat, photo, key and setting in it on this phone is erased. " +
-                "There is no undo and no warning first. (Photos you saved to the phone's gallery are outside $APP_NAME and stay.)\n\n" +
+                "There is no undo and no warning first. (Photos you saved to the phone's gallery, and normal texts, are outside $APP_NAME and stay.)\n\n" +
                 "Opening $APP_NAME starts the countdown again. Your account itself stays: with cloud backup on you could log in again and get your friends back, but not your chats.",
                 null, "Cancel" to dim, "Turn on" to red) { b ->
                 if (b == 1) confirmIdentity("Turn on self-destruct") { Destruct.setHours(this, h); showSettings() }
@@ -233,6 +233,8 @@ class MainActivity : Activity() {
     }
 
     private fun handle(i: Intent?) {
+        if (i?.data?.scheme in setOf("sms", "smsto", "mms", "mmsto")) return openTextIntent(i!!)
+        i?.getLongExtra("textThread", 0L)?.takeIf { it > 0 }?.let { return showTextThread(it) }
         if (i?.action == Intent.ACTION_SEND || i?.action == Intent.ACTION_SEND_MULTIPLE) return shared(i)
         i?.getStringExtra("chat")?.let { u -> if (Messenger.core.contact(u) != null) showChat(u) }
         i?.getStringExtra("group")?.let { g -> if (Messenger.core.group(g) != null) showGroup(g) }
@@ -245,6 +247,7 @@ class MainActivity : Activity() {
         Messenger.appShown()
         Messenger.listen(refresh)
         Messenger.callListeners.add(callWatch); callTicker.post(callTick)
+        Texts.listen(this, textsChanged)
         if (Messenger.signedIn) startForegroundService(Intent(this, SyncService::class.java))
         redraw()
     }
@@ -257,6 +260,7 @@ class MainActivity : Activity() {
         Messenger.appHidden()
         Messenger.unlisten(refresh)
         Messenger.callListeners.remove(callWatch); callTicker.removeCallbacks(callTick)
+        Texts.unlisten(textsChanged); Texts.openThread = 0
         if (!Messenger.background) stopService(Intent(this, SyncService::class.java))
         super.onStop()
     }
@@ -267,6 +271,7 @@ class MainActivity : Activity() {
             emojiPopup != null -> { emojiPopup?.dismiss(); emojiPopup = null }
             (replyTo != null || editing != null) && (screen == "chat" || screen == "group") -> cancelReply()
             drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
+            screen == "textthread" || screen == "newtext" -> leaveTexts()
             !Messenger.signedIn && screen != "welcome" -> showWelcome()
             screen == "viewer" -> leaveViewer()
             screen == "storage" -> showSettings()
@@ -387,8 +392,10 @@ class MainActivity : Activity() {
     private fun redraw() {
         if (Messenger.locked && Messenger.signedIn) { if (screen != "lock") showLock(); return }
         maybeCheckUpdate()
+        if (screen == "textthread") return fillTextThread()   // texts work signed in or not
+        if (screen == "textlist") return showTextList()
         if (!Messenger.signedIn) {
-            if (screen != "welcome" && screen != "signup" && screen != "login") showWelcome()
+            if (screen != "welcome" && screen != "signup" && screen != "login" && screen != "newtext") showWelcome()
             return
         }
         when (screen) {
@@ -629,6 +636,11 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(8), dp(8), dp(8))
             setOnClickListener { pickRecoveryToRestore() }
         })
+        if (Texts.isDefault(this)) col.addView(tv("Open my texts", 15f, white, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { showTextList() }
+        })
         col.addView(gap(24))
         welcomeStatus = tv("", 15f, dim, true).apply { gravity = Gravity.CENTER }
         col.addView(welcomeStatus)
@@ -832,6 +844,10 @@ class MainActivity : Activity() {
         val all = core.sorted().filter { q.isEmpty() || it.name.lowercase().contains(q) || it.user.contains(q) }
         val grps = synchronized(core) { core.groups.toList() }.filter { q.isEmpty() || it.name.lowercase().contains(q) }
         val requests = all.filter { it.status == Contact.ASKING }
+        val textsOn = Texts.canRead(this)
+        val mixed = textsOn && Texts.mixed(this)
+        if (!textsOn || mixed) textsTab = false
+        val textsOnly = textsTab && !showArchive
         // everything else, keyed "u:<user>" / "g:<group>" so folders can hold either
         val rows = (all - requests.toSet()).map { Triple("u:${it.user}", it.lastTs, it as Any) } + grps.map { Triple("g:${it.id}", it.lastTs, it as Any) }
         fun rowFor(t: Triple<String, Long, Any>, bg: Int = listBg) = (t.third as? Contact)?.let { chatRow(it, t.first, bg) } ?: groupRow(t.third as Group, t.first, bg)
@@ -840,7 +856,8 @@ class MainActivity : Activity() {
         val inFolder = HashSet<String>()
         val arch = Messenger.archived
         if (q.isEmpty()) arch.retainAll { it in byKey || it.startsWith("u:") && core.contact(it.drop(2)) != null }   // forget deleted chats
-        if (showArchive && q.isEmpty()) {
+        if (textsOnly) addTextRows(list, q)
+        else if (showArchive && q.isEmpty()) {
             // the Archived chats page: just those, newest first
             for (t in rows.filter { it.first in arch }.sortedByDescending { it.second }) list.addView(rowFor(t))
         } else {
@@ -868,10 +885,13 @@ class MainActivity : Activity() {
                 })
             }
         }
-        for (t in rows.filter { it.first !in inFolder }.sortedByDescending { it.second }) list.addView(rowFor(t))
+        // with "show texts together with chats", text threads sit among the chats (never in pins or folders)
+        val loose: List<Pair<Long, () -> View>> = rows.filter { it.first !in inFolder }.map { t -> t.second to { rowFor(t) } } +
+            (if (mixed) Texts.threads.filter { textMatches(it, q) }.map { t -> t.date to { textRow(t) } } else emptyList())
+        for ((_, make) in loose.sortedByDescending { it.first }) list.addView(make())
         }
-        if (q.length >= 2) messageResults(list, q)
-        if (all.isEmpty() && grps.isEmpty() && (q.length < 2 || list.childCount == 0)) {
+        if (q.length >= 2 && !textsOnly) messageResults(list, q)
+        if (!textsOnly && all.isEmpty() && grps.isEmpty() && (!mixed || Texts.threads.isEmpty()) && (q.length < 2 || list.childCount == 0)) {
             list.addView(tv(
                 if (q.isNotEmpty()) "No chats match \"$search\""
                 else "Welcome, ${core.me?.name}!\n\nTap the pencil to add a friend by their @username.\n\nYour username is @${core.me?.user}. Share it so friends can add you.",
@@ -897,7 +917,7 @@ class MainActivity : Activity() {
             background = circle(white)
             elevation = dp(6).toFloat()
             setOnClickListener { showNewChat() }
-        }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
+        }.let { if (textsOnly) newTextButton() else it }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
 
         val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
         else if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
@@ -909,7 +929,12 @@ class MainActivity : Activity() {
         // Content + a left slide-out drawer (opens by tapping the lines or swiping from the edge).
         val keepOpen = refreshing && drawer?.isDrawerOpen(GravityCompat.START) == true   // refreshes rebuild the screen; don't snap the menu shut
         val d = DrawerLayout(this)
-        d.addView(page(top, frame), DrawerLayout.LayoutParams(-1, -1))
+        val body = if (textsOn && !mixed && !showArchive) LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(textTabs(all.sumOf { it.unread } + grps.sumOf { it.unread }))
+            addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
+        } else frame
+        d.addView(page(top, body), DrawerLayout.LayoutParams(-1, -1))
         d.addView(drawerPanel(d), DrawerLayout.LayoutParams(
             minOf(dp(300), (resources.displayMetrics.widthPixels * 0.82).toInt()), -1
         ).apply { gravity = GravityCompat.START })
@@ -1090,6 +1115,358 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------- normal texts (SMS/MMS): kept visibly apart from private Tellem chats ----------
+
+    private val smsGreen = Color.parseColor("#2E7D4F")   // normal texts' own bubble colour, never a Tellem one
+    private var textsTab = false                         // separate mode: the Texts tab is showing
+    private var textThread = 0L
+    private var textPeople: List<String> = emptyList()
+    private var textImage: Pair<ByteArray, String>? = null
+    private var textImageBar: TextView? = null
+    private var textDraft: String? = null
+    private val textPics = android.util.LruCache<String, android.graphics.Bitmap>(24)
+    private val textsChanged: () -> Unit = { redraw() }
+
+    /** Ask Android to make Tellem the texting app (Android shows its own "set as default" question). */
+    private fun askTextRole() {
+        val i = if (Build.VERSION.SDK_INT >= 29) getSystemService(android.app.role.RoleManager::class.java)
+            .takeIf { it.isRoleAvailable(android.app.role.RoleManager.ROLE_SMS) }?.createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS)
+        else @Suppress("DEPRECATION") Intent(android.provider.Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
+            .putExtra(android.provider.Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, packageName)
+        if (i == null) return toast("This phone can't send texts")
+        @Suppress("DEPRECATION") startActivityForResult(i, TEXT_ROLE)
+    }
+
+    private fun textRoleResult() {
+        if (Texts.isDefault(this)) {
+            Texts.listen(this, textsChanged)   // now allowed to read texts: start watching them
+            // names instead of numbers, and this phone's own number (left out of group texts); both optional
+            requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.READ_PHONE_NUMBERS, Manifest.permission.READ_PHONE_STATE), TEXT_PERMS)
+            toast("$APP_NAME is now your texting app")
+        } else popup("$APP_NAME isn't your texting app",
+            "If Android didn't ask, it may be blocking this for apps installed outside the Play Store. Open $APP_NAME's App info, tap ⋮ (top right), choose \"Allow restricted settings\", then try again.",
+            null, "Cancel" to dim, "Open App info" to white) { b ->
+            if (b == 1) startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", packageName, null)))
+        }
+        if (screen == "settings") showSettings() else redraw()
+    }
+
+    private fun textsUnread() = Texts.threads.sumOf { it.unread }
+
+    /** Chats | Texts, under the top bar (separate mode only). */
+    private fun textTabs(chatsUnread: Int): View = LinearLayout(this).apply {
+        setBackgroundColor(bar)
+        fun tab(label: String, n: Int, on: Boolean, go: () -> Unit) = addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = pressable()
+            setOnClickListener { go() }
+            addView(tv(label + if (n > 0) "  $n" else "", 15f, if (on) white else dim, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(8)) }, LinearLayout.LayoutParams(-1, -2))
+            addView(View(context).apply { setBackgroundColor(if (on) white else Color.TRANSPARENT) }, LinearLayout.LayoutParams(-1, dp(2)))
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        tab("Chats", chatsUnread, !textsTab) { if (textsTab) { textsTab = false; chatsScrollY = 0; showChats() } }
+        tab("Texts", textsUnread(), textsTab) { if (!textsTab) { textsTab = true; chatsScrollY = 0; showChats() } }
+    }
+
+    private fun textMatches(t: Texts.Thread, q: String) = q.isEmpty() || Texts.title(this, t.addresses).lowercase().contains(q) ||
+        t.addresses.any { it.contains(q) } || t.snippet.lowercase().contains(q)
+
+    /** The text threads, newest first (the Texts tab and the signed-out texts screen). */
+    private fun addTextRows(list: LinearLayout, q: String) {
+        if (!Texts.isDefault(this)) list.addView(note("$APP_NAME isn't your texting app right now, so texts can't be sent or received here. Tap to change that.") { askTextRole() })
+        val ts = Texts.threads.filter { textMatches(it, q) }
+        for (t in ts) list.addView(textRow(t))
+        if (ts.isEmpty()) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
+            .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
+    }
+
+    private fun textRow(t: Texts.Thread): View {
+        val title = Texts.title(this, t.addresses)
+        val row = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(listBg)
+            setPadding(dp(10), dp(8), dp(14), dp(8))
+            setOnClickListener { showTextThread(t.id) }
+        }
+        row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54))   // a bare number gets "#", not "+5"
+        val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+        val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        line1.addView(tv(title, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        line1.addView(tv("SMS", 10.5f, Color.WHITE, true).apply { setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(smsGreen, 4) })
+        line1.addView(tv(time(t.date), 13f, dim).apply { setPadding(dp(6), 0, 0, 0) })
+        mid.addView(line1)
+        val line2 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
+        line2.addView(tv(t.snippet.replace('\n', ' '), 15f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (t.unread > 0) line2.addView(tv("${t.unread}", 12.5f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1)); background = round(smsGreen, 11)
+        })
+        mid.addView(line2)
+        row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
+        val swipe = SwipeRow(this, row, R.drawable.ic_trash, onOpen = { showTextThread(t.id) }, onDelete = {
+            popup("Delete texts with $title?", "This deletes these texts from the phone for good.", null, "Cancel" to dim, "Delete" to red) { i ->
+                if (i == 1) Texts.deleteThread(this, t.id) else redraw()
+            }
+        })
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(swipe, LinearLayout.LayoutParams(-1, -2))
+            addView(View(context).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(76) })
+        }
+    }
+
+    /** Signed out but Tellem is the texting app: texts still have to be reachable. */
+    private fun showTextList() {
+        screen = "textlist"
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        addTextRows(list, "")
+        val frame = FrameLayout(this)
+        frame.addView(ScrollView(this).apply { addView(list); isFillViewport = true })
+        frame.addView(newTextButton(), FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
+        setContentView(page(topBar("Texts", "Normal texts · not encrypted", icon(R.drawable.ic_back) { showWelcome() }), frame))
+    }
+
+    private fun newTextButton() = ImageView(this).apply {
+        setImageResource(R.drawable.ic_edit); setColorFilter(Color.WHITE)
+        setPadding(dp(16), dp(16), dp(16), dp(16)); background = circle(smsGreen); elevation = dp(6).toFloat()
+        setOnClickListener { showNewText() }
+    }
+
+    private fun leaveTexts() {
+        Texts.openThread = 0
+        if (Messenger.signedIn) { textsTab = !Texts.mixed(this); showChats() } else showTextList()
+    }
+
+    /** "To:" numbers (or pick a contact), then the thread. */
+    private fun showNewText(body: String? = null) {
+        screen = "newtext"
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16)) }
+        val to = field("Phone number(s), separated by commas").apply { inputType = InputType.TYPE_CLASS_PHONE }
+        newTextTo = to
+        col.addView(to)
+        col.addView(tv("Choose from contacts", 16f, blue, true).apply {
+            setPadding(0, dp(14), 0, dp(14))
+            setOnClickListener {
+                runCatching { @Suppress("DEPRECATION") startActivityForResult(Intent(Intent.ACTION_PICK, android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI), PICK_CONTACT) }
+                    .onFailure { toast("No contacts app") }
+            }
+        })
+        col.addView(settingNote("Normal texts go through your phone carrier and aren't encrypted. For private messages, use a $APP_NAME chat.").apply { setPadding(0, dp(4), 0, dp(16)) })
+        col.addView(cta("Next") {
+            val nums = to.text.split(',', ';').map { it.trim() }.filter { it.any(Char::isDigit) || it.contains('@') }
+            if (nums.isEmpty()) return@cta toast("Type a phone number")
+            var id = 0L
+            Messenger.run({ id = Texts.threadFor(this, nums) }, { textDraft = body; showTextThread(id, nums) }) { toast("Couldn't start that text") }
+        }, ctaParams())
+        setContentView(page(topBar("New text", null, icon(R.drawable.ic_back) { leaveTexts() }), ScrollView(this).apply { addView(col) }))
+        to.requestFocus()
+    }
+    private var newTextTo: EditText? = null
+
+    private fun contactPicked(uri: android.net.Uri) {
+        val n = runCatching {
+            contentResolver.query(uri, arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+        }.getOrNull() ?: return toast("Couldn't read that contact")
+        newTextTo?.let { f -> val cur = f.text.toString().trim().trimEnd(','); f.setText(if (cur.isEmpty()) n else "$cur, $n"); f.setSelection(f.text.length) }
+    }
+
+    /** "Text this number" from the dialer, contacts or an sms: link. */
+    private fun openTextIntent(i: Intent) {
+        val data = i.data ?: return
+        val nums = data.schemeSpecificPart.orEmpty().substringBefore('?').split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }
+        val body = i.getStringExtra("sms_body") ?: i.getStringExtra(Intent.EXTRA_TEXT)
+            ?: data.schemeSpecificPart?.substringAfter("body=", "")?.takeIf { it.isNotEmpty() }
+        if (!Texts.isDefault(this)) return popup("Use $APP_NAME for texts?", "To send normal texts from $APP_NAME, make it this phone's texting app.", null, "Cancel" to dim, "Set up" to white) { b -> if (b == 1) askTextRole() }
+        if (nums.isEmpty()) return showNewText(body)
+        var id = 0L
+        Messenger.run({ id = Texts.threadFor(this, nums) }, { textDraft = body; showTextThread(id, nums) })
+    }
+
+    private var textList: LinearLayout? = null
+    private var textScroll: ScrollView? = null
+
+    private fun showTextThread(id: Long, people: List<String>? = null) {
+        screen = "textthread"
+        textThread = id
+        Texts.openThread = id
+        textPeople = people ?: Texts.threads.firstOrNull { it.id == id }?.addresses ?: emptyList()
+        textImage = null
+        val title = Texts.title(this, textPeople)
+        val group = textPeople.size > 1
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
+            isClickable = true; setOnClickListener { dismissKeyboard() }
+        }
+        textList = list
+        val sc = chatScroller(list); textScroll = sc
+        val call = textPeople.singleOrNull()?.let { n -> icon(R.drawable.ic_call) { runCatching { startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", n, null))) } } }
+        val top = topBar(title, if (group) "Group text · ${textPeople.size} people · not encrypted" else "Text message · not encrypted",
+            icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(call).toTypedArray())
+        val bottom: View = if (!Texts.isDefault(this)) tv("Make $APP_NAME your texting app to send", 16f, blue, true).apply {
+            gravity = Gravity.CENTER; setPadding(dp(16), dp(16), dp(16), dp(16)); setBackgroundColor(listBg)
+            setOnClickListener { askTextRole() }
+        } else LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(listBg)
+            val picBar = tv("", 14f, white).apply {
+                visibility = View.GONE; setPadding(dp(16), dp(8), dp(16), dp(4))
+                setOnClickListener { textImage = null; visibility = View.GONE }
+            }
+            textImageBar = picBar
+            addView(picBar)
+            val input = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(4), dp(6), dp(4)) }
+            val box = EditText(context).apply {
+                hint = "Text message · not encrypted"
+                setHintTextColor(dim); setTextColor(white); textSize = look.msg; background = null
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                maxLines = 5
+                setText(textDraft ?: ""); textDraft = null
+            }
+            fun send() {
+                val body = box.text.toString().trim()
+                val pic = textImage
+                if (body.isEmpty() && pic == null || textPeople.isEmpty()) return
+                box.setText(""); textImage = null; picBar.visibility = View.GONE
+                Texts.send(this@MainActivity, textPeople, body, pic)
+            }
+            input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
+            input.addView(icon(R.drawable.ic_attach, dim, pad = 10) {
+                runCatching { @Suppress("DEPRECATION") startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), TEXT_IMAGE) }
+            })
+            input.addView(icon(R.drawable.ic_send, smsGreen, pad = 10) { send() })
+            addView(input)
+        }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = wallBg()
+            fitsSystemWindows = true
+            addView(callBarView(), LinearLayout.LayoutParams(-1, -2))
+            addView(top, LinearLayout.LayoutParams(-1, -2))
+            addView(sc, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(bottom, LinearLayout.LayoutParams(-1, -2))
+        }
+        setContentView(root)
+        stick = true
+        fillTextThread()
+        if (textPeople.isEmpty()) {   // opened from a notification before the thread list loaded
+            var found: List<String> = emptyList()
+            Messenger.run({ found = Texts.addressesOf(this, id) }, { if (found.isNotEmpty() && screen == "textthread" && textThread == id) showTextThread(id, found) })
+        }
+    }
+
+    private fun fillTextThread() {
+        val id = textThread
+        var msgs: List<Texts.Text> = emptyList()
+        Messenger.run({
+            msgs = Texts.messages(this, id)
+            msgs.mapNotNull { it.from }.forEach { Texts.name(this, it) }   // look names up here, not while drawing
+        }, {
+            val list = textList ?: return@run
+            if (screen != "textthread" || textThread != id) return@run
+            val sc = textScroll
+            val follow = stick || sc == null || atBottom(sc)
+            list.removeAllViews()
+            if (msgs.isEmpty()) list.addView(tv("Texts go through your phone carrier, not Tor, and aren't encrypted.", 13.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) })
+            for (t in msgs) list.addView(textBubble(t, textPeople.size > 1))
+            if (follow && sc != null) sc.post { toBottom(sc); stick = false }
+            if (Texts.threads.firstOrNull { it.id == id }?.unread ?: 1 > 0) Texts.markRead(this, id)
+        })
+    }
+
+    private fun textBubble(t: Texts.Text, group: Boolean): View {
+        val wrap = LinearLayout(this).apply { gravity = if (t.mine) Gravity.END else Gravity.START; setPadding(0, dp(4), 0, dp(4)) }
+        val fill = if (t.mine) smsGreen else look.inn
+        val ink = Look.textOn(fill)
+        val b = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = round(fill, if (look.square) 0 else 14)
+            setPadding(dp(10), dp(6), dp(10), dp(5))
+        }
+        if (group && !t.mine && t.from != null) b.addView(tv(Texts.name(this, t.from), 13.5f, avatarColors[Math.floorMod(t.from.hashCode(), avatarColors.size)], true))
+        for (a in t.attachments) b.addView(textPicture(a))
+        if (t.state == Texts.DOWNLOADING) b.addView(tv("📷 Downloading picture message…", look.msg, ink))
+        if (t.state == Texts.NOT_DOWNLOADED) b.addView(tv("📷 Picture message didn't download. Tap to try again.", look.msg, ink).apply {
+            setOnClickListener { Texts.retryDownload(this@MainActivity, t.id); toast("Downloading…") }
+        })
+        if (t.body.isNotEmpty()) b.addView(tv(t.body, look.msg, ink).apply {
+            android.text.util.Linkify.addLinks(this, android.text.util.Linkify.WEB_URLS or android.text.util.Linkify.PHONE_NUMBERS)
+            setLinkTextColor(ink)
+            setOnLongClickListener { textMenu(t); true }
+        })
+        val meta = (ink and 0x00FFFFFF) or (0x99 shl 24)
+        b.addView(LinearLayout(this).apply {
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            addView(tv("SMS · " + time(t.date), 12f, meta))
+            when (t.state) {
+                Texts.SENDING -> addView(tv("  🕓", 11f, meta))
+                Texts.FAILED -> addView(tv("  not sent · tap to retry", 12f, if (t.mine) Color.WHITE else red, true).apply {
+                    setOnClickListener {
+                        val people = textPeople
+                        var pic: Pair<ByteArray, String>? = null
+                        Messenger.run({
+                            pic = t.attachments.firstOrNull { it.mime.startsWith("image/") }?.let { a -> contentResolver.openInputStream(a.uri)?.use { it.readBytes() }?.let { it to a.mime } }
+                        }, {
+                            if (t.body.isEmpty() && pic == null) return@run toast("Couldn't resend that one")
+                            Texts.deleteText(this@MainActivity, t)
+                            Texts.send(this@MainActivity, people, t.body, pic)
+                        })
+                    }
+                })
+            }
+        }, LinearLayout.LayoutParams(-1, -2))
+        b.setOnLongClickListener { textMenu(t); true }
+        wrap.addView(b, LinearLayout.LayoutParams(-2, -2).apply { if (t.mine) leftMargin = dp(56) else rightMargin = dp(56) })
+        return wrap
+    }
+
+    private fun textMenu(t: Texts.Text) = longPressMenu(null, null, listOfNotNull(
+        t.body.takeIf { it.isNotEmpty() }?.let { body -> "Copy" to { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("text", body)); toast("Copied") } },
+        "Delete" to { Texts.deleteText(this, t) },
+    ))
+
+    /** A picture inside a picture text, loaded off the main thread; tap to see it big. */
+    private fun textPicture(a: Texts.Attachment): View {
+        val iv = ImageView(this).apply {
+            adjustViewBounds = true; maxHeight = dp(320); maxWidth = dp(260); minimumHeight = dp(80); minimumWidth = dp(120)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        if (!a.mime.startsWith("image/")) return tv(if (a.mime.startsWith("video/")) "🎬 Video" else "🎵 Audio", look.msg, white).apply {
+            setOnClickListener { toast("Open this one in your old texting app") }
+        }
+        val key = a.uri.toString()
+        textPics.get(key)?.let { iv.setImageBitmap(it) } ?: run {
+            var bmp: android.graphics.Bitmap? = null
+            Messenger.run({ bmp = contentResolver.openInputStream(a.uri)?.use { it.readBytes() }?.let { decodeSmall(it, 720) } },
+                { bmp?.let { textPics.put(key, it); iv.setImageBitmap(it) } })
+        }
+        iv.setOnClickListener {
+            var big: android.graphics.Bitmap? = null
+            Messenger.run({ big = contentResolver.openInputStream(a.uri)?.use { it.readBytes() }?.let { decodeSmall(it, 2048) } }, {
+                big?.let { bm ->
+                    val d = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+                    d.setContentView(ImageView(this).apply { setImageBitmap(bm); setBackgroundColor(Color.BLACK); setOnClickListener { d.dismiss() } })
+                    d.show()
+                }
+            })
+        }
+        return iv
+    }
+
+    /** A photo chosen for a picture text, shrunk to fit the carrier's size limit. */
+    private fun textImagePicked(uri: android.net.Uri) {
+        val limit = (Texts.mmsLimit(this) * 0.9).toInt()
+        var out: ByteArray? = null
+        Messenger.run({
+            val bmp = loadPhoto(uri) ?: return@run
+            var side = 1600; var q = 85
+            var b = jpeg(bmp, side, q)
+            while (b.size > limit && side > 320) { if (q > 60) q -= 10 else side = side * 3 / 4; b = jpeg(bmp, side, q) }
+            out = b
+        }, {
+            val b = out ?: return@run toast("Couldn't open that photo")
+            textImage = b to "image/jpeg"
+            textImageBar?.apply { text = "📷 Picture attached (${b.size / 1024} KB) · tap to remove"; visibility = View.VISIBLE }
+        }) { toast("Couldn't open that photo") }
+    }
+
     companion object {
         private const val PICK_PHOTO = 7
         private const val PICK_ATTACH_PHOTO = 8
@@ -1103,7 +1480,11 @@ class MainActivity : Activity() {
         private const val LOCATION_FOR_SHARE = 16
         private const val SCAN_QR = 17
         private const val CONFIRM_IDENTITY = 18
-        private const val ROUND_VIDEO = 18
+        private const val ROUND_VIDEO = 19   // was 18, the same as CONFIRM_IDENTITY, so recorded round videos were dropped
+        private const val TEXT_ROLE = 20
+        private const val PICK_CONTACT = 21
+        private const val TEXT_IMAGE = 22
+        private const val TEXT_PERMS = 23
 
         /** Fixed reactions, then the most-used emoji not already in the bar, padded with [filler]. */
         fun quickReactions(use: Map<String, Int>, fixed: List<String>, filler: List<String>): List<String> {
@@ -1951,6 +2332,7 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == TEXT_PERMS) { Texts.forgetNames(); Texts.reload(this); return }
         if (requestCode == LOCATION_FOR_SHARE) {
             if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) shareLocation() else toast("$APP_NAME needs location access to share where you are")
             return
@@ -2994,6 +3376,7 @@ class MainActivity : Activity() {
         fun divider() = col.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(6) })
         col.addView(gap(6))
         item(R.drawable.ic_edit, "New Message") { showNewChat() }
+        if (Texts.isDefault(this)) item(R.drawable.ic_edit, "New Text", "a normal text, not encrypted") { showNewText() }
         item(R.drawable.ic_more, "New Group") { showNewGroup() }
         item(R.drawable.ic_search, "Join Group", "with an invite link") { joinGroupPrompt() }
         item(R.drawable.ic_folder, "New Folder", "group chats, e.g. Family") { newFolder() }
@@ -3911,6 +4294,7 @@ class MainActivity : Activity() {
         if (requestCode == CONFIRM_IDENTITY) { val ok = pendingIdentity; pendingIdentity = null; if (resultCode == RESULT_OK) ok?.invoke(); return }
         if (requestCode == SCAN_QR && resultCode == RESULT_OK) return data?.getStringExtra("qr")?.let { scanned(it) } ?: Unit
         if (requestCode == ROUND_VIDEO && resultCode == RESULT_OK) return data?.getStringExtra("path")?.let { sendRound(it) } ?: Unit
+        if (requestCode == TEXT_ROLE) return textRoleResult()
         val uri = data?.data
         if (resultCode != RESULT_OK || uri == null) return
         if (requestCode == CREATE_RECOVERY) return setupRecovery(uri)
@@ -3918,6 +4302,8 @@ class MainActivity : Activity() {
         if (requestCode == SAVE_IMAGE) return saveImageTo(uri)
         if (requestCode == PICK_ATTACH_PHOTO || requestCode == PICK_ATTACH_FILE) return attachPicked(uri, requestCode == PICK_ATTACH_PHOTO)
         if (requestCode == TAKE_MEDIA) return attachPicked(uri, data?.getBooleanExtra("photo", true) ?: true)
+        if (requestCode == PICK_CONTACT) return contactPicked(uri)
+        if (requestCode == TEXT_IMAGE) return textImagePicked(uri)
         if (requestCode != PICK_PHOTO) return
         var bmp: android.graphics.Bitmap? = null
         Messenger.run({ bmp = loadPhoto(uri) }, { bmp?.let { showCrop(it) } ?: toast("Couldn't open that photo") }) {
@@ -4138,6 +4524,15 @@ class MainActivity : Activity() {
         col.addView(settingRow("Self-destruct", if (sd == 0) "Off" else "On: everything in $APP_NAME on this phone is wiped if it isn't opened for ${destructLabel(sd)}", if (sd == 0) white else red) { selfDestructMenu() })
         col.addView(settingSwitch("Show names in notifications", Messenger.notifyNames) { on -> Messenger.notifyNames = on; Messenger.settingsChanged() })
         col.addView(settingSwitch("Show message text in notifications", Messenger.notifyText) { on -> Messenger.notifyText = on; Messenger.settingsChanged() })
+        col.addView(tv("Texting", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+        val texting = Texts.isDefault(this)
+        col.addView(settingRow("Use $APP_NAME for normal texts", if (texting) "On: $APP_NAME is this phone's texting app" else "Off: texts stay in your usual texting app") {
+            if (!texting) askTextRole()
+            else popup("Switch texting apps?", "Pick a different texting app in your phone's Default apps settings. Your texts stay on the phone either way.",
+                null, "Cancel" to dim, "Open settings" to white) { b -> if (b == 1) runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) } }
+        })
+        if (Texts.canRead(this)) col.addView(settingSwitch("Show texts together with chats", Texts.mixed(this)) { on -> Texts.setMixed(this, on); textsTab = false })
+        col.addView(settingNote("Normal texts go through your phone carrier, not Tor, and aren't encrypted: the carrier can read them. They're kept in the phone's own text storage, so self-destruct doesn't erase them. In $APP_NAME they always have green bubbles and an SMS tag."))
         col.addView(settingNote("Like a normal text: who wrote and what they said (not while app lock is on). On the lock screen your phone's own setting decides how much shows. " +
             "Turn names off to just see \"$APP_NAME · New message\"."))
         // Calls when closed: each missing phone setting, tap to fix

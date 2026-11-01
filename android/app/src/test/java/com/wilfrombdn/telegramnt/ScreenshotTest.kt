@@ -130,6 +130,29 @@ class ScreenshotTest {
         call(a, "showSignup"); shoot(a, "0b-signup")
     }
 
+    /** Normal texts: the Chats | Texts tabs, the mixed list, and a text thread (green, "not encrypted"). */
+    @Test fun texts() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val app = org.robolectric.RuntimeEnvironment.getApplication()
+        shadowOf(app).grantPermissions(android.Manifest.permission.READ_SMS)
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        Thread.sleep(500); shadowOf(Looper.getMainLooper()).idle()   // let the (empty) first load finish
+        val now = System.currentTimeMillis()
+        Texts.threads = listOf(
+            Texts.Thread(11, listOf("+15551234567"), "Your table for 2 is ready", now - 120_000, 1),
+            Texts.Thread(12, listOf("+15559876543", "+15550001111"), "📷 Picture", now - 7_200_000, 0),
+        )
+        call(a, "showChats"); shoot(a, "t1-chats-tab")
+        MainActivity::class.java.getDeclaredField("textsTab").apply { isAccessible = true }.setBoolean(a, true)
+        call(a, "showChats"); shoot(a, "t2-texts-tab")
+        Texts.setMixed(app, true)
+        call(a, "showChats"); shoot(a, "t3-mixed")
+        Texts.setMixed(app, false)
+        call(a, "showSettings"); shoot(a, "t4-settings")
+        call(a, "showNewText"); shoot(a, "t5-new-text")
+        Texts.threads = emptyList()
+    }
+
     /** 4.4: icon (with the round mask), folders, the long-press menu, and the react-bar ranking. */
     @Test fun v44() {
         val ctx = org.robolectric.RuntimeEnvironment.getApplication()
