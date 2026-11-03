@@ -88,12 +88,21 @@ object Net {
      * GETs [path] and streams the body into [out] (handles Content-Length or chunked replies), calling
      * [progress] with (bytes so far, total or -1). Used for the app's own updates from GitHub Pages.
      */
-    fun download(route: Route, path: String, out: java.io.OutputStream, progress: (Long, Long) -> Unit = { _, _ -> }) {
+    fun download(route: Route, path: String, out: java.io.OutputStream, progress: (Long, Long) -> Unit = { _, _ -> }) =
+        download(route, path, 0, { out }, progress)
+
+    /**
+     * Like the above, but [from] > 0 asks only for the rest of the file (an HTTP Range request), so a
+     * dropped download can carry on where it stopped. [open] is told where the reply actually starts:
+     * [from] when the server agreed, or 0 when it sends the whole file again (then start over).
+     */
+    fun download(route: Route, path: String, from: Long, open: (Long) -> java.io.OutputStream, progress: (Long, Long) -> Unit) {
         val s = connect(route.host, route.port, route.tls, route.socksPort, 15_000)
         try {
             s.soTimeout = 60_000
             s.getOutputStream().apply {
                 write(("GET $path HTTP/1.1\r\nHost: ${route.host}\r\nUser-Agent: $APP_NAME\r\nAccept-Encoding: identity\r\n" +
+                    (if (from > 0) "Range: bytes=$from-\r\n" else "") +
                     "Connection: close\r\n\r\n").toByteArray(Charsets.ISO_8859_1))
                 flush()
             }
@@ -101,6 +110,7 @@ object Net {
             val code = readLine(inp)?.split(" ")?.getOrNull(1)?.toIntOrNull() ?: throw IOException("bad status")
             var length = -1L
             var chunked = false
+            var rangeStart = -1L
             while (true) {
                 val line = readLine(inp) ?: break
                 if (line.isEmpty()) break
@@ -108,24 +118,32 @@ object Net {
                 val k = line.substring(0, i).trim(); val v = line.substring(i + 1).trim()
                 if (k.equals("Content-Length", true)) length = v.toLongOrNull() ?: -1
                 if (k.equals("Transfer-Encoding", true) && v.contains("chunked", true)) chunked = true
+                if (k.equals("Content-Range", true)) rangeStart = v.substringAfter("bytes", "").trim().substringBefore('-').toLongOrNull() ?: -1
             }
-            if (code != 200) throw IOException("HTTP $code")
-            val buf = ByteArray(64 * 1024)
-            var got = 0L
-            fun copy(n: Long) {   // n < 0 = until EOF
-                var left = n
-                while (n < 0 || left > 0) {
-                    val r = inp.read(buf, 0, if (n < 0) buf.size else minOf(buf.size.toLong(), left).toInt())
-                    if (r == -1) { if (n < 0) return else throw IOException("connection dropped") }
-                    out.write(buf, 0, r); got += r; left -= r
-                    progress(got, length)
+            val start = when {
+                code == 200 -> 0L
+                code == 206 && from > 0 && rangeStart == from -> from
+                else -> throw IOException("HTTP $code")
+            }
+            val total = if (length >= 0 && !chunked) start + length else -1L
+            open(start).use { out ->
+                val buf = ByteArray(64 * 1024)
+                var got = start
+                fun copy(n: Long) {   // n < 0 = until EOF
+                    var left = n
+                    while (n < 0 || left > 0) {
+                        val r = inp.read(buf, 0, if (n < 0) buf.size else minOf(buf.size.toLong(), left).toInt())
+                        if (r == -1) { if (n < 0) return else throw IOException("connection dropped") }
+                        out.write(buf, 0, r); got += r; left -= r
+                        progress(got, total)
+                    }
                 }
+                if (chunked) while (true) {
+                    val size = readLine(inp)?.substringBefore(';')?.trim()?.toLongOrNull(16) ?: throw IOException("bad chunk")
+                    if (size == 0L) break
+                    copy(size); readLine(inp)
+                } else copy(length)
             }
-            if (chunked) while (true) {
-                val size = readLine(inp)?.substringBefore(';')?.trim()?.toLongOrNull(16) ?: throw IOException("bad chunk")
-                if (size == 0L) break
-                copy(size); readLine(inp)
-            } else copy(length)
         } finally {
             runCatching { s.close() }
         }

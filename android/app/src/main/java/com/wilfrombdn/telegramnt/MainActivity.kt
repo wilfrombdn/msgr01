@@ -338,16 +338,19 @@ class MainActivity : Activity() {
         }
         lateinit var ask: View
         lateinit var go: View
+        lateinit var updateBtn: TextView
         fun startUpdate() {
             go.visibility = View.GONE; track.visibility = View.VISIBLE; status.visibility = View.VISIBLE
-            status.text = "Downloading… 0%"
+            val resuming = Updater.hasPartial(this, u)
+            status.text = if (resuming) "Picking up where it left off…" else "Downloading… 0%"
             d.setCancelable(false)
             Updater.onStatus = { err -> runOnUiThread {
                 if (err != null) { status.text = "Couldn't update: $err"; go.visibility = View.VISIBLE; d.setCancelable(true) }
             } }
             var apk: File? = null
             Messenger.run({
-                apk = Updater.download(this, u) { p -> runOnUiThread { fill.scaleX = p; status.text = "Downloading… ${(p * 100).toInt()}%" } }
+                apk = Updater.download(this, u, { p -> runOnUiThread { fill.scaleX = p; status.text = "Downloading… ${(p * 100).toInt()}%" } },
+                    { msg -> runOnUiThread { status.text = msg } })
             }, {
                 fill.scaleX = 1f
                 status.text = "Installing… $APP_NAME will close and reopen."
@@ -359,11 +362,18 @@ class MainActivity : Activity() {
                     startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:$packageName")))
                 } else Messenger.run({ Updater.install(this, f) }, {}) { e -> status.text = "Couldn't update: ${e.message}"; go.visibility = View.VISIBLE; d.setCancelable(true) }
             }) { e ->
-                status.text = if (e is java.io.IOException) "Download didn't finish (${e.message}). Try again." else errorText(e)
+                status.text = if (e is java.io.IOException) {
+                    val at = (fill.scaleX * 100).toInt()
+                    if (e is Updater.Damaged) "The download came through damaged. Tap Continue to try again."
+                    else if (Updater.hasPartial(this, u)) "The connection keeps dropping. Tap Continue to carry on from ${if (at > 0) "$at%" else "where it stopped"} — nothing downloaded is lost."
+                    else "Couldn't reach the update (${e.message}). Tap Continue to try again."
+                } else errorText(e)
+                updateBtn.text = "CONTINUE"
                 go.visibility = View.VISIBLE; d.setCancelable(true)
             }
         }
-        go = buttons(("Not now" to dim) to { d.dismiss() }, ("Update" to white) to { startUpdate() })
+        go = buttons(("Not now" to dim) to { d.dismiss() }, ((if (Updater.hasPartial(this, u)) "Continue" else "Update") to white) to { startUpdate() })
+        updateBtn = (go as LinearLayout).getChildAt(1) as TextView
         ask = buttons(("No" to dim) to { d.dismiss() }, ("Yes" to white) to {
             col.removeView(ask)
             col.addView(tv("What's new", 15f, white, true).apply { setPadding(0, dp(8), dp(8), dp(4)) })
