@@ -1434,7 +1434,7 @@ class MainActivity : Activity() {
         if (q.isEmpty() && folderPlace() == "top") folderRows(list)
         for (t in ts) list.addView(textRow(t))
         if (q.isEmpty() && folderPlace() == "bottom") folderRows(list)
-        if (ts.isEmpty() && Texts.threads.none { it.spam || it.code || it.archived }) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
+        if (ts.isEmpty()) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
             .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
     }
 
@@ -1480,7 +1480,7 @@ class MainActivity : Activity() {
 
     /** A folder row at the end of the texts ("Codes · 3"), or null if it's empty. */
     private fun sectionRow(icon: String, label: String, n: Int, open: () -> Unit): View? {
-        if (n == 0) return null
+        // always shown, even when empty, so you know where it is
         return LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(22), dp(16), dp(16), dp(16))
@@ -1488,7 +1488,7 @@ class MainActivity : Activity() {
             setOnClickListener { open() }
             addView(tv(icon, 18f, dim).apply { setPadding(0, 0, dp(18), 0) })
             addView(tv(label, 16f, dim), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(tv("$n", 14f, dim))
+            if (n > 0) addView(tv("$n", 14f, dim))
         }
     }
 
@@ -3819,18 +3819,29 @@ class MainActivity : Activity() {
         })
         fun divider() = col.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(6) })
         col.addView(gap(6))
-        item(R.drawable.ic_edit, "New Message") { showNewChat() }
-        if (Texts.isDefault(this)) item(R.drawable.ic_edit, "New Text", "a normal text, not encrypted") { showNewText() }
-        item(R.drawable.ic_more, "New Group") { showNewGroup() }
-        item(R.drawable.ic_search, "Join Group", "with an invite link") { joinGroupPrompt() }
-        item(R.drawable.ic_folder, "New Folder", "group chats, e.g. Family") { newFolder() }
-        item(R.drawable.ic_bookmark, "Saved Messages", "notes to yourself, on this phone") { showChat(Messenger.core.savedChat().user) }
-        divider()
-        if (folderPlace() == "menu" && Texts.canRead(this)) {
-            val (a, c, s) = folderCounts()
-            item(R.drawable.ic_folder, "Archive", "$a texts") { showTextSection("archive") }
-            item(R.drawable.ic_folder, "Codes", "$c texts") { showTextSection("codes") }
-            item(R.drawable.ic_folder, "Spam & blocked", "$s texts") { showTextSection("spam") }
+        if (textsTab) {
+            // Phone screen: texts, dialling, contacts and the text folders
+            if (Texts.isDefault(this)) item(R.drawable.ic_edit, "New Text", "a normal text, not encrypted") { showNewText() }
+            else if (Texts.canRead(this)) item(R.drawable.ic_edit, "Use $APP_NAME for texts", "so you can send and receive here") { askTextRole() }
+            item(R.drawable.ic_call, "Dial pad") { runCatching { startActivity(Intent(Intent.ACTION_DIAL)) } }
+            item(R.drawable.ic_add, "New Contact") { showAddContact(null) { showChats() } }
+            if (!PhoneCalls.isDefaultDialer(this)) item(R.drawable.ic_call, "Use $APP_NAME for phone calls", "answer and place calls here") { askCallRole() }
+            divider()
+            if (folderPlace() == "menu" && Texts.canRead(this)) {
+                val (a, c, s) = folderCounts()
+                item(R.drawable.ic_folder, "Archive", "$a texts") { showTextSection("archive") }
+                item(R.drawable.ic_folder, "Codes", "$c texts") { showTextSection("codes") }
+                item(R.drawable.ic_folder, "Spam & blocked", "$s texts") { showTextSection("spam") }
+                divider()
+            }
+        } else {
+            // Tellem screen: private chats
+            item(R.drawable.ic_edit, "New Message") { showNewChat() }
+            if (Texts.mixed(this) && Texts.isDefault(this)) item(R.drawable.ic_edit, "New Text", "a normal text, not encrypted") { showNewText() }   // texts sit among the chats
+            item(R.drawable.ic_more, "New Group") { showNewGroup() }
+            item(R.drawable.ic_search, "Join Group", "with an invite link") { joinGroupPrompt() }
+            item(R.drawable.ic_folder, "New Folder", "group chats, e.g. Family") { newFolder() }
+            item(R.drawable.ic_bookmark, "Saved Messages", "notes to yourself, on this phone") { showChat(Messenger.core.savedChat().user) }
             divider()
         }
         item(R.drawable.ic_menu, "Settings") { showSettings() }
