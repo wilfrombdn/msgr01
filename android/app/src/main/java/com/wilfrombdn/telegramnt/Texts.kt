@@ -252,6 +252,7 @@ object Texts {
     fun spamVerdict(ctx: Context, thread: Long, people: List<String>, latest: String, replied: Boolean): Boolean {
         if (thread in idSet(ctx, "notspam")) return false
         if (thread in idSet(ctx, "spam")) return true
+        if (CodeText.matches(latest)) return false   // login / verification codes are wanted, even when they say "verify your…"
         return !replied && people.none { contact(ctx, it) != null } && looksLikeSpam(latest)
     }
 
@@ -457,6 +458,7 @@ object Texts {
         val people = addressesOf(ctx, thread)
         val recent = messages(ctx, thread, 30)
         val spam = spamVerdict(ctx, thread, people, recent.lastOrNull { !it.mine }?.body.orEmpty(), recent.any { it.mine })
+        if (spam) return   // spam never notifies; it waits quietly in Spam & blocked
         val title = (if (spam) "Possible spam · " else "") + if (showNames) title(ctx, people) else APP_NAME
         val open = PendingIntent.getActivity(ctx, ("t$thread").hashCode(), Intent(ctx, MainActivity::class.java).putExtra("textThread", thread),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -488,7 +490,7 @@ object Texts {
         if (showNames && people.isNotEmpty() && !spam) {
             val pi = PendingIntent.getBroadcast(ctx, ("r$thread").hashCode(), Intent(ctx, TextReplyReceiver::class.java).putExtra("thread", thread),
                 PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)   // mutable: Android fills in the typed reply
-            b.addAction(Notification.Action.Builder(null, "Reply", pi).addRemoteInput(RemoteInput.Builder(TextReplyReceiver.KEY).setLabel("Text message").build()).build())
+            b.addAction(Notification.Action.Builder(null, "Reply", pi).also { ReplyReceiver.noUnlock(ctx, it) }.addRemoteInput(RemoteInput.Builder(TextReplyReceiver.KEY).setLabel("Text message").build()).build())
         }
         ctx.getSystemService(NotificationManager::class.java).notify(NOTE_TAG, thread.toInt(), b.build())
     }

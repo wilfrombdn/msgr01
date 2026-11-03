@@ -886,6 +886,9 @@ class MainActivity : Activity() {
             // the Archived chats page: just those, newest first
             for (t in rows.filter { it.first in arch }.sortedByDescending { it.second }) list.addView(rowFor(t))
         } else {
+        if (q.isEmpty() && !phoneOnly) ringFixes().firstOrNull()?.let { f ->   // messages arrive late while the phone is set to cut Tellem's internet
+            list.addView(note("Messages can arrive late: ${f.first.replaceFirstChar { it.lowercase() }} isn't set up. Tap to fix.") { f.third() })
+        }
         if (mixed && q.isEmpty()) { sectionRow("🔑", "Codes", Texts.threads.count { it.code && !it.spam }) { showTextSection(true) }?.let { list.addView(it) }
             sectionRow("🚫", "Spam & blocked", Texts.threads.count { it.spam }) { showTextSection(false) }?.let { list.addView(it) } }
         // pinned chats: at the very top, above folders, in the order you pinned them
@@ -1230,9 +1233,9 @@ class MainActivity : Activity() {
         if (textsTab) {
             val sub = row().apply { setBackgroundColor(listBg) }
             fun go(k: String) { if (phoneSub != k) { phoneSub = k; chatsScrollY = 0; showChats() } }
-            if (!mixed) sub.tab("Texts", textsUnread(), phoneSub == "texts", 14f) { go("texts") }
-            sub.tab("Calls", 0, phoneSub == "calls", 14f) { go("calls") }
             sub.tab("Contacts", 0, phoneSub == "contacts", 14f) { go("contacts") }
+            sub.tab("Calls", 0, phoneSub == "calls", 14f) { go("calls") }
+            if (!mixed) sub.tab("Texts", textsUnread(), phoneSub == "texts", 14f) { go("texts") }
             addView(sub)
         }
     }
@@ -4891,6 +4894,8 @@ class MainActivity : Activity() {
         col.addView(settingRow("Self-destruct", if (sd == 0) "Off" else "On: everything in $APP_NAME on this phone is wiped if it isn't opened for ${destructLabel(sd)}", if (sd == 0) white else red) { selfDestructMenu() })
         col.addView(settingSwitch("Show names in notifications", Messenger.notifyNames) { on -> Messenger.notifyNames = on; Messenger.settingsChanged() })
         col.addView(settingSwitch("Show message text in notifications", Messenger.notifyText) { on -> Messenger.notifyText = on; Messenger.settingsChanged() })
+        col.addView(settingSwitch("Reply from the lock screen without unlocking", ReplyReceiver.lockReply(this)) { on -> getSharedPreferences("ui", 0).edit().putBoolean("lockreply", on).apply() })
+        col.addView(settingNote("When off, replying to a notification asks for your phone passcode first. Always asked while app lock is on."))
         if (Build.VERSION.SDK_INT >= 29 || packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) {
             col.addView(tv("Phone calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
             val calling = PhoneCalls.isDefaultDialer(this)

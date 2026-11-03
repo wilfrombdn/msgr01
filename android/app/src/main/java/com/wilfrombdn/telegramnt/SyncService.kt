@@ -100,7 +100,7 @@ class SyncService : Service() {
                 b.setContentTitle(c.name)
                 // with app lock on, the chats stay behind it: no text in notifications either
                 val unread = if (Messenger.notifyText && !Messenger.appLock) synchronized(Messenger.core) {
-                    c.msgs.filter { !it.mine && it.state != Msg.NOTE }.takeLast(c.unread.coerceIn(1, 6))
+                    c.msgs.filter { !it.mine && it.state != Msg.NOTE }.sortedBy { it.ts }.takeLast(c.unread.coerceIn(1, 6))
                 } else emptyList()
                 if (unread.isEmpty()) b.setContentText(summary)
                 else b.setStyle(chatStyle(c.name, unread)).setContentText(preview(unread.last()))

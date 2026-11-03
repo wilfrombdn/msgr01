@@ -28,10 +28,17 @@ class ReplyReceiver : BroadcastReceiver() {
     companion object {
         const val KEY = "reply"
 
+        /** Reply from the lock screen without typing the phone's passcode (Settings > Privacy; off with app lock). */
+        fun lockReply(ctx: Context) = ctx.getSharedPreferences("ui", 0).getBoolean("lockreply", true) && !Messenger.appLock
+
+        fun noUnlock(ctx: Context, b: Notification.Action.Builder) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) b.setAuthenticationRequired(!lockReply(ctx))
+        }
+
         fun action(ctx: Context, c: Contact): Notification.Action {
             val pi = PendingIntent.getBroadcast(ctx, c.user.hashCode(), Intent(ctx, ReplyReceiver::class.java).putExtra("chat", c.user),
                 PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)   // mutable: Android fills in the typed reply
-            return Notification.Action.Builder(null, "Reply", pi)
+            return Notification.Action.Builder(null, "Reply", pi).also { noUnlock(ctx, it) }
                 .addRemoteInput(RemoteInput.Builder(KEY).setLabel("Message").build())
                 .build()
         }

@@ -10,6 +10,7 @@ class CodeTextTest {
         assertTrue(CodeText.matches("G-123456 is your Google verification code."))
         assertTrue(CodeText.matches("Use 5521 as your login PIN"))
         assertTrue(CodeText.matches("123-456 is your security code"))
+        assertTrue(CodeText.matches("Please verify your account. Your code is 884213, expires in 10 minutes"))
     }
     @Test fun normalTextsAreNot() {
         assertFalse(CodeText.matches("See you at 7, bring the code for the garage"))
