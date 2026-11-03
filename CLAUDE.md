@@ -14,8 +14,8 @@
   without asking the owner first.
 - **Next server step:** regular database backups (not set up yet). See `SERVER-SETUP.md`.
 
-## Waiting for the next release (since 6.9)
-- Nothing yet. 7.0 in progress: Tellem as the phone's calling app (default dialer / InCallService).
+## Waiting for the next release (since 7.0)
+- Nothing yet. 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) has not been tested on a real phone, so expect fixes.
 
 ## Setting up another computer
 - Clone this repo and `git@github.com:wilfrombdn/wilfrombdn.github.io.git` to `~/wilfrombdn.github.io` (download page + update.json).

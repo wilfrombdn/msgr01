@@ -1156,6 +1156,22 @@ class MainActivity : Activity() {
     private val textsChanged: () -> Unit = { redraw() }
 
     /** Ask Android to make Tellem the texting app (Android shows its own "set as default" question). */
+    private fun askCallRole() {
+        val rm = if (Build.VERSION.SDK_INT >= 29) getSystemService(android.app.role.RoleManager::class.java) else null
+        val i = rm?.takeIf { it.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER) }?.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER)
+            ?: @Suppress("DEPRECATION") Intent(android.telecom.TelecomManager.ACTION_CHANGE_DEFAULT_DIALER).putExtra(android.telecom.TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, packageName)
+        @Suppress("DEPRECATION") startActivityForResult(i, CALL_ROLE)
+    }
+
+    private fun callRoleResult() {
+        if (PhoneCalls.isDefaultDialer(this)) {
+            PhoneCalls.channels(this)
+            toast("$APP_NAME now handles phone calls")
+            if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.ANSWER_PHONE_CALLS), CALL_PERM)
+        }
+        if (screen == "settings") showSettings()
+    }
+
     private fun askTextRole() {
         val i = if (Build.VERSION.SDK_INT >= 29) getSystemService(android.app.role.RoleManager::class.java)
             .takeIf { it.isRoleAvailable(android.app.role.RoleManager.ROLE_SMS) }?.createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS)
@@ -1271,7 +1287,7 @@ class MainActivity : Activity() {
             background = pressable()
             setOnClickListener {
                 k.friend?.let { u -> Messenger.core.contact(u)?.takeIf { it.canChat }?.let { callFriend(it) } ?: toast("Can't call them on $APP_NAME") }
-                    ?: runCatching { startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", k.number, null))) }
+                    ?: k.number?.let { PhoneCalls.dial(this@MainActivity, it) }
             }
             setOnLongClickListener {
                 val n = k.number
@@ -1340,7 +1356,7 @@ class MainActivity : Activity() {
                 addView(tv(n, 16f, white))
                 addView(tv(label, 13f, dim))
             }, LinearLayout.LayoutParams(0, -2, 1f))
-            addView(icon(R.drawable.ic_call, white, 22) { runCatching { startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", n, null))) } })
+            addView(icon(R.drawable.ic_call, white, 22) { PhoneCalls.dial(this@MainActivity, n) })
             addView(icon(R.drawable.ic_send, smsGreen, 22) {
                 var id = 0L
                 Messenger.run({ id = Texts.threadFor(this@MainActivity, listOf(n)) }, { showTextThread(id, listOf(n)) })
@@ -1580,7 +1596,7 @@ class MainActivity : Activity() {
         textList = list
         textKeys = emptyList(); textViews.clear()
         val sc = chatScroller(list); textScroll = sc
-        val call = textPeople.singleOrNull()?.let { n -> icon(R.drawable.ic_call) { runCatching { startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", n, null))) } } }
+        val call = textPeople.singleOrNull()?.let { n -> icon(R.drawable.ic_call) { PhoneCalls.dial(this@MainActivity, n) } }
         val more = icon(R.drawable.ic_more).also { v -> v.setOnClickListener { textThreadMenu(v) } }
         val top = topBar(title, if (group) "Group text · ${textPeople.size} people · not encrypted" else "Text message · not encrypted",
             icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(call, more).toTypedArray())
@@ -1792,6 +1808,8 @@ class MainActivity : Activity() {
         private const val CONFIRM_IDENTITY = 18
         private const val ROUND_VIDEO = 19   // was 18, the same as CONFIRM_IDENTITY, so recorded round videos were dropped
         private const val TEXT_ROLE = 20
+        private const val CALL_ROLE = 21
+        private const val CALL_PERM = 26
         private const val PICK_CONTACT = 21
         private const val TEXT_IMAGE = 22
         private const val TEXT_PERMS = 23
@@ -4615,6 +4633,7 @@ class MainActivity : Activity() {
         if (requestCode == SCAN_QR && resultCode == RESULT_OK) return data?.getStringExtra("qr")?.let { scanned(it) } ?: Unit
         if (requestCode == ROUND_VIDEO && resultCode == RESULT_OK) return data?.getStringExtra("path")?.let { sendRound(it) } ?: Unit
         if (requestCode == TEXT_ROLE) return textRoleResult()
+        if (requestCode == CALL_ROLE) return callRoleResult()
         val uri = data?.data
         if (resultCode != RESULT_OK || uri == null) return
         if (requestCode == CREATE_RECOVERY) return setupRecovery(uri)
@@ -4846,6 +4865,17 @@ class MainActivity : Activity() {
         col.addView(settingRow("Self-destruct", if (sd == 0) "Off" else "On: everything in $APP_NAME on this phone is wiped if it isn't opened for ${destructLabel(sd)}", if (sd == 0) white else red) { selfDestructMenu() })
         col.addView(settingSwitch("Show names in notifications", Messenger.notifyNames) { on -> Messenger.notifyNames = on; Messenger.settingsChanged() })
         col.addView(settingSwitch("Show message text in notifications", Messenger.notifyText) { on -> Messenger.notifyText = on; Messenger.settingsChanged() })
+        if (Build.VERSION.SDK_INT >= 29 || packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) {
+            col.addView(tv("Phone calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+            val calling = PhoneCalls.isDefaultDialer(this)
+            col.addView(settingRow("Use $APP_NAME for phone calls", if (calling) "On: $APP_NAME answers and places normal phone calls" else "Off: calls use your usual phone app") {
+                if (!calling) askCallRole()
+                else popup("Switch calling apps?", "Pick a different phone app in your phone's Default apps settings.", null, "Cancel" to dim, "Open settings" to white) { b ->
+                    if (b == 1) runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
+                }
+            })
+            col.addView(settingNote("Normal phone calls go through your carrier, not Tor, and aren't encrypted. $APP_NAME's own calls with friends are separate and stay private."))
+        }
         col.addView(tv("Texting", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
         val texting = Texts.isDefault(this)
         col.addView(settingRow("Use $APP_NAME for normal texts", if (texting) "On: $APP_NAME is this phone's texting app" else "Off: texts stay in your usual texting app") {

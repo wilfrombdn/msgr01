@@ -30,6 +30,9 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <!-- the Phone tab's call history (read on the phone only) -->
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- phone calls, when Tellem is picked as the phone's calling app (Settings > Phone calls) -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
@@ -93,6 +96,34 @@
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <service android:name=".CallService" android:exported="false"
             android:foregroundServiceType="microphone" />
+        <!-- phone calls: Android only lists an app as a calling app if it has a dial screen and an in-call service -->
+        <activity android:name=".DialerActivity" android:exported="true" android:launchMode="singleTask"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tel" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tel" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".PhoneCallActivity" android:exported="false" android:launchMode="singleTask"
+            android:screenOrientation="portrait" android:showWhenLocked="true" android:turnScreenOn="true"
+            android:excludeFromRecents="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <service android:name=".PhoneCallService" android:exported="true" android:permission="android.permission.BIND_INCALL_SERVICE">
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
+            <intent-filter><action android:name="android.telecom.InCallService" /></intent-filter>
+        </service>
+        <receiver android:name=".PhoneCallReceiver" android:exported="false" />
         <receiver android:name=".ReplyReceiver" android:exported="false" />
         <!-- self-destruct: the deadline alarm, and re-checking after a phone restart (restarts clear alarms) -->
         <receiver android:name=".DestructReceiver" android:exported="false">
