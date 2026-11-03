@@ -12,7 +12,7 @@
 - The server runs on a DigitalOcean droplet. After `relay.py` changes: `scp server/relay.py tellem:/opt/tellem/server/ && ssh tellem systemctl restart tellem`. Details in `SERVER-SETUP.md`.
   The app reaches it only through its Tor .onion address (plus the optional Direct mode). Never add a route that bypasses Tor or exposes users' IPs
   without asking the owner first.
-- **Next server step:** regular database backups (not set up yet). See `SERVER-SETUP.md`.
+- Server backups run nightly from the owner's PC (accounts only, encrypted; see `SERVER-SETUP.md`). Keep the server holding as little as possible.
 
 ## Waiting for the next release (since 7.0)
 - Nothing yet. 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) has not been tested on a real phone, so expect fixes.

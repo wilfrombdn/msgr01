@@ -42,7 +42,9 @@ The old laptop server (`systemctl --user telegramnt`) is **disabled. Never start
 out of date, and two machines publishing the same onion fight each other. The laptop copy of
 `~/.telegramnt-onion/hs/` is still the onion key backup: keep it.
 
-**To do:** regular database backups (e.g. pull a `sqlite3 .backup` copy to the laptop now and then), and keep tor up to date (Ubuntu's tor lags; consider the deb.torproject.org repo). Not set up yet.
+**Backups (set up 2026-11-03):** every night the owner's PC pulls only the `accounts` and `otpk` tables over SSH and locks them with a public key before they touch its disk (nothing is stored on the droplet; the last 7 are kept). Messages, files, mailboxes and wake-up tokens are never copied. Restore steps are in the owner's `tellem-backups` folder. **To do:** keep tor up to date (Ubuntu's tor lags; consider the deb.torproject.org repo).
+
+**Logs:** the relay keeps none. On the droplet the firewall log is off, the system journal is memory-only (1 day), and the text logs rotate daily keeping 1. SSH accepts keys only. The data files are readable only by the `tellem` user (`UMask=0077`).
 
 ### Later
 - Direct could get a **fixed address** (the server's own https name) instead of the Cloudflare tunnel.
