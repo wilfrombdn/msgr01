@@ -14,9 +14,8 @@
   without asking the owner first.
 - **Next server step:** regular database backups (not set up yet). See `SERVER-SETUP.md`.
 
-## Waiting for the next release (since 6.7)
-- Update downloads resume after a dropped connection, retry by themselves, and offer Continue (commit 0026c4c).
-  Only helps from the version after it ships.
+## Waiting for the next release (since 6.9)
+- Nothing yet. 7.0 in progress: Tellem as the phone's calling app (default dialer / InCallService).
 
 ## Setting up another computer
 - Clone this repo and `git@github.com:wilfrombdn/wilfrombdn.github.io.git` to `~/wilfrombdn.github.io` (download page + update.json).

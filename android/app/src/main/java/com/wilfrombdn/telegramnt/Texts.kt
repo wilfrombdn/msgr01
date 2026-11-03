@@ -34,7 +34,7 @@ import java.util.concurrent.Executors
  */
 object Texts {
     class Thread(val id: Long, val addresses: List<String>, val snippet: String, val date: Long, val unread: Int,
-                 val spam: Boolean = false, val blocked: Boolean = false)
+                 val spam: Boolean = false, val blocked: Boolean = false, val code: Boolean = false)
     class Attachment(val uri: Uri, val mime: String)
     class Text(
         val id: Long, val mms: Boolean, val mine: Boolean, val from: String?, val body: String, val date: Long,
@@ -124,7 +124,8 @@ object Texts {
                 if (c.getInt(4) != 0 && snip.isNotEmpty()) snip = String(snip.toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8)
                 if (snip.isEmpty() && c.getInt(6) != 0) snip = "📷 Picture"
                 val blocked = people.any { isBlocked(ctx, it) }
-                out += Thread(id, people, snip, c.getLong(1), unread[id] ?: 0, blocked || spamVerdict(ctx, id, people, snip, id in replied), blocked)
+                val spam = blocked || spamVerdict(ctx, id, people, snip, id in replied)
+                out += Thread(id, people, snip, c.getLong(1), unread[id] ?: 0, spam, blocked, !spam && id !in replied && looksLikeCode(snip))
             }
         }
         out.forEach { t -> t.addresses.forEach { name(ctx, it) } }   // look names up here, not while drawing the list
@@ -225,6 +226,20 @@ object Texts {
 
     /** A text that reads like a typical scam or ad: has a link, or scam wording. */
     fun looksLikeSpam(text: String) = LINK.containsMatchIn(text) || SCAM.containsMatchIn(text)
+
+    // ---------- verification codes, pins, group names (all kept on this phone) ----------
+
+
+    /** A one-time verification / two-factor code text. */
+    fun looksLikeCode(text: String) = CodeText.matches(text)
+
+    fun pins(ctx: Context): Set<Long> = idSet(ctx, "pin")
+    fun setPinned(ctx: Context, thread: Long, on: Boolean) { setId(ctx, "pin", thread, on); reload(ctx) }
+
+    /** The name you gave a group text on this phone (other people can't see it: normal texts have no shared group names). */
+    fun groupName(ctx: Context, thread: Long): String? = prefs(ctx).getString("gname$thread", null)?.takeIf { it.isNotBlank() }
+    fun setGroupName(ctx: Context, thread: Long, name: String) { prefs(ctx).edit().putString("gname$thread", name.trim()).apply(); reload(ctx) }
+    fun threadTitle(ctx: Context, thread: Long, addresses: List<String>) = groupName(ctx, thread) ?: title(ctx, addresses)
 
     private fun idSet(ctx: Context, key: String) = prefs(ctx).getStringSet(key, emptySet())!!.mapNotNull { it.toLongOrNull() }.toSet()
     private fun setId(ctx: Context, key: String, id: Long, on: Boolean) {

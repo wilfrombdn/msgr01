@@ -25,6 +25,8 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.HorizontalScrollView
+import androidx.core.view.children
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
@@ -96,7 +98,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // keep chats out of screenshots and the recent-apps preview
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        applyShotPolicy()
         applyBars()
         Messenger.init(this)
         SyncService.channels(this)
@@ -218,6 +220,11 @@ class MainActivity : Activity() {
     }
 
     /** Status/navigation bar colours (and dark icons on them in light mode). */
+    private fun shotsAllowed() = getSharedPreferences("ui", 0).getBoolean("shots", false)
+    private fun applyShotPolicy() {
+        if (shotsAllowed()) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
     private fun applyBars() {
         window.statusBarColor = bar
         window.navigationBarColor = listBg
@@ -405,7 +412,7 @@ class MainActivity : Activity() {
         maybeCheckUpdate()
         if (screen == "textthread") return fillTextThread()   // texts work signed in or not
         if (screen == "textlist") return showTextList()
-        if (screen == "textspam") return showTextSpam()
+        if (screen == "textspam") return showTextSection(textSectionCodes)
         if (!Messenger.signedIn) {
             if (screen != "welcome" && screen != "signup" && screen != "login" && screen != "newtext") showWelcome()
             return
@@ -904,9 +911,10 @@ class MainActivity : Activity() {
         }
         // with "show texts together with chats", text threads sit among the chats (never in pins or folders)
         val loose: List<Pair<Long, () -> View>> = rows.filter { it.first !in inFolder }.map { t -> t.second to { rowFor(t) } } +
-            (if (mixed) Texts.threads.filter { !it.spam && textMatches(it, q) }.map { t -> t.date to { textRow(t) } } else emptyList())
+            (if (mixed) Texts.threads.filter { !it.spam && (!it.code || q.isNotEmpty()) && textMatches(it, q) }.map { t -> t.date to { textRow(t) } } else emptyList())
         for ((_, make) in loose.sortedByDescending { it.first }) list.addView(make())
-        if (mixed && q.isEmpty()) spamRow()?.let { list.addView(it) }
+        if (mixed && q.isEmpty()) { sectionRow("🔑", "Codes", Texts.threads.count { it.code && !it.spam }) { showTextSection(true) }?.let { list.addView(it) }
+            sectionRow("🚫", "Spam & blocked", Texts.threads.count { it.spam }) { showTextSection(false) }?.let { list.addView(it) } }
         }
         if (q.length >= 2 && !phoneOnly) messageResults(list, q)
         if (!phoneOnly && all.isEmpty() && grps.isEmpty() && (!mixed || Texts.threads.isEmpty()) && (q.length < 2 || list.childCount == 0)) {
@@ -943,7 +951,9 @@ class MainActivity : Activity() {
             if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
-        )
+        ).also { b ->   // tap the name at the top to flip between chats and the phone screen
+            if (Texts.canRead(this)) b.getChildAt(1)?.setOnClickListener { textsTab = !textsTab; chatsScrollY = 0; showChats() }
+        }
         // Content + a left slide-out drawer (opens by tapping the lines or swiping from the edge).
         val keepOpen = refreshing && drawer?.isDrawerOpen(GravityCompat.START) == true   // refreshes rebuild the screen; don't snap the menu shut
         val d = DrawerLayout(this)
@@ -1345,25 +1355,30 @@ class MainActivity : Activity() {
     /** The text threads, newest first (the Texts tab and the signed-out texts screen). */
     private fun addTextRows(list: LinearLayout, q: String) {
         if (!Texts.isDefault(this)) list.addView(note("$APP_NAME isn't your texting app right now, so texts can't be sent or received here. Tap to change that.") { askTextRole() })
-        val ts = Texts.threads.filter { !it.spam && textMatches(it, q) }
+        val pins = Texts.pins(this)
+        val ts = Texts.threads.filter { !it.spam && (!it.code || q.isNotEmpty()) && textMatches(it, q) }.sortedByDescending { it.id in pins }   // pinned first, then newest (list is already newest first)
         for (t in ts) list.addView(textRow(t))
-        spamRow()?.let { list.addView(it) }
-        if (ts.isEmpty() && Texts.threads.none { it.spam }) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
+        if (q.isEmpty()) { sectionRow("🔑", "Codes", Texts.threads.count { it.code && !it.spam }) { showTextSection(true) }?.let { list.addView(it) }
+            sectionRow("🚫", "Spam & blocked", Texts.threads.count { it.spam }) { showTextSection(false) }?.let { list.addView(it) } }
+        if (ts.isEmpty() && Texts.threads.none { it.spam || it.code }) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
             .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
     }
 
     private fun textRow(t: Texts.Thread): View {
-        val title = Texts.title(this, t.addresses)
+        val title = Texts.threadTitle(this, t.id, t.addresses)
+        val pinned = t.id in Texts.pins(this)
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(listBg)
             setPadding(dp(10), dp(8), dp(14), dp(8))
             setOnClickListener { showTextThread(t.id) }
+            setOnLongClickListener { v -> dropdown(v, Gravity.END, (if (pinned) "Unpin" else "Pin to top") to { Texts.setPinned(this@MainActivity, t.id, !pinned) }); true }
         }
         row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54))   // a bare number gets "#", not "+5"
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
         val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         line1.addView(tv(title, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (pinned) line1.addView(pinMark())
         line1.addView(tv("SMS", 10.5f, Color.WHITE, true).apply { setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(smsGreen, 4) })
         line1.addView(tv(time(t.date), 13f, dim).apply { setPadding(dp(6), 0, 0, 0) })
         mid.addView(line1)
@@ -1386,30 +1401,61 @@ class MainActivity : Activity() {
         }
     }
 
-    /** "Spam & blocked · N" at the end of the texts, or null if there's none. */
-    private fun spamRow(): View? {
-        val n = Texts.threads.count { it.spam }
+    /** A folder row at the end of the texts ("Codes · 3"), or null if it's empty. */
+    private fun sectionRow(icon: String, label: String, n: Int, open: () -> Unit): View? {
         if (n == 0) return null
         return LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(22), dp(16), dp(16), dp(16))
             background = pressable()
-            setOnClickListener { showTextSpam() }
-            addView(tv("🚫", 18f, dim).apply { setPadding(0, 0, dp(18), 0) })
-            addView(tv("Spam & blocked", 16f, dim), LinearLayout.LayoutParams(0, -2, 1f))
+            setOnClickListener { open() }
+            addView(tv(icon, 18f, dim).apply { setPadding(0, 0, dp(18), 0) })
+            addView(tv(label, 16f, dim), LinearLayout.LayoutParams(0, -2, 1f))
             addView(tv("$n", 14f, dim))
         }
     }
 
-    /** Texts the filter set aside, and conversations with blocked numbers. Nothing here is deleted. */
-    private fun showTextSpam() {
+    /** Codes (verification / two-factor texts) or Spam & blocked. Nothing is deleted unless you clear it. */
+    private fun showTextSection(codes: Boolean) {
         screen = "textspam"
+        textSectionCodes = codes
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        list.addView(settingNote("Texts from numbers that aren't in your contacts and have a link or typical scam wording, plus numbers you blocked. They arrive silently. Open one to mark it Not spam. All of this is decided on your phone; nothing is sent anywhere.").apply { setPadding(dp(20), dp(14), dp(20), dp(10)) })
-        val ts = Texts.threads.filter { it.spam }
-        for (t in ts) list.addView(textRow(t))
-        if (ts.isEmpty()) list.addView(tv("No spam", 15.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(48), dp(32), dp(32)) })
-        setContentView(page(topBar("Spam & blocked", null, icon(R.drawable.ic_back) { leaveTexts() }), ScrollView(this).apply { addView(list) }))
+        list.addView(settingNote(if (codes) "Texts with a one-time code, like logins and two-factor. They stay out of your normal texts. Decided on your phone; nothing is sent anywhere."
+            else "Texts from numbers that aren't in your contacts and have a link or typical scam wording, plus numbers you blocked. They arrive silently. Tap Not spam to bring one back, or clear them all. Decided on your phone; nothing is sent anywhere.").apply { setPadding(dp(20), dp(14), dp(20), dp(10)) })
+        val ts = Texts.threads.filter { if (codes) it.code && !it.spam else it.spam }
+        for (t in ts) {
+            list.addView(textRow(t))
+            if (!codes) list.addView(tv("NOT SPAM", 13f, blue, true).apply {
+                setPadding(dp(76), dp(2), dp(16), dp(12))
+                setOnClickListener { Texts.markSpam(this@MainActivity, t.id, false); toast("Moved back to your texts"); showTextSection(false) }
+            })
+        }
+        if (ts.isEmpty()) list.addView(tv(if (codes) "No codes" else "No spam", 15.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(48), dp(32), dp(32)) })
+        val clear = if (ts.isEmpty()) null else icon(R.drawable.ic_trash) {
+            popup(if (codes) "Delete all ${ts.size} code conversations?" else "Clear all ${ts.size} spam conversations?",
+                "This deletes these texts from the phone for good. To keep one, cancel and tap Not spam on it first.", null, "Cancel" to dim, "Delete all" to red) { b ->
+                if (b == 1) { ts.forEach { Texts.deleteThread(this, it.id) }; showTextSection(codes) }
+            }
+        }
+        setContentView(page(topBar(if (codes) "Codes" else "Spam & blocked", null, icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(clear).toTypedArray()), ScrollView(this).apply { addView(list) }))
+    }
+    private var textSectionCodes = false
+
+    /** Everyone in a group text on one scrolling line; tap it for the full list. */
+    private fun peopleStrip(people: List<String>): View = HorizontalScrollView(this).apply {
+        isHorizontalScrollBarEnabled = false
+        setBackgroundColor(bar)
+        val row = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(2), dp(14), dp(8)) }
+        people.forEach { n -> row.addView(tv(Texts.name(this@MainActivity, n), 13f, dim).apply {
+            setPadding(dp(10), dp(3), dp(10), dp(3)); background = round(listBg, 10); maxLines = 1
+        }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) }) }
+        row.addView(tv("all ›", 13f, blue, true).apply { setPadding(dp(6), dp(3), dp(6), dp(3)) })
+        addView(row)
+        val showAll = View.OnClickListener {
+            popup("${people.size} people", people.joinToString("\n") { n -> Texts.name(this@MainActivity, n).let { nm -> if (nm == n) n else "$nm · $n" } }, null, "Close" to white)
+        }
+        row.setOnClickListener(showAll)
+        row.children.forEach { it.setOnClickListener(showAll) }
     }
 
     /** Block / unblock, spam / not spam, delete: the ⋮ menu of a text conversation. */
@@ -1417,6 +1463,14 @@ class MainActivity : Activity() {
         val id = textThread; val people = textPeople
         val t = Texts.threads.firstOrNull { it.id == id }
         val items = ArrayList<Pair<String, () -> Unit>>()
+        val pinned = id in Texts.pins(this)
+        items += (if (pinned) "Unpin from top" else "Pin to top") to { Texts.setPinned(this, id, !pinned); toast(if (pinned) "Unpinned" else "Pinned to the top of your texts") }
+        if (people.size > 1) items += "Name this group" to {
+            val box = field("Group name", Texts.groupName(this, id).orEmpty())
+            popup("Name this group", "Only you see this name. Normal group texts can't share one with the others.", box, "Cancel" to dim, "Save" to white) { b ->
+                if (b == 1) { Texts.setGroupName(this, id, box.text.toString().take(60)); showTextThread(id, people) }
+            }
+        }
         if (people.isNotEmpty()) items += if (t?.blocked == true) "Unblock" to { Texts.block(this, people, false); toast("Unblocked") }
             else "Block number" to {
                 popup("Block ${Texts.title(this, people)}?", "Android will stop their texts and calls from reaching this phone (in every app). You can unblock them later from here.",
@@ -1449,7 +1503,11 @@ class MainActivity : Activity() {
         setOnClickListener { showNewText() }
     }
 
+    private val textSpots = HashMap<Long, Int>()   // where you were in each text chat (kept until the app closes)
+    private var textRestoreY = -1
+
     private fun leaveTexts() {
+        if (screen == "textthread") textScroll?.let { s -> if (atBottom(s)) textSpots.remove(textThread) else textSpots[textThread] = s.scrollY }
         Texts.openThread = 0
         if (Messenger.signedIn) { textsTab = !Texts.mixed(this); phoneSub = "texts"; showChats() } else showTextList()
     }
@@ -1513,7 +1571,7 @@ class MainActivity : Activity() {
         Texts.openThread = id
         textPeople = people ?: Texts.threads.firstOrNull { it.id == id }?.addresses ?: emptyList()
         textImage = null
-        val title = Texts.title(this, textPeople)
+        val title = Texts.threadTitle(this, id, textPeople)
         val group = textPeople.size > 1
         val list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -1583,11 +1641,14 @@ class MainActivity : Activity() {
             addView(callBarView(), LinearLayout.LayoutParams(-1, -2))
             addView(top, LinearLayout.LayoutParams(-1, -2))
             spamBar?.let { addView(it, LinearLayout.LayoutParams(-1, -2)) }
+            if (group) addView(peopleStrip(textPeople), LinearLayout.LayoutParams(-1, -2))
             addView(sc, LinearLayout.LayoutParams(-1, 0, 1f))
             addView(bottom, LinearLayout.LayoutParams(-1, -2))
         }
         setContentView(root)
         stick = true
+        textRestoreY = textSpots[id] ?: -1
+        if (textRestoreY >= 0) stick = false
         fillTextThread()
         if (textPeople.isEmpty()) {   // opened from a notification before the thread list loaded
             var found: List<String> = emptyList()
@@ -1616,6 +1677,7 @@ class MainActivity : Activity() {
             want.forEachIndexed { i, v -> if (list.getChildAt(i) !== v) { (v.parent as? ViewGroup)?.removeView(v); list.addView(v, i) } }
             if (msgs.isEmpty()) list.addView(tv("Texts go through your phone carrier, not Tor, and aren't encrypted.", 13.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) })
             // the scroller keeps to the bottom while you're there (see chatScroller)
+            if (textRestoreY >= 0) { val y = textRestoreY; textRestoreY = -1; textScroll?.let { s -> s.post { s.scrollTo(0, y); stick = atBottom(s) } } }
         })
     }
 
@@ -1757,7 +1819,11 @@ class MainActivity : Activity() {
                 }
             })
         }
-        box.post { box.requestFocus(); box.setSelection(box.text.length) }
+        // each letter redraws the screen, so take focus back and keep the keyboard up (it dropped in the Phone tab)
+        box.post {
+            box.requestFocus(); box.setSelection(box.text.length)
+            getSystemService(InputMethodManager::class.java).showSoftInput(box, InputMethodManager.SHOW_IMPLICIT)
+        }
         return LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(bar)
@@ -4773,6 +4839,8 @@ class MainActivity : Activity() {
         col.addView(gap(8))
         col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged(); showSettings() })
         col.addView(tv("Privacy", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+        col.addView(settingSwitch("Allow screenshots", shotsAllowed()) { on -> getSharedPreferences("ui", 0).edit().putBoolean("shots", on).apply(); applyShotPolicy() })
+        col.addView(settingNote("Lets you screenshot and screen-record the chat screens (they also show in the recent-apps preview). Calls, camera and QR codes stay blocked."))
         col.addView(settingRow("App lock", if (Messenger.appLock) "On: asks for your fingerprint, face or PIN after ${when (Messenger.lockAfterMin) { 1 -> "1 minute"; 60 -> "1 hour"; else -> "${Messenger.lockAfterMin} minutes" }} away" else "Off") { appLockMenu() })
         val sd = Destruct.hours(this)
         col.addView(settingRow("Self-destruct", if (sd == 0) "Off" else "On: everything in $APP_NAME on this phone is wiped if it isn't opened for ${destructLabel(sd)}", if (sd == 0) white else red) { selfDestructMenu() })
