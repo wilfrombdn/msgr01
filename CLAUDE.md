@@ -1,8 +1,9 @@
 # Tellem: notes for Claude
 
-- **Ship every change as an in-app update.** Follow `RELEASING.md` exactly: bump the version, build signed,
-  copy the APK + write `update.json` with 2–4 brief plain-words notes in `~/wilfrombdn.github.io/telegramnt/`, push both repos,
-  then run the live update check. The owner tests the updater on their phone with every release.
+- **Don't build or publish an update until the owner says so.** Batch fixes; when asked to release, follow
+  `RELEASING.md` exactly: bump the version, build signed, copy the APK + write `update.json` with 2–4 brief plain-words
+  notes in `~/wilfrombdn.github.io/telegramnt/`, push both repos, then run the live update check.
+  Keep the list below of what's waiting, and use it for the update notes.
 - Explain things to the owner in plain words, keep lists short, give one recommendation.
 - While working, run only the tests related to the change. The full suite runs on GitHub Actions after each push.
 - Build: `cd android && JAVA_HOME=~/opt/jdk21 ANDROID_HOME=~/Android/Sdk bash ./gradlew assembleRelease`.
@@ -12,3 +13,15 @@
   The app reaches it only through its Tor .onion address (plus the optional Direct mode). Never add a route that bypasses Tor or exposes users' IPs
   without asking the owner first.
 - **Next server step:** regular database backups (not set up yet). See `SERVER-SETUP.md`.
+
+## Waiting for the next release (since 6.7)
+- Update downloads resume after a dropped connection, retry by themselves, and offer Continue (commit 0026c4c).
+  Only helps from the version after it ships.
+
+## Setting up another computer
+- Clone this repo and `git@github.com:wilfrombdn/wilfrombdn.github.io.git` to `~/wilfrombdn.github.io` (download page + update.json).
+- Signing key: unzip `app-signing-keys-2026-10-26.zip` from Google Drive folder "App signing keys (private)" so that
+  `android/keystore/release.jks` and `android/keystore/keystore.properties` exist. Never commit them (this repo is public).
+  Without them builds are debug-signed and can't update phones.
+- Server login: an SSH config entry `Host tellem` → `root@159.89.125.221`, and an SSH key the droplet accepts.
+  `server/giphy.key` and `server/fcm.json` live only on the server; they aren't needed to build the app.
