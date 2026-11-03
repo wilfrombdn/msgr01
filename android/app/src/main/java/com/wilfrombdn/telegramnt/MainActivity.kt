@@ -51,20 +51,20 @@ class MainActivity : Activity() {
         else -> true
     }
     private fun pick(d: String, l: String) = Color.parseColor(if (dark) d else l)
-    private val bar get() = pick("#1F1F1F", "#F7F7F8")       // top bars
-    private val listBg get() = pick("#141414", "#FFFFFF")    // chat list, inputs
-    private val wall get() = pick("#0B0B0B", "#E6E6EA")      // behind messages
-    private val menuBg get() = pick("#2A2A2A", "#FFFFFF")    // drop-down menus
-    private val raised get() = pick("#3A3A3A", "#D9D9DE")    // highlights, outlines, chip borders
-    private val nestedBg get() = pick("#181818", "#F3F3F5")  // chats inside an open folder
+    private val bar get() = pick("#1F1F1F", "#F1F3F6")       // top bars
+    private val listBg get() = pick("#141414", "#F7F8FA")    // chat list, inputs
+    private val wall get() = pick("#0B0B0B", "#E8EBEF")      // behind messages
+    private val menuBg get() = pick("#2A2A2A", "#FBFBFC")    // drop-down menus
+    private val raised get() = pick("#3A3A3A", "#DCE0E6")    // highlights, outlines, chip borders
+    private val nestedBg get() = pick("#181818", "#EEF0F4")  // chats inside an open folder
     private val look get() = Messenger.look
     private val blue = Color.parseColor("#4EA4F6")      // status only: unread, ticks, requests
-    private val ink get() = pick("#111111", "#FFFFFF")       // text on the main (white / dark) buttons
-    private val white get() = pick("#FFFFFF", "#111111")     // main text and icons (dark text in light mode)
-    private val dim get() = pick("#8E8E93", "#6D6D72")
-    private val divider get() = pick("#262626", "#E3E3E6")
-    private val faint get() = pick("#5A5A5A", "#B0B0B5")
-    private val panel2 get() = pick("#2A2A2A", "#EDEDF0")
+    private val ink get() = pick("#111111", "#F7F8FA")       // text on the main (white / dark) buttons
+    private val white get() = pick("#FFFFFF", "#2D323A")     // main text and icons (dark text in light mode)
+    private val dim get() = pick("#8E8E93", "#757B86")
+    private val divider get() = pick("#262626", "#E0E4E9")
+    private val faint get() = pick("#5A5A5A", "#B5BAC2")
+    private val panel2 get() = pick("#2A2A2A", "#E7EAEF")
     private val red = Color.parseColor("#E5534B")
     private val amber get() = pick("#E8C24A", "#9A6B00")   // gentle yellow for the Tor "first connection is slow" note
     private val avatarColors = listOf("#E17076", "#FAA774", "#A695E7", "#7BC862", "#6EC9CB", "#65AADD", "#EE7AAE")
@@ -282,6 +282,7 @@ class MainActivity : Activity() {
             !Messenger.signedIn && screen != "welcome" -> showWelcome()
             screen == "viewer" -> leaveViewer()
             screen == "storage" -> showSettings()
+            screen == "addcontact" -> addContactBack()
             screen == "chats" && showArchive -> { showArchive = false; showChats() }
             Messenger.signedIn && screen != "chats" -> showChats()
             search.isNotEmpty() -> { search = ""; showChats() }
@@ -850,7 +851,11 @@ class MainActivity : Activity() {
             ". You can do this later in Settings > Calls.", null, "Later" to dim, "Set up" to white) { i -> if (i == 1) showSettings() }
     }
 
-    private fun showChats() {
+    /** The chat list inside the open screen: while you type in search only its rows are swapped, so nothing flashes. */
+    private var liveList: LinearLayout? = null
+    private var flipAnim = false
+
+    private fun showChats(searchOnly: Boolean = false) {
         val refreshing = screen == "chats"   // same screen redrawing (new message, reconnect), not arriving from elsewhere
         if (!refreshing) window.decorView.post { maybeAskRingSetup() }
         emojiPopup?.dismiss(); emojiPopup = null
@@ -928,6 +933,11 @@ class MainActivity : Activity() {
                 15.5f, dim,
             ).apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
         }
+        liveList?.takeIf { searchOnly && refreshing && it.isAttachedToWindow }?.let { live ->
+            live.removeAllViews()
+            while (list.childCount > 0) { val v = list.getChildAt(0); list.removeViewAt(0); live.addView(v) }
+            return
+        }
         val scroll = ScrollView(this).apply { addView(list); isFillViewport = true }
         // keep the list where you had it across refreshes (new messages, folder open/close)
         val y = chatsScrollY
@@ -952,21 +962,20 @@ class MainActivity : Activity() {
         val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
         else if (search.isNotEmpty() || screenSearch) searchBar() else {
             // the name at the top flips between Tellem (chats) and Phone; the other side's unread count rides along
-            val phoneUnread = if (mixed) 0 else textsUnread()
-            val chatUnread = all.sumOf { it.unread } + grps.sumOf { it.unread }
             val flip = android.text.SpannableStringBuilder()
             if (textsTab) flip.append("Phone")
             else flip.append(if (!Messenger.connected) "Connecting…" else if (Messenger.direct) APP_NAME else torTitle())
-            flip.append(" ▾")
-            flip.setSpan(android.text.style.RelativeSizeSpan(0.6f), flip.length - 2, flip.length, 0)
-            val other = if (textsTab) chatUnread else phoneUnread
-            if (other > 0) flip.append("  ").append(android.text.SpannableString((if (textsTab) "Tellem " else "Phone ") + other).apply {
-                setSpan(android.text.style.RelativeSizeSpan(0.6f), 0, length, 0); setSpan(android.text.style.ForegroundColorSpan(dim), 0, length, 0) })
+            // small, dim, on the right: the screen a tap switches to (⇄ = swap)
+            val tail = "  ⇄ " + if (textsTab) APP_NAME else "Phone"
+            val at = flip.length
+            flip.append(tail)
+            flip.setSpan(android.text.style.RelativeSizeSpan(0.6f), at, flip.length, 0)
+            flip.setSpan(android.text.style.ForegroundColorSpan(dim), at, flip.length, 0)
             topBar(flip,
                 if (textsTab) null else if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
                 icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
                 icon(R.drawable.ic_search) { screenSearch = true; showChats() },
-            ).also { b -> b.getChildAt(1)?.setOnClickListener { textsTab = !textsTab; chatsScrollY = 0; showChats() } }
+            ).also { b -> b.getChildAt(1)?.setOnClickListener { textsTab = !textsTab; chatsScrollY = 0; flipAnim = true; showChats() } }
         }
         // Content + a left slide-out drawer (opens by tapping the lines or swiping from the edge).
         val keepOpen = refreshing && drawer?.isDrawerOpen(GravityCompat.START) == true   // refreshes rebuild the screen; don't snap the menu shut
@@ -982,6 +991,8 @@ class MainActivity : Activity() {
         ).apply { gravity = GravityCompat.START })
         d.setScrimColor(0x99000000.toInt())
         drawer = d
+        liveList = list
+        if (flipAnim) { flipAnim = false; if (android.animation.ValueAnimator.areAnimatorsEnabled()) (top as? ViewGroup)?.getChildAt(1)?.let { t -> t.alpha = 0f; t.translationX = dp(28).toFloat(); t.animate().alpha(1f).translationX(0f).setDuration(220).start() } }
         setContentView(d)
         if (keepOpen) d.openDrawer(GravityCompat.START, false)
         // while still connecting over Tor, refresh so the status line (bootstrap %, ready, error) updates live
@@ -1261,7 +1272,7 @@ class MainActivity : Activity() {
     private fun phoneButton() = newTextButton().apply {
         when (phoneSub) {
             "calls" -> { setImageResource(R.drawable.ic_call); setOnClickListener { runCatching { startActivity(Intent(Intent.ACTION_DIAL)) } } }
-            "contacts" -> setOnClickListener { runCatching { startActivity(Intent(Intent.ACTION_INSERT, android.provider.ContactsContract.Contacts.CONTENT_URI)) } }
+            "contacts" -> { setImageResource(R.drawable.ic_add); setOnClickListener { showAddContact(null) { showChats() } } }
         }
     }
 
@@ -1352,6 +1363,40 @@ class MainActivity : Activity() {
         }
         if (people.isEmpty() && phonePeople != null) list.addView(tv(if (q.isEmpty()) "No contacts with phone numbers" else "No contacts match \"$search\"", 15.5f, dim)
             .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)) })
+    }
+
+    private var addContactBack: () -> Unit = {}
+    private var addContactSave: (() -> Unit)? = null
+
+    /** New contact, made right here (name, number, email) and saved to the phone's contacts. [number] pre-fills it. */
+    private fun showAddContact(number: String?, back: () -> Unit) {
+        screen = "addcontact"
+        addContactBack = back
+        val first = field("First name").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
+        val last = field("Last name").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
+        val phone = field("Phone number", number.orEmpty()).apply { inputType = InputType.TYPE_CLASS_PHONE }
+        val mail = field("Email (optional)").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
+        fun save() {
+            if (first.text.isBlank() && last.text.isBlank()) return toast("Add a name")
+            if (phone.text.isBlank() && mail.text.isBlank()) return toast("Add a phone number or email")
+            if (!Phone.canWriteContacts(this)) {
+                addContactSave = { save() }
+                return requestPermissions(arrayOf(Manifest.permission.WRITE_CONTACTS), ADD_CONTACT_PERM)
+            }
+            var ok = false
+            Messenger.run({ ok = Phone.addContact(this, first.text.toString().trim(), last.text.toString().trim(), phone.text.toString(), mail.text.toString()) }, {
+                if (ok) {
+                    toast("Contact saved")
+                    Texts.forgetNames(); phoneLoaded = 0; phoneCalls = null
+                    Messenger.run({ Texts.threads.forEach { t -> t.addresses.forEach { Texts.name(this, it) } } }, { addContactBack() })
+                } else toast("Couldn't save the contact")
+            }) { toast("Couldn't save the contact") }
+        }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16)) }
+        listOf(first, last, phone, mail).forEach { col.addView(it, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }) }
+        col.addView(cta("Save contact") { save() })
+        setContentView(page(topBar("New contact", null, icon(R.drawable.ic_back) { back() }), ScrollView(this).apply { addView(col) }))
+        first.post { first.requestFocus(); getSystemService(InputMethodManager::class.java).showSoftInput(first, 0) }
     }
 
     /** Name, each number, and Call / Text for each. */
@@ -1492,15 +1537,8 @@ class MainActivity : Activity() {
         val pinned = id in Texts.pins(this)
         items += (if (pinned) "Unpin from top" else "Pin to top") to { Texts.setPinned(this, id, !pinned); toast(if (pinned) "Unpinned" else "Pinned to the top of your texts") }
         people.singleOrNull()?.takeIf { Texts.contact(this, it) == null }?.let { n ->
-            items += "Add to contacts" to {
-                // the contacts app opens with the number (and its type) already filled in; Save finishes it
-                val i = Intent(Intent.ACTION_INSERT, android.provider.ContactsContract.Contacts.CONTENT_URI)
-                    .putExtra(android.provider.ContactsContract.Intents.Insert.PHONE, n)
-                    .putExtra(android.provider.ContactsContract.Intents.Insert.PHONE_TYPE, android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE)
-                    .putExtra("finishActivityOnSaveCompleted", true)
-                newContactPending = true
-                runCatching { startActivity(i) }.onFailure { newContactPending = false; toast("No contacts app found") }
-            }
+            items += "Add to contacts" to { val back = textThread; showAddContact(n) { showTextThread(back, people) } }
+
         }
         if (people.size > 1) items += "Name this group" to {
             val box = field("Group name", Texts.groupName(this, id).orEmpty())
@@ -1832,6 +1870,7 @@ class MainActivity : Activity() {
         private const val TEXT_ROLE = 20
         private const val CALL_ROLE = 21
         private const val CALL_PERM = 26
+        private const val ADD_CONTACT_PERM = 27
         private const val PICK_CONTACT = 21
         private const val TEXT_IMAGE = 22
         private const val TEXT_PERMS = 23
@@ -1855,7 +1894,7 @@ class MainActivity : Activity() {
                 override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 override fun afterTextChanged(s: Editable?) {
-                    if (search != s.toString()) { search = s.toString(); showChats() }
+                    if (search != s.toString()) { search = s.toString(); chatsScrollY = 0; showChats(searchOnly = true) }
                 }
             })
         }
@@ -2698,6 +2737,10 @@ class MainActivity : Activity() {
         if (requestCode == TEXT_PERMS || requestCode == CALL_LOG_PERM || requestCode == CONTACTS_PERM) {
             Texts.forgetNames(); Texts.reload(this); phoneLoaded = 0; phoneCalls = null
             if (screen == "chats") showChats()
+            return
+        }
+        if (requestCode == ADD_CONTACT_PERM) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) addContactSave?.invoke() else toast("Allow contacts access to save a contact")
             return
         }
         if (requestCode == LOCATION_FOR_SHARE) {
