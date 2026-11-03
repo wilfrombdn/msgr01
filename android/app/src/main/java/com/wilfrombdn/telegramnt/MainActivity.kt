@@ -402,6 +402,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // back from "allow installs from Tellem": carry on with the update
+        if (newContactPending) { newContactPending = false; Messenger.run({ Texts.forgetNames(); Texts.threads.forEach { t -> t.addresses.forEach { Texts.name(this, it) } } }, { if (screen == "textthread") showTextThread(textThread) else if (screen == "chats") showChats() }) }
         pendingApk?.let { f -> if (packageManager.canRequestPackageInstalls()) { pendingApk = null; Messenger.run({ Updater.install(this, f) }) } }
         // back from a phone setting (battery, full-screen alerts, default texting app): show what changed
         if (screen == "settings" || screen == "textthread" && textMadeDefault != Texts.isDefault(this)) rebuildTextScreen()
@@ -885,6 +886,8 @@ class MainActivity : Activity() {
             // the Archived chats page: just those, newest first
             for (t in rows.filter { it.first in arch }.sortedByDescending { it.second }) list.addView(rowFor(t))
         } else {
+        if (mixed && q.isEmpty()) { sectionRow("🔑", "Codes", Texts.threads.count { it.code && !it.spam }) { showTextSection(true) }?.let { list.addView(it) }
+            sectionRow("🚫", "Spam & blocked", Texts.threads.count { it.spam }) { showTextSection(false) }?.let { list.addView(it) } }
         // pinned chats: at the very top, above folders, in the order you pinned them
         val pins = Messenger.pins
         pins.retainAll { it in byKey || it.startsWith("u:") && core.contact(it.drop(2)) != null }   // forget deleted chats
@@ -913,8 +916,6 @@ class MainActivity : Activity() {
         val loose: List<Pair<Long, () -> View>> = rows.filter { it.first !in inFolder }.map { t -> t.second to { rowFor(t) } } +
             (if (mixed) Texts.threads.filter { !it.spam && (!it.code || q.isNotEmpty()) && textMatches(it, q) }.map { t -> t.date to { textRow(t) } } else emptyList())
         for ((_, make) in loose.sortedByDescending { it.first }) list.addView(make())
-        if (mixed && q.isEmpty()) { sectionRow("🔑", "Codes", Texts.threads.count { it.code && !it.spam }) { showTextSection(true) }?.let { list.addView(it) }
-            sectionRow("🚫", "Spam & blocked", Texts.threads.count { it.spam }) { showTextSection(false) }?.let { list.addView(it) } }
         }
         if (q.length >= 2 && !phoneOnly) messageResults(list, q)
         if (!phoneOnly && all.isEmpty() && grps.isEmpty() && (!mixed || Texts.threads.isEmpty()) && (q.length < 2 || list.childCount == 0)) {
@@ -1379,9 +1380,9 @@ class MainActivity : Activity() {
         if (!Texts.isDefault(this)) list.addView(note("$APP_NAME isn't your texting app right now, so texts can't be sent or received here. Tap to change that.") { askTextRole() })
         val pins = Texts.pins(this)
         val ts = Texts.threads.filter { !it.spam && (!it.code || q.isNotEmpty()) && textMatches(it, q) }.sortedByDescending { it.id in pins }   // pinned first, then newest (list is already newest first)
-        for (t in ts) list.addView(textRow(t))
         if (q.isEmpty()) { sectionRow("🔑", "Codes", Texts.threads.count { it.code && !it.spam }) { showTextSection(true) }?.let { list.addView(it) }
             sectionRow("🚫", "Spam & blocked", Texts.threads.count { it.spam }) { showTextSection(false) }?.let { list.addView(it) } }
+        for (t in ts) list.addView(textRow(t))
         if (ts.isEmpty() && Texts.threads.none { it.spam || it.code }) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
             .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
     }
@@ -1415,7 +1416,7 @@ class MainActivity : Activity() {
             popup("Delete texts with $title?", "This deletes these texts from the phone for good.", null, "Cancel" to dim, "Delete" to red) { i ->
                 if (i == 1) Texts.deleteThread(this, t.id) else redraw()
             }
-        })
+        }, onPin = { Texts.setPinned(this, t.id, !pinned) }, pinLabel = if (pinned) "Unpin" else "Pin")
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(swipe, LinearLayout.LayoutParams(-1, -2))
@@ -1487,6 +1488,17 @@ class MainActivity : Activity() {
         val items = ArrayList<Pair<String, () -> Unit>>()
         val pinned = id in Texts.pins(this)
         items += (if (pinned) "Unpin from top" else "Pin to top") to { Texts.setPinned(this, id, !pinned); toast(if (pinned) "Unpinned" else "Pinned to the top of your texts") }
+        people.singleOrNull()?.takeIf { Texts.contact(this, it) == null }?.let { n ->
+            items += "Add to contacts" to {
+                // the contacts app opens with the number (and its type) already filled in; Save finishes it
+                val i = Intent(Intent.ACTION_INSERT, android.provider.ContactsContract.Contacts.CONTENT_URI)
+                    .putExtra(android.provider.ContactsContract.Intents.Insert.PHONE, n)
+                    .putExtra(android.provider.ContactsContract.Intents.Insert.PHONE_TYPE, android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE)
+                    .putExtra("finishActivityOnSaveCompleted", true)
+                newContactPending = true
+                runCatching { startActivity(i) }.onFailure { newContactPending = false; toast("No contacts app found") }
+            }
+        }
         if (people.size > 1) items += "Name this group" to {
             val box = field("Group name", Texts.groupName(this, id).orEmpty())
             popup("Name this group", "Only you see this name. Normal group texts can't share one with the others.", box, "Cancel" to dim, "Save" to white) { b ->
@@ -1525,6 +1537,7 @@ class MainActivity : Activity() {
         setOnClickListener { showNewText() }
     }
 
+    private var newContactPending = false   // came back from adding a contact: refresh names
     private val textSpots = HashMap<Long, Int>()   // where you were in each text chat (kept until the app closes)
     private var textRestoreY = -1
 
@@ -1862,6 +1875,12 @@ class MainActivity : Activity() {
 
     private fun pinMark() = tv("📌", 12f, dim).apply { setPadding(dp(4), 0, 0, 0) }
 
+    private fun togglePinKey(key: String) {
+        val ps = Messenger.pins
+        if (key in ps) ps.remove(key) else { ps.remove(key); ps.add(0, key) }
+        Messenger.settingsChanged(); showChats()
+    }
+
     /** Long-press a chat and let go without dragging it: pin / unpin. */
     private fun chatRowMenu(key: String) {
         val pinned = key in Messenger.pins
@@ -1920,7 +1939,8 @@ class MainActivity : Activity() {
         mid.addView(line2)
         row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
         key?.let { k -> row.setOnLongClickListener { startChatDrag(row, k); true } }
-        val swipe = SwipeRow(this, row, R.drawable.ic_trash, onOpen = { showChat(c.user) }, onDelete = { deleteChatConfirm(c) })
+        val swipe = SwipeRow(this, row, R.drawable.ic_trash, onOpen = { showChat(c.user) }, onDelete = { deleteChatConfirm(c) },
+            onPin = { togglePinKey("u:${c.user}") }, pinLabel = if ("u:${c.user}" in Messenger.pins) "Unpin" else "Pin")
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(swipe, LinearLayout.LayoutParams(-1, -2))
@@ -1979,7 +1999,7 @@ class MainActivity : Activity() {
         val swipe = SwipeRow(this, row, R.drawable.ic_trash, onOpen = { showGroup(g.id) }, onDelete = {
             popup("Leave \"${g.name}\"?", "You'll stop getting its messages and it's removed from this phone. Nothing is kept on the server to recover. You can be re-invited later.",
                 null, "Cancel" to dim, "Leave" to red) { i -> if (i == 1) { Messenger.io.execute { Messenger.core.leaveGroup(g) }; showChats() } }
-        })
+        }, onPin = { togglePinKey("g:${g.id}") }, pinLabel = if ("g:${g.id}" in Messenger.pins) "Unpin" else "Pin")
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(swipe, LinearLayout.LayoutParams(-1, -2))
