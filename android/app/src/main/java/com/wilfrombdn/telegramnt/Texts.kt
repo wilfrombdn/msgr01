@@ -34,7 +34,7 @@ import java.util.concurrent.Executors
  */
 object Texts {
     class Thread(val id: Long, val addresses: List<String>, val snippet: String, val date: Long, val unread: Int,
-                 val spam: Boolean = false, val blocked: Boolean = false, val code: Boolean = false)
+                 val spam: Boolean = false, val blocked: Boolean = false, val code: Boolean = false, val archived: Boolean = false)
     class Attachment(val uri: Uri, val mime: String)
     class Text(
         val id: Long, val mms: Boolean, val mine: Boolean, val from: String?, val body: String, val date: Long,
@@ -113,6 +113,7 @@ object Texts {
         val replied = HashSet<Long>()   // threads you've written in are never spam
         cr.query(Telephony.Sms.CONTENT_URI, arrayOf("thread_id"), "type != ${Telephony.Sms.MESSAGE_TYPE_INBOX}", null, null)?.use { c -> while (c.moveToNext()) replied += c.getLong(0) }
         cr.query(Telephony.Mms.CONTENT_URI, arrayOf("thread_id"), "msg_box != ${Telephony.Mms.MESSAGE_BOX_INBOX}", null, null)?.use { c -> while (c.moveToNext()) replied += c.getLong(0) }
+        val archivedIds = idSet(ctx, "archive")
         val out = ArrayList<Thread>()
         cr.query(Uri.parse("content://mms-sms/conversations?simple=true"),
             arrayOf("_id", "date", "recipient_ids", "snippet", "snippet_cs", "message_count", "has_attachment"), null, null, "date DESC")?.use { c ->
@@ -125,7 +126,8 @@ object Texts {
                 if (snip.isEmpty() && c.getInt(6) != 0) snip = "📷 Picture"
                 val blocked = people.any { isBlocked(ctx, it) }
                 val spam = blocked || spamVerdict(ctx, id, people, snip, id in replied)
-                out += Thread(id, people, snip, c.getLong(1), unread[id] ?: 0, spam, blocked, !spam && id !in replied && looksLikeCode(snip))
+                val arch = !spam && id in archivedIds
+                out += Thread(id, people, snip, c.getLong(1), unread[id] ?: 0, spam, blocked, !spam && !arch && id !in replied && looksLikeCode(snip), arch)
             }
         }
         out.forEach { t -> t.addresses.forEach { name(ctx, it) } }   // look names up here, not while drawing the list
@@ -234,6 +236,7 @@ object Texts {
     fun looksLikeCode(text: String) = CodeText.matches(text)
 
     fun pins(ctx: Context): Set<Long> = idSet(ctx, "pin")
+    fun setArchived(ctx: Context, thread: Long, on: Boolean) { setId(ctx, "archive", thread, on); reload(ctx) }
     fun setPinned(ctx: Context, thread: Long, on: Boolean) { setId(ctx, "pin", thread, on); reload(ctx) }
 
     /** The name you gave a group text on this phone (other people can't see it: normal texts have no shared group names). */

@@ -25,6 +25,7 @@ class SwipeRow(
     private val onDelete: () -> Unit,
     private val onPin: (() -> Unit)? = null,
     pinLabel: String = "Pin",
+    private val directRight: Boolean = false,   // swiping right far enough runs onPin at once, no second tap
 ) : FrameLayout(context) {
     private val density = resources.displayMetrics.density
     private val reveal = (84 * density)          // how far the row slides to show a button
@@ -105,6 +106,7 @@ class SwipeRow(
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 val x = front.translationX
+                if (directRight && x > reveal * 0.75f) { settle(0); onPin?.invoke(); return dragging }
                 settle(if (x < -reveal / 2) -1 else if (x > reveal / 2) 1 else 0)
                 return dragging
             }

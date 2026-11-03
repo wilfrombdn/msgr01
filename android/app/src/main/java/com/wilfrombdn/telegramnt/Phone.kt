@@ -83,3 +83,25 @@ object Phone {
         true
     }.getOrDefault(false)
 }
+
+/** Formats phone numbers as they're typed ((555) 123-4567); several numbers separated by commas each get formatted. Backspacing is left alone. */
+class PhoneFormatWatcher : android.text.TextWatcher {
+    private var busy = false
+    private var deleting = false
+    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) { deleting = after < count }
+    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+    override fun afterTextChanged(e: android.text.Editable?) {
+        if (busy || deleting || e == null) return
+        busy = true
+        try {
+            val country = java.util.Locale.getDefault().country
+            val out = e.toString().split(',').mapIndexed { i, part ->
+                val p = part.trim()
+                val digits = p.filter { it.isDigit() || it == '+' }
+                val shown = if (digits.length < 4 || p.any { it.isLetter() }) p else (android.telephony.PhoneNumberUtils.formatNumber(digits, country) ?: p)
+                if (i == 0) shown else " $shown"
+            }.joinToString(",")
+            if (out != e.toString()) { e.replace(0, e.length, out) }
+        } finally { busy = false }
+    }
+}

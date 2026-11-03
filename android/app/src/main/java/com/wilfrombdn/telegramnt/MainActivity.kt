@@ -414,7 +414,7 @@ class MainActivity : Activity() {
         maybeCheckUpdate()
         if (screen == "textthread") return fillTextThread()   // texts work signed in or not
         if (screen == "textlist") return showTextList()
-        if (screen == "textspam") return showTextSection(textSectionCodes)
+        if (screen == "textspam") return showTextSection(textSectionKind)
         if (!Messenger.signedIn) {
             if (screen != "welcome" && screen != "signup" && screen != "login" && screen != "newtext") showWelcome()
             return
@@ -872,6 +872,7 @@ class MainActivity : Activity() {
         val textsOn = Texts.canRead(this)
         val mixed = textsOn && Texts.mixed(this)
         if (mixed && phoneSub == "texts") phoneSub = "calls"   // texts already sit among the chats
+        if (phoneSub == "folders" && folderPlace() != "tab") phoneSub = if (mixed) "calls" else "texts"
         val phoneOnly = textsTab && !showArchive
         val textsOnly = phoneOnly && phoneSub == "texts"
         // everything else, keyed "u:<user>" / "g:<group>" so folders can hold either
@@ -885,6 +886,7 @@ class MainActivity : Activity() {
         if (phoneOnly) when (phoneSub) {
             "calls" -> addCallRows(list, q)
             "contacts" -> addContactRows(list, q)
+            "folders" -> addFolderTab(list)
             else -> addTextRows(list, q)
         }
         else if (showArchive && q.isEmpty()) {
@@ -894,8 +896,7 @@ class MainActivity : Activity() {
         if (q.isEmpty() && !phoneOnly) ringFixes().firstOrNull()?.let { f ->   // messages arrive late while the phone is set to cut Tellem's internet
             list.addView(note("Messages can arrive late: ${f.first.replaceFirstChar { it.lowercase() }} isn't set up. Tap to fix.") { f.third() })
         }
-        if (mixed && q.isEmpty()) { sectionRow("🔑", "Codes", Texts.threads.count { it.code && !it.spam }) { showTextSection(true) }?.let { list.addView(it) }
-            sectionRow("🚫", "Spam & blocked", Texts.threads.count { it.spam }) { showTextSection(false) }?.let { list.addView(it) } }
+        if (mixed && q.isEmpty() && folderPlace() == "top") folderRows(list)
         // pinned chats: at the very top, above folders, in the order you pinned them
         val pins = Messenger.pins
         pins.retainAll { it in byKey || it.startsWith("u:") && core.contact(it.drop(2)) != null }   // forget deleted chats
@@ -922,8 +923,9 @@ class MainActivity : Activity() {
         }
         // with "show texts together with chats", text threads sit among the chats (never in pins or folders)
         val loose: List<Pair<Long, () -> View>> = rows.filter { it.first !in inFolder }.map { t -> t.second to { rowFor(t) } } +
-            (if (mixed) Texts.threads.filter { !it.spam && (!it.code || q.isNotEmpty()) && textMatches(it, q) }.map { t -> t.date to { textRow(t) } } else emptyList())
+            (if (mixed) Texts.threads.filter { !it.spam && ((!it.code && !it.archived) || q.isNotEmpty()) && textMatches(it, q) }.map { t -> t.date to { textRow(t) } } else emptyList())
         for ((_, make) in loose.sortedByDescending { it.first }) list.addView(make())
+        if (mixed && q.isEmpty() && folderPlace() == "bottom") folderRows(list)
         }
         if (q.length >= 2 && !phoneOnly) messageResults(list, q)
         if (!phoneOnly && all.isEmpty() && grps.isEmpty() && (!mixed || Texts.threads.isEmpty()) && (q.length < 2 || list.childCount == 0)) {
@@ -1247,6 +1249,7 @@ class MainActivity : Activity() {
             sub.tab("Contacts", 0, phoneSub == "contacts", 14f) { go("contacts") }
             sub.tab("Calls", 0, phoneSub == "calls", 14f) { go("calls") }
             if (!mixed) sub.tab("Texts", textsUnread(), phoneSub == "texts", 14f) { go("texts") }
+            if (folderPlace() == "tab") sub.tab("Folders", 0, phoneSub == "folders", 14f) { go("folders") }
             addView(sub)
         }
     }
@@ -1374,7 +1377,7 @@ class MainActivity : Activity() {
         addContactBack = back
         val first = field("First name").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
         val last = field("Last name").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
-        val phone = field("Phone number", number.orEmpty()).apply { inputType = InputType.TYPE_CLASS_PHONE }
+        val phone = field("Phone number", number.orEmpty()).apply { inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher()) }
         val mail = field("Email (optional)").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
         fun save() {
             if (first.text.isBlank() && last.text.isBlank()) return toast("Add a name")
@@ -1427,11 +1430,11 @@ class MainActivity : Activity() {
     private fun addTextRows(list: LinearLayout, q: String) {
         if (!Texts.isDefault(this)) list.addView(note("$APP_NAME isn't your texting app right now, so texts can't be sent or received here. Tap to change that.") { askTextRole() })
         val pins = Texts.pins(this)
-        val ts = Texts.threads.filter { !it.spam && (!it.code || q.isNotEmpty()) && textMatches(it, q) }.sortedByDescending { it.id in pins }   // pinned first, then newest (list is already newest first)
-        if (q.isEmpty()) { sectionRow("🔑", "Codes", Texts.threads.count { it.code && !it.spam }) { showTextSection(true) }?.let { list.addView(it) }
-            sectionRow("🚫", "Spam & blocked", Texts.threads.count { it.spam }) { showTextSection(false) }?.let { list.addView(it) } }
+        val ts = Texts.threads.filter { !it.spam && ((!it.code && !it.archived) || q.isNotEmpty()) && textMatches(it, q) }.sortedByDescending { it.id in pins }   // pinned first, then newest (list is already newest first)
+        if (q.isEmpty() && folderPlace() == "top") folderRows(list)
         for (t in ts) list.addView(textRow(t))
-        if (ts.isEmpty() && Texts.threads.none { it.spam || it.code }) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
+        if (q.isEmpty() && folderPlace() == "bottom") folderRows(list)
+        if (ts.isEmpty() && Texts.threads.none { it.spam || it.code || it.archived }) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
             .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
     }
 
@@ -1443,7 +1446,8 @@ class MainActivity : Activity() {
             setBackgroundColor(listBg)
             setPadding(dp(10), dp(8), dp(14), dp(8))
             setOnClickListener { showTextThread(t.id) }
-            setOnLongClickListener { v -> dropdown(v, Gravity.END, (if (pinned) "Unpin" else "Pin to top") to { Texts.setPinned(this@MainActivity, t.id, !pinned) }); true }
+            setOnLongClickListener { v -> dropdown(v, Gravity.END, (if (pinned) "Unpin" else "Pin to top") to { Texts.setPinned(this@MainActivity, t.id, !pinned) },
+                (if (t.archived) "Unarchive" else "Archive") to { Texts.setArchived(this@MainActivity, t.id, !t.archived); toast(if (t.archived) "Moved back to your texts" else "Archived") }); true }
         }
         row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54))   // a bare number gets "#", not "+5"
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
@@ -1464,7 +1468,9 @@ class MainActivity : Activity() {
             popup("Delete texts with $title?", "This deletes these texts from the phone for good.", null, "Cancel" to dim, "Delete" to red) { i ->
                 if (i == 1) Texts.deleteThread(this, t.id) else redraw()
             }
-        }, onPin = { Texts.setPinned(this, t.id, !pinned) }, pinLabel = if (pinned) "Unpin" else "Pin")
+        }, onPin = {
+            if (t.spam) { Texts.markSpam(this, t.id, false); toast("Moved back to your texts") } else { Texts.markSpam(this, t.id, true); toast("Moved to spam") }
+        }, pinLabel = if (t.spam) "Not spam" else "Spam", directRight = true)
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(swipe, LinearLayout.LayoutParams(-1, -2))
@@ -1486,31 +1492,58 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Codes (verification / two-factor texts) or Spam & blocked. Nothing is deleted unless you clear it. */
-    private fun showTextSection(codes: Boolean) {
+    /** Where Archive / Codes / Spam & blocked live: "top" or "bottom" of the texts, the side "menu", or their own "tab". */
+    private fun folderPlace() = getSharedPreferences("ui", 0).getString("folders", "top") ?: "top"
+
+    private fun folderCounts() = Triple(Texts.threads.count { it.archived }, Texts.threads.count { it.code }, Texts.threads.count { it.spam })
+
+    /** The Archive, Codes and Spam & blocked rows (each hidden while empty). */
+    private fun folderRows(list: LinearLayout) {
+        val (a, c, s) = folderCounts()
+        sectionRow("📦", "Archive", a) { showTextSection("archive") }?.let { list.addView(it) }
+        sectionRow("🔑", "Codes", c) { showTextSection("codes") }?.let { list.addView(it) }
+        sectionRow("🚫", "Spam & blocked", s) { showTextSection("spam") }?.let { list.addView(it) }
+    }
+
+    /** The "Folders" tab of the Phone screen. */
+    private fun addFolderTab(list: LinearLayout) {
+        folderRows(list)
+        val (a, c, s) = folderCounts()
+        if (a + c + s == 0) list.addView(tv("Nothing here yet.\n\nArchived texts, login codes and spam collect in this tab.", 15.5f, dim)
+            .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
+    }
+
+    /** "archive", "codes" or "spam". Nothing is deleted unless you clear it. */
+    private fun showTextSection(kind: String) {
         screen = "textspam"
-        textSectionCodes = codes
+        textSectionKind = kind
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        list.addView(settingNote(if (codes) "Texts with a one-time code, like logins and two-factor. They stay out of your normal texts. Decided on your phone; nothing is sent anywhere."
-            else "Texts from numbers that aren't in your contacts and have a link or typical scam wording, plus numbers you blocked. They arrive silently. Tap Not spam to bring one back, or clear them all. Decided on your phone; nothing is sent anywhere.").apply { setPadding(dp(20), dp(14), dp(20), dp(10)) })
-        val ts = Texts.threads.filter { if (codes) it.code && !it.spam else it.spam }
+        list.addView(settingNote(when (kind) {
+            "codes" -> "Texts with a one-time code, like logins and two-factor. They stay out of your normal texts. Decided on your phone; nothing is sent anywhere."
+            "archive" -> "Texts you put away. Open one to read it, or tap Unarchive to bring it back."
+            else -> "Texts from numbers that aren't in your contacts and have a link or typical scam wording, plus numbers you blocked. They arrive silently. Tap Not spam to bring one back, or clear them all. Decided on your phone; nothing is sent anywhere."
+        }).apply { setPadding(dp(20), dp(14), dp(20), dp(10)) })
+        val ts = Texts.threads.filter { when (kind) { "codes" -> it.code; "archive" -> it.archived; else -> it.spam } }
         for (t in ts) {
             list.addView(textRow(t))
-            if (!codes) list.addView(tv("NOT SPAM", 13f, blue, true).apply {
+            if (kind != "codes") list.addView(tv(if (kind == "archive") "UNARCHIVE" else "NOT SPAM", 13f, blue, true).apply {
                 setPadding(dp(76), dp(2), dp(16), dp(12))
-                setOnClickListener { Texts.markSpam(this@MainActivity, t.id, false); toast("Moved back to your texts"); showTextSection(false) }
+                setOnClickListener {
+                    if (kind == "archive") Texts.setArchived(this@MainActivity, t.id, false) else Texts.markSpam(this@MainActivity, t.id, false)
+                    toast("Moved back to your texts"); showTextSection(kind)
+                }
             })
         }
-        if (ts.isEmpty()) list.addView(tv(if (codes) "No codes" else "No spam", 15.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(48), dp(32), dp(32)) })
-        val clear = if (ts.isEmpty()) null else icon(R.drawable.ic_trash) {
-            popup(if (codes) "Delete all ${ts.size} code conversations?" else "Clear all ${ts.size} spam conversations?",
+        if (ts.isEmpty()) list.addView(tv(when (kind) { "codes" -> "No codes"; "archive" -> "Nothing archived"; else -> "No spam" }, 15.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(48), dp(32), dp(32)) })
+        val clear = if (ts.isEmpty() || kind == "archive") null else icon(R.drawable.ic_trash) {
+            popup(if (kind == "codes") "Delete all ${ts.size} code conversations?" else "Clear all ${ts.size} spam conversations?",
                 "This deletes these texts from the phone for good. To keep one, cancel and tap Not spam on it first.", null, "Cancel" to dim, "Delete all" to red) { b ->
-                if (b == 1) { ts.forEach { Texts.deleteThread(this, it.id) }; showTextSection(codes) }
+                if (b == 1) { ts.forEach { Texts.deleteThread(this, it.id) }; showTextSection(kind) }
             }
         }
-        setContentView(page(topBar(if (codes) "Codes" else "Spam & blocked", null, icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(clear).toTypedArray()), ScrollView(this).apply { addView(list) }))
+        setContentView(page(topBar(when (kind) { "codes" -> "Codes"; "archive" -> "Archive"; else -> "Spam & blocked" }, null, icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(clear).toTypedArray()), ScrollView(this).apply { addView(list) }))
     }
-    private var textSectionCodes = false
+    private var textSectionKind = "spam"
 
     /** Everyone in a group text on one scrolling line; tap it for the full list. */
     private fun peopleStrip(people: List<String>): View = HorizontalScrollView(this).apply {
@@ -1535,6 +1568,7 @@ class MainActivity : Activity() {
         val t = Texts.threads.firstOrNull { it.id == id }
         val items = ArrayList<Pair<String, () -> Unit>>()
         val pinned = id in Texts.pins(this)
+        items += (if (t?.archived == true) "Unarchive" else "Archive") to { Texts.setArchived(this, id, t?.archived != true); toast(if (t?.archived == true) "Moved back to your texts" else "Archived"); if (t?.archived != true) leaveTexts() }
         items += (if (pinned) "Unpin from top" else "Pin to top") to { Texts.setPinned(this, id, !pinned); toast(if (pinned) "Unpinned" else "Pinned to the top of your texts") }
         people.singleOrNull()?.takeIf { Texts.contact(this, it) == null }?.let { n ->
             items += "Add to contacts" to { val back = textThread; showAddContact(n) { showTextThread(back, people) } }
@@ -1592,7 +1626,7 @@ class MainActivity : Activity() {
     private fun showNewText(body: String? = null) {
         screen = "newtext"
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16)) }
-        val to = field("Phone number(s), separated by commas").apply { inputType = InputType.TYPE_CLASS_PHONE }
+        val to = field("Phone number(s), separated by commas").apply { inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher()) }
         newTextTo = to
         col.addView(to)
         col.addView(tv("Choose from contacts", 16f, blue, true).apply {
@@ -1604,7 +1638,7 @@ class MainActivity : Activity() {
         })
         col.addView(settingNote("Normal texts go through your phone carrier and aren't encrypted. For private messages, use a $APP_NAME chat.").apply { setPadding(0, dp(4), 0, dp(16)) })
         col.addView(cta("Next") {
-            val nums = to.text.split(',', ';').map { it.trim() }.filter { it.any(Char::isDigit) || it.contains('@') }
+            val nums = to.text.split(',', ';').map { it.trim() }.filter { it.any(Char::isDigit) || it.contains('@') }.map { if (it.contains('@')) it else it.filter { c -> c.isDigit() || c == '+' } }   // typed formatting is only for show
             if (nums.isEmpty()) return@cta toast("Type a phone number")
             var id = 0L
             Messenger.run({ id = Texts.threadFor(this, nums) }, { textDraft = body; showTextThread(id, nums) }) { toast("Couldn't start that text") }
@@ -3792,6 +3826,13 @@ class MainActivity : Activity() {
         item(R.drawable.ic_folder, "New Folder", "group chats, e.g. Family") { newFolder() }
         item(R.drawable.ic_bookmark, "Saved Messages", "notes to yourself, on this phone") { showChat(Messenger.core.savedChat().user) }
         divider()
+        if (folderPlace() == "menu" && Texts.canRead(this)) {
+            val (a, c, s) = folderCounts()
+            item(R.drawable.ic_folder, "Archive", "$a texts") { showTextSection("archive") }
+            item(R.drawable.ic_folder, "Codes", "$c texts") { showTextSection("codes") }
+            item(R.drawable.ic_folder, "Spam & blocked", "$s texts") { showTextSection("spam") }
+            divider()
+        }
         item(R.drawable.ic_menu, "Settings") { showSettings() }
         col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
         col.addView(tv("$APP_NAME ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
@@ -4958,6 +4999,14 @@ class MainActivity : Activity() {
                 null, "Cancel" to dim, "Open settings" to white) { b -> if (b == 1) runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) } }
         })
         if (Texts.canRead(this)) col.addView(settingSwitch("Show texts together with chats", Texts.mixed(this)) { on -> Texts.setMixed(this, on); textsTab = false })
+        if (Texts.canRead(this)) {
+            val places = listOf("top" to "Top of your texts", "bottom" to "Bottom of your texts", "menu" to "In the side menu", "tab" to "Their own Folders tab")
+            col.addView(settingRow("Archive, Codes and Spam folders", "Shown: " + places.first { it.first == folderPlace() }.second.replaceFirstChar { it.lowercase() }) {
+                pickList("Where should these folders go?", "Archive, Codes and Spam & blocked", places.map { it.second }.toTypedArray()) { i ->
+                    getSharedPreferences("ui", 0).edit().putString("folders", places[i].first).apply(); showSettings()
+                }
+            })
+        }
         col.addView(settingNote("Normal texts go through your phone carrier, not Tor, and aren't encrypted: the carrier can read them. They're kept in the phone's own text storage, so self-destruct doesn't erase them. In $APP_NAME they always have green bubbles and an SMS tag."))
         col.addView(settingNote("Like a normal text: who wrote and what they said (not while app lock is on). On the lock screen your phone's own setting decides how much shows. " +
             "Turn names off to just see \"$APP_NAME · New message\"."))
