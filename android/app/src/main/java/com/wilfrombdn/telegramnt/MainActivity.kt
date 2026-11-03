@@ -946,20 +946,30 @@ class MainActivity : Activity() {
         }.let { if (phoneOnly) phoneButton() else it }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
 
         val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
-        else if (search.isNotEmpty() || screenSearch) searchBar() else topBar(
-            if (!Messenger.connected) "Connecting…" else if (Messenger.direct) APP_NAME else torTitle(),
-            if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
-            icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
-            icon(R.drawable.ic_search) { screenSearch = true; showChats() },
-        ).also { b ->   // tap the name at the top to flip between chats and the phone screen
-            if (Texts.canRead(this)) b.getChildAt(1)?.setOnClickListener { textsTab = !textsTab; chatsScrollY = 0; showChats() }
+        else if (search.isNotEmpty() || screenSearch) searchBar() else {
+            // the name at the top flips between Tellem (chats) and Phone; the other side's unread count rides along
+            val phoneUnread = if (mixed) 0 else textsUnread()
+            val chatUnread = all.sumOf { it.unread } + grps.sumOf { it.unread }
+            val flip = android.text.SpannableStringBuilder()
+            if (textsTab) flip.append("Phone")
+            else flip.append(if (!Messenger.connected) "Connecting…" else if (Messenger.direct) APP_NAME else torTitle())
+            flip.append(" ▾")
+            flip.setSpan(android.text.style.RelativeSizeSpan(0.6f), flip.length - 2, flip.length, 0)
+            val other = if (textsTab) chatUnread else phoneUnread
+            if (other > 0) flip.append("  ").append(android.text.SpannableString((if (textsTab) "Tellem " else "Phone ") + other).apply {
+                setSpan(android.text.style.RelativeSizeSpan(0.6f), 0, length, 0); setSpan(android.text.style.ForegroundColorSpan(dim), 0, length, 0) })
+            topBar(flip,
+                if (textsTab) null else if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
+                icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
+                icon(R.drawable.ic_search) { screenSearch = true; showChats() },
+            ).also { b -> b.getChildAt(1)?.setOnClickListener { textsTab = !textsTab; chatsScrollY = 0; showChats() } }
         }
         // Content + a left slide-out drawer (opens by tapping the lines or swiping from the edge).
         val keepOpen = refreshing && drawer?.isDrawerOpen(GravityCompat.START) == true   // refreshes rebuild the screen; don't snap the menu shut
         val d = DrawerLayout(this)
         val body = if (!showArchive) LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(textTabs(all.sumOf { it.unread } + grps.sumOf { it.unread }, mixed))
+            if (textsTab) addView(textTabs(all.sumOf { it.unread } + grps.sumOf { it.unread }, mixed))
             addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         } else frame
         d.addView(page(top, body), DrawerLayout.LayoutParams(-1, -1))
@@ -1216,10 +1226,6 @@ class MainActivity : Activity() {
             addView(tv(label + if (n > 0) "  $n" else "", size, if (on) white else dim, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(8)) }, LinearLayout.LayoutParams(-1, -2))
             addView(View(context).apply { setBackgroundColor(if (on) white else Color.TRANSPARENT) }, LinearLayout.LayoutParams(-1, dp(2)))
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        val main = row()
-        main.tab("Chats", chatsUnread, !textsTab, 15f) { if (textsTab) { textsTab = false; chatsScrollY = 0; showChats() } }
-        main.tab("Phone", if (mixed) 0 else textsUnread(), textsTab, 15f) { if (!textsTab) { textsTab = true; chatsScrollY = 0; showChats() } }
-        addView(main)
         if (textsTab) {
             val sub = row().apply { setBackgroundColor(listBg) }
             fun go(k: String) { if (phoneSub != k) { phoneSub = k; chatsScrollY = 0; showChats() } }

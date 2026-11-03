@@ -55,7 +55,7 @@ object PhoneCalls {
     fun nameOf(ctx: Context, c: Call): String {
         val n = number(c)
         if (n.isEmpty()) return c.details?.callerDisplayName?.takeIf { it.isNotBlank() } ?: "Unknown"
-        return Texts.name(ctx, n)
+        return runCatching { Texts.name(ctx, n) }.getOrDefault(n)
     }
 
     /** The call to show first: one that's ringing, else one in progress. */
@@ -83,7 +83,9 @@ object PhoneCalls {
         Intent(ctx, PhoneCallReceiver::class.java).setAction(what), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     /** The ringing / ongoing call notification (full-screen when ringing on a locked phone). */
-    fun notify(ctx: Context) {
+    fun notify(ctx: Context) = runCatching { notifyNow(ctx) }
+
+    private fun notifyNow(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         val c = primary()
         if (c == null || c.state == Call.STATE_DISCONNECTED) { nm.cancel(NOTE_ID); return }
@@ -94,16 +96,17 @@ object PhoneCalls {
         val b = Notification.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_notify).setContentIntent(screen)
             .setCategory(Notification.CATEGORY_CALL).setOngoing(true).setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PUBLIC)
         val decline = action(ctx, PhoneCallReceiver.DECLINE, 2); val answer = action(ctx, PhoneCallReceiver.ANSWER, 3); val hang = action(ctx, PhoneCallReceiver.HANGUP, 4)
-        if (Build.VERSION.SDK_INT >= 31) {
+        if (ringing && Build.VERSION.SDK_INT >= 31) {
+            // CallStyle is only allowed with a full-screen intent (ringing); an ongoing call gets a plain notification
             val who = android.app.Person.Builder().setName(name).build()
-            b.setStyle(if (ringing) Notification.CallStyle.forIncomingCall(who, decline, answer) else Notification.CallStyle.forOngoingCall(who, hang))
+            b.setStyle(Notification.CallStyle.forIncomingCall(who, decline, answer))
         } else {
             b.setContentTitle(name).setContentText(if (ringing) "Incoming call" else "Phone call")
             if (ringing) { b.addAction(Notification.Action.Builder(null, "Decline", decline).build()); b.addAction(Notification.Action.Builder(null, "Answer", answer).build()) }
             else b.addAction(Notification.Action.Builder(null, "Hang up", hang).build())
         }
         if (ringing) b.setFullScreenIntent(screen, true)
-        nm.notify(NOTE_ID, b.build())
+        runCatching { nm.notify(NOTE_ID, b.build()) }
     }
 
     fun missed(ctx: Context, who: String) {
@@ -205,6 +208,15 @@ class PhoneCallActivity : Activity() {
 
     @Suppress("DEPRECATION")
     private fun render() {
+        try { renderNow() } catch (e: Exception) {   // never crash mid-call: show what went wrong and keep a way to hang up
+            root.removeAllViews()
+            root.addView(TextView(this).apply { text = "Call screen problem: ${e.javaClass.simpleName} ${e.message}"; setTextColor(Color.WHITE); setPadding(dp(24), dp(80), dp(24), dp(24)) })
+            root.addView(circle("✆", 72, 0xFFE53935.toInt()) { PhoneCalls.primary()?.disconnect(); finish() })
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun renderNow() {
         val c = PhoneCalls.primary()
         if (c == null) { finish(); return }
         val num = PhoneCalls.number(c)
