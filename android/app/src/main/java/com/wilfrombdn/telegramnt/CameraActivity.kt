@@ -179,10 +179,12 @@ class CameraActivity : ComponentActivity() {
             val p = future.get()
             provider = p
             val prev = Preview.Builder().build().also { it.surfaceProvider = preview.surfaceProvider }
-            // fast shutter, but still the sensor's biggest picture (the quality mode made the shutter feel slow)
+            // fast shutter, about 12 MP: the sensor's biggest picture (50 MP and up on newer phones) took a second or more to turn
+            // into a JPEG before anything happened. 12 MP is still sharp, and far more than a message picture needs.
             imageCapture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .setResolutionSelector(androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
-                    .setResolutionStrategy(androidx.camera.core.resolutionselector.ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .setResolutionStrategy(androidx.camera.core.resolutionselector.ResolutionStrategy(android.util.Size(4032, 3024),
+                        androidx.camera.core.resolutionselector.ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
                     .setAspectRatioStrategy(androidx.camera.core.resolutionselector.AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build())
                 .build()
             val recorder = Recorder.Builder()
@@ -311,6 +313,19 @@ class CameraActivity : ComponentActivity() {
         blink.animate().alpha(0f).setDuration(140).withEndAction { rootView.removeView(blink) }.start()
     }
 
+    private var frozen: View? = null
+
+    /** Holds the picture still the moment you tap, so the shot feels instant while the camera finishes saving it. */
+    private fun freeze() {
+        val still = runCatching { preview.bitmap }.getOrNull() ?: return
+        val host = preview.parent as? android.view.ViewGroup ?: return
+        frozen = android.widget.ImageView(this).apply { setImageBitmap(still); scaleType = android.widget.ImageView.ScaleType.FIT_XY }
+            .also { host.addView(it, host.indexOfChild(preview) + 1, android.view.ViewGroup.LayoutParams(preview.width, preview.height)) }
+        frozen?.x = preview.x; frozen?.y = preview.y
+    }
+
+    private fun unfreeze() { frozen?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }; frozen = null }
+
     private fun takePhoto() {
         val ic = imageCapture ?: return
         shutterFeedback()
@@ -322,9 +337,11 @@ class CameraActivity : ComponentActivity() {
                 override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                     android.util.Log.d("TellemPerf", "photo saved " + (SystemClock.uptimeMillis() - tapped) + " ms after the tap")
                     if (snap) showEdit(file, true) else handBack(file, true)
+                    unfreeze()
                 }
-                override fun onError(e: ImageCaptureException) { shutter.isEnabled = true; toast("Couldn't take the photo") }
+                override fun onError(e: ImageCaptureException) { shutter.isEnabled = true; unfreeze(); toast("Couldn't take the photo") }
             })
+        freeze()   // after asking for the photo, so this never delays it
     }
 
     private fun beginVideo() {

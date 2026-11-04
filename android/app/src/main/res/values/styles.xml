@@ -2,7 +2,7 @@
 <resources>
     <!-- The app theme: the phone's dark/light default, with Android's own scrollbars switched off on every list.
          (Android flashed them each time a screen appeared, so they sat on the right edge during screen and tab slides.
-         Tellem draws its own slim bar only while you scroll: Scrollbar.kt.) -->
+         A list gets a slim bar once you drag it: Scrollbar.kt.) -->
     <style name="TellemTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
         <item name="android:scrollViewStyle">@style/TellemScrollView</item>
         <item name="android:horizontalScrollViewStyle">@style/TellemHorizontalScrollView</item>

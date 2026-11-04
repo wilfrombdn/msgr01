@@ -168,17 +168,23 @@ class PhoneCallReceiver : BroadcastReceiver() {
 
 private fun Activity.dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-private fun Activity.circle(label: String, size: Int, fill: Int, onClick: () -> Unit) = TextView(this).apply {
-    text = label; textSize = 22f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(fill) }
+/** A round button with a drawn icon (the old emoji glyphs looked different on every phone, and "⌗" read as the # key). */
+private fun Activity.iconCircle(res: Int, size: Int, fill: Int, tint: Int = Color.WHITE, onClick: () -> Unit) = android.widget.ImageView(this).apply {
+    setImageResource(res); setColorFilter(tint)
+    val pad = dp(size) * 3 / 10; setPadding(pad, pad, pad, pad)
+    background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x40FFFFFF),
+        GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(fill) }, null)
+    isClickable = true
     setOnClickListener { onClick() }
     layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
 }
 
-/** A button with a small label under it. */
-private fun Activity.labelled(label: String, glyph: String, on: Boolean, onClick: () -> Unit) = LinearLayout(this).apply {
+/** A button with a small label under it; the whole column (icon and label) is the button, so a slightly-off tap still counts. */
+private fun Activity.labelled(label: String, res: Int, on: Boolean, onClick: () -> Unit) = LinearLayout(this).apply {
     orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-    addView(circle(glyph, 64, if (on) Color.WHITE else 0x33FFFFFF) { onClick() }.also { if (on) it.setTextColor(Color.BLACK) })
+    setPadding(0, dp(4), 0, dp(4)); isClickable = true
+    setOnClickListener { onClick() }
+    addView(iconCircle(res, 64, if (on) Color.WHITE else 0x33FFFFFF, if (on) Color.BLACK else Color.WHITE) { onClick() })
     addView(TextView(context).apply { text = label; setTextColor(0xCCFFFFFF.toInt()); textSize = 12.5f; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) })
 }
 
@@ -188,6 +194,10 @@ class PhoneCallActivity : Activity() {
     private var keypad = false
     private val names = HashMap<String, String>()
     private val tick = object : Runnable { override fun run() { render(); root.postDelayed(this, 1000) } }
+    // The screen used to be thrown away and rebuilt every second for the timer: a tap that landed during a rebuild hit a
+    // button that no longer existed and was lost. Now only the timer text changes, unless something on screen really changed.
+    private var shownKey = ""
+    private var statusView: TextView? = null
     private val listener: () -> Unit = { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -211,7 +221,8 @@ class PhoneCallActivity : Activity() {
         try { renderNow() } catch (e: Exception) {   // never crash mid-call: show what went wrong and keep a way to hang up
             root.removeAllViews()
             root.addView(TextView(this).apply { text = "Call screen problem: ${e.javaClass.simpleName} ${e.message}"; setTextColor(Color.WHITE); setPadding(dp(24), dp(80), dp(24), dp(24)) })
-            root.addView(circle("✆", 72, 0xFFE53935.toInt()) { PhoneCalls.primary()?.disconnect(); finish() })
+            root.addView(iconCircle(R.drawable.ic_call_end, 72, 0xFFE53935.toInt()) { PhoneCalls.primary()?.disconnect(); finish() })
+            shownKey = ""; statusView = null
         }
     }
 
@@ -235,6 +246,9 @@ class PhoneCallActivity : Activity() {
         val muted = audio?.isMuted == true
         val speaker = audio?.route == CallAudioState.ROUTE_SPEAKER
         val onHold = st == Call.STATE_HOLDING
+        val key = "$num|$name|$st|$muted|$speaker|$keypad"
+        if (key == shownKey && statusView != null) { statusView?.text = status; return }   // only the timer moved
+        shownKey = key
         root.removeAllViews()
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 0.5f))
         root.addView(TextView(this).apply {   // initial in a circle
@@ -246,45 +260,47 @@ class PhoneCallActivity : Activity() {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL); setPadding(dp(24), dp(20), dp(24), dp(4))
         })
         if (name != num && num.isNotEmpty()) root.addView(TextView(this).apply { text = num; setTextColor(0x99FFFFFF.toInt()); textSize = 15f; gravity = Gravity.CENTER })
-        root.addView(TextView(this).apply { text = status; setTextColor(0xCCFFFFFF.toInt()); textSize = 17f; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) })
+        root.addView(TextView(this).apply { text = status; setTextColor(0xCCFFFFFF.toInt()); textSize = 17f; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) }.also { statusView = it })
         root.addView(TextView(this).apply { text = "Normal phone call · not encrypted"; setTextColor(0x66FFFFFF.toInt()); textSize = 12.5f; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) })
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
 
         if (ringing) {
             root.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER
-                addView(labelledRound("Decline", "✕", 0xFFE53935.toInt()) { c.reject(false, null) })
+                addView(labelledRound("Decline", R.drawable.ic_call_end, 0xFFE53935.toInt()) { c.reject(false, null) })
                 addView(View(context), LinearLayout.LayoutParams(dp(80), 1))
-                addView(labelledRound("Answer", "✆", 0xFF2EAD5B.toInt()) { c.answer(android.telecom.VideoProfile.STATE_AUDIO_ONLY) })
+                addView(labelledRound("Answer", R.drawable.ic_call, 0xFF2EAD5B.toInt()) { c.answer(android.telecom.VideoProfile.STATE_AUDIO_ONLY) })
             }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(56) })
             return
         }
         if (keypad) {
-            root.addView(keypad(62, 8, { k -> c.playDtmfTone(k[0]); root.postDelayed({ c.stopDtmfTone() }, 160) }))
+            root.addView(keypad(keySize(80, 7, 440), 7, { k -> c.playDtmfTone(k[0]); root.postDelayed({ c.stopDtmfTone() }, 160) }))
         } else {
             root.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER
-                listOf(labelled("Mute", "🎙", muted) { PhoneCalls.service?.setMuted(!muted); render() },
-                    labelled("Keypad", "⌗", false) { keypad = true; render() },
-                    labelled("Speaker", "🔊", speaker) { PhoneCalls.service?.setAudioRoute(if (speaker) CallAudioState.ROUTE_EARPIECE else CallAudioState.ROUTE_SPEAKER); render() },
-                    labelled("Hold", "⏸", onHold) { if (onHold) c.unhold() else c.hold() }
+                listOf(labelled("Mute", if (muted) R.drawable.ic_mic_off else R.drawable.ic_mic, muted) { PhoneCalls.service?.setMuted(!muted); render() },
+                    labelled("Keypad", R.drawable.ic_dialpad, false) { keypad = true; render() },
+                    labelled("Speaker", R.drawable.ic_speaker, speaker) { PhoneCalls.service?.setAudioRoute(if (speaker) CallAudioState.ROUTE_EARPIECE else CallAudioState.ROUTE_SPEAKER); render() },
+                    labelled("Hold", R.drawable.ic_pause, onHold) { if (onHold) c.unhold() else c.hold() }
                 ).forEach { addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
             }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(28) })
         }
         root.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER
             if (keypad) addView(TextView(context).apply { text = "Hide keypad"; setTextColor(Color.WHITE); textSize = 15f; setPadding(dp(20), dp(10), dp(30), dp(10)); setOnClickListener { keypad = false; render() } })
-            addView(circle("✆", 72, 0xFFE53935.toInt()) { c.disconnect() }.apply { rotation = 135f })
+            addView(iconCircle(R.drawable.ic_call_end, 72, 0xFFE53935.toInt()) { c.disconnect() })
         }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(48) })
     }
 
-    private fun labelledRound(label: String, glyph: String, fill: Int, go: () -> Unit) = LinearLayout(this).apply {
+    private fun labelledRound(label: String, res: Int, fill: Int, go: () -> Unit) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-        addView(circle(glyph, 76, fill) { go() })
+        addView(iconCircle(res, 76, fill) { go() })
         addView(TextView(context).apply { text = label; setTextColor(0xCCFFFFFF.toInt()); textSize = 13f; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) })
     }
 
     private fun showEnded(name: String) {
+        if (shownKey == "ended") return
+        shownKey = "ended"; statusView = null
         root.removeAllViews()
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         root.addView(TextView(this).apply { text = name; setTextColor(Color.WHITE); textSize = 26f; gravity = Gravity.CENTER })
@@ -321,7 +337,7 @@ class DialerActivity : Activity() {
             fun chip(label: String, go: () -> Unit) = addView(TextView(context).apply {
                 text = label; setTextColor(Color.WHITE); textSize = 14f; gravity = Gravity.CENTER
                 setPadding(dp(16), dp(10), dp(16), dp(10))
-                background = GradientDrawable().apply { setColor(0x14FFFFFF); setStroke(dp(1), 0x40FFFFFF); cornerRadius = dp(22).toFloat() }
+                background = GradientDrawable().apply { setColor(0x14FFFFFF); setStroke(dp(1), 0x40FFFFFF); cornerRadius = dp(3).toFloat() }
                 setOnClickListener { go() }
             }, LinearLayout.LayoutParams(-2, -2).apply { setMargins(dp(6), 0, dp(6), 0) })
             chip("＋  Create contact") {
@@ -332,17 +348,18 @@ class DialerActivity : Activity() {
             }
         }
         root.addView(actions, LinearLayout.LayoutParams(-2, dp(48)).apply { bottomMargin = dp(12) })
-        root.addView(keypad(74, 8, { k -> digits.append(k); refresh() }) { digits.append("+"); refresh() })
+        val ks = keySize(88, 8, 290)   // bigger keys, shrunk only if the screen is too small for them
+        root.addView(keypad(ks, 8, { k -> digits.append(k); refresh() }) { digits.append("+"); refresh() })
         // call button centred under the keypad; backspace on its right (a same-size gap keeps the call button in the middle)
         root.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            addView(View(context), LinearLayout.LayoutParams(dp(74), dp(74)).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
-            addView(circle("✆", 74, 0xFF2EAD5B.toInt()) { call() }, LinearLayout.LayoutParams(dp(74), dp(74)).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
+            addView(View(context), LinearLayout.LayoutParams(dp(ks), dp(ks)).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
+            addView(iconCircle(R.drawable.ic_call, ks, 0xFF2EAD5B.toInt()) { call() }, LinearLayout.LayoutParams(dp(ks), dp(ks)).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
             addView(TextView(context).apply {
-                text = "⌫"; textSize = 26f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER
+                text = "⌫"; textSize = 28f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER
                 setOnClickListener { if (digits.isNotEmpty()) digits.setLength(digits.length - 1); refresh() }
                 setOnLongClickListener { digits.setLength(0); refresh(); true }
-            }, LinearLayout.LayoutParams(dp(74), dp(74)).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
+            }, LinearLayout.LayoutParams(dp(ks), dp(ks)).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
         }, LinearLayout.LayoutParams(-1, -2))
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 0.8f))
         setContentView(root)
@@ -376,6 +393,18 @@ class DialerActivity : Activity() {
 
 private val KEY_LETTERS = mapOf("2" to "ABC", "3" to "DEF", "4" to "GHI", "5" to "JKL", "6" to "MNO", "7" to "PQRS", "8" to "TUV", "9" to "WXYZ", "0" to "+")
 
+/**
+ * The key size (dp) for a keypad: [want] if it fits, otherwise as big as fits across the screen and in the height left after
+ * [reserveDp] of other things on the screen (four rows; [gap] on every side of each key).
+ */
+private fun Activity.keySize(want: Int, gap: Int, reserveDp: Int): Int {
+    val m = resources.displayMetrics
+    val wDp = m.widthPixels / m.density; val hDp = m.heightPixels / m.density
+    val byWidth = ((wDp - 24) / 3 - 2 * gap).toInt()
+    val byHeight = ((hDp - reserveDp) / 4 - 2 * gap).toInt()
+    return minOf(want, byWidth, byHeight).coerceAtLeast(56)
+}
+
 /** A phone keypad: four rows of three round keys with letters under the digits. [size] and [gap] are in dp. */
 private fun Activity.keypad(size: Int, gap: Int, onKey: (String) -> Unit, onPlus: (() -> Unit)? = null): LinearLayout = LinearLayout(this).apply {
     orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
@@ -384,9 +413,10 @@ private fun Activity.keypad(size: Int, gap: Int, onKey: (String) -> Unit, onPlus
             gravity = Gravity.CENTER
             for (k in row) addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x26FFFFFF) }
-                addView(TextView(context).apply { text = k; setTextColor(Color.WHITE); textSize = if (size >= 70) 30f else 24f; gravity = Gravity.CENTER; includeFontPadding = false })
-                if (k in KEY_LETTERS) addView(TextView(context).apply { text = KEY_LETTERS[k]; setTextColor(0x99FFFFFF.toInt()); textSize = 9f; letterSpacing = 0.15f; gravity = Gravity.CENTER; includeFontPadding = false })
+                background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x40FFFFFF),
+                    GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x26FFFFFF) }, null)   // lights up under your finger
+                addView(TextView(context).apply { text = k; setTextColor(Color.WHITE); textSize = size * 0.4f; gravity = Gravity.CENTER; includeFontPadding = false })
+                if (k in KEY_LETTERS) addView(TextView(context).apply { text = KEY_LETTERS[k]; setTextColor(0x99FFFFFF.toInt()); textSize = size * 0.125f; letterSpacing = 0.15f; gravity = Gravity.CENTER; includeFontPadding = false })
                 setOnClickListener { onKey(k) }
                 if (k == "0" && onPlus != null) setOnLongClickListener { onPlus(); true }   // hold 0 for +
             }, LinearLayout.LayoutParams(dp(size), dp(size)).apply { setMargins(dp(gap), dp(gap), dp(gap), dp(gap)) })

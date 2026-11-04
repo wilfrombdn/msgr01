@@ -310,6 +310,12 @@ class ScreenshotTest {
         shootView(list, "b2-calls", 1080)
     }
 
+    /** The dial pad (bigger keys since 10.4; they shrink only if the screen is too small). */
+    @Test fun dialer() {
+        val a = Robolectric.buildActivity(DialerActivity::class.java).setup().get()
+        shoot(a, "b2-dialer")
+    }
+
     @Test fun storage() {
         Messenger.initForPreview(fakeCore(signedIn = true))
         Messenger.core.blobSize = { 3_400_000L }

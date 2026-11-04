@@ -76,7 +76,6 @@ class MainActivity : Activity() {
         // keep chats out of screenshots and the recent-apps preview
         applyShotPolicy()
         applyBars()
-        window.decorView.viewTreeObserver.addOnScrollChangedListener { onAnyScroll() }   // Tellem's own scroll bar (Scrollbar.kt)
         Messenger.init(this)
         SyncService.channels(this)
         File(cacheDir, "open").deleteRecursively() // unlocked copies of opened attachments
@@ -401,6 +400,7 @@ class MainActivity : Activity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) { touchX = ev.rawX; touchY = ev.rawY; touchT = ev.eventTime }
+        scrollbarTouch(ev)   // a list gets its scroll bar once you drag it (Scrollbar.kt)
         val handled = super.dispatchTouchEvent(ev)
         // "Vibrate on every tap": a quick press-and-release on something tappable gives a small classic tap
         if (ev.actionMasked == MotionEvent.ACTION_UP && UiPrefs.tapHaptics(this)) {
