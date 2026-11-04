@@ -37,6 +37,7 @@ internal fun MainActivity.checkUpdateNow() {
 
 /** "Update available — Yes/No"; Yes opens what's new and an Update button with a progress bar. */
 internal fun MainActivity.updatePrompt(u: Updater.Update) {
+    if (updateDialogOpen) return   // one update pop-up at a time
     val d = android.app.Dialog(this)
     d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
     val col = LinearLayout(this).apply {
@@ -110,5 +111,21 @@ internal fun MainActivity.updatePrompt(u: Updater.Update) {
     d.setContentView(ScrollView(this).apply { addView(col) })
     d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
     d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.86).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
+    updateDialogOpen = true; updateShown = maxOf(updateShown, u.code.toLong())
+    d.setOnDismissListener { updateDialogOpen = false }
     d.show()
+}
+
+/**
+ * While the app is open, an update that drops pops up by itself within about a minute (no need to reopen the app).
+ * Offered once per version per run: "Not now" isn't nagged again until the next app open or the next version.
+ * Not over the photo viewer / crop screens, and never on top of an update pop-up that is already open.
+ */
+internal fun MainActivity.pollUpdate() {
+    if (updateDialogOpen || isFinishing) return
+    if (Tor.socksPort() == null && !Messenger.direct && !Tor.outdated) return   // Tor still starting
+    var u: Updater.Update? = null
+    Messenger.run({ u = Updater.check(this) }, {
+        u?.let { if (it.code > updateShown && !updateDialogOpen && !isFinishing && screen != Screen.VIEWER && screen != Screen.CROP) updatePrompt(it) }
+    }) { /* couldn't reach it: the next minute tries again */ }
 }

@@ -12,7 +12,8 @@ import android.widget.ScrollView
 // Slide animations between screens and tabs. All of them switch off with Settings → Animations (and with the phone's own
 // "remove animations" setting), and then everything changes instantly.
 
-internal fun MainActivity.animationsOn() = UiPrefs.animations(this) && android.animation.ValueAnimator.areAnimatorsEnabled()
+/** Follows only Settings → Animations. (The phone's own animation speed is deliberately ignored: with it at 0 every animation used to be skipped.) */
+internal fun MainActivity.animationsOn() = UiPrefs.animations(this)
 
 internal fun MainActivity.contentRoot(): View? = findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
 
@@ -37,8 +38,7 @@ internal fun MainActivity.slideScreens(old: View, dir: Int) {
     val w = (content.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels).toFloat()
     val ease = DecelerateInterpolator(1.6f)
     new.translationX = dir * w
-    new.animate().translationX(0f).setDuration(SLIDE_MS).setInterpolator(ease).start()
-    old.animate().translationX(-dir * w).setDuration(SLIDE_MS).setInterpolator(ease).withEndAction { content.removeView(shield) }.start()
+    Tween(SLIDE_MS, ease, { f -> new.translationX = dir * w * (1f - f); old.translationX = -dir * w * f }) { new.translationX = 0f; content.removeView(shield) }.start()
 }
 
 /**
@@ -57,8 +57,7 @@ internal fun MainActivity.slideLists(old: View, startX: Float, dir: Int) {
     val ease = DecelerateInterpolator(1.6f)
     old.translationX = startX
     new.translationX = startX + dir * w
-    new.animate().translationX(0f).setDuration(SLIDE_MS).setInterpolator(ease).start()
-    old.animate().translationX(-dir * w).setDuration(SLIDE_MS).setInterpolator(ease).withEndAction { frame.removeView(shield) }.start()
+    Tween(SLIDE_MS, ease, { f -> old.translationX = startX + (-dir * w - startX) * f; new.translationX = (startX + dir * w) * (1f - f) }) { new.translationX = 0f; frame.removeView(shield) }.start()
 }
 
 /** Contacts, Calls, Texts (and Folders when they have their own tab), left to right. */
@@ -119,7 +118,7 @@ internal class TabSwipeFrame(
     }
 
     private fun list(): View? = if (childCount > 0) getChildAt(0) else null
-    private fun back(v: View?) { v?.animate()?.translationX(0f)?.setDuration(160)?.setInterpolator(DecelerateInterpolator())?.start() }
+    private fun back(v: View?) { v ?: return; val from = v.translationX; Tween(160, DecelerateInterpolator(), { f -> v.translationX = from * (1f - f) }).start() }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
@@ -140,5 +139,28 @@ internal class TabSwipeFrame(
             MotionEvent.ACTION_CANCEL -> if (swiping) { swiping = false; back(list()?.takeIf { follow() }) }
         }
         return swiping
+    }
+}
+
+/**
+ * Our own animation clock, in step with the screen's frames. The system's animators follow the phone's "animation speed"
+ * developer/accessibility setting (at 0 they finish instantly), so these slides and the balloon use this instead.
+ */
+internal class Tween(
+    private val ms: Long,
+    private val ease: android.animation.TimeInterpolator,
+    private val onUpdate: (Float) -> Unit,
+    private val onEnd: () -> Unit = {},
+) : android.view.Choreographer.FrameCallback {
+    private var t0 = 0L
+    private var live = true
+    fun start(): Tween { android.view.Choreographer.getInstance().postFrameCallback(this); return this }
+    fun cancel() { live = false }
+    override fun doFrame(frameTimeNanos: Long) {
+        if (!live) return
+        if (t0 == 0L) t0 = frameTimeNanos
+        val f = ((frameTimeNanos - t0) / 1_000_000f / ms).coerceIn(0f, 1f)
+        onUpdate(ease.getInterpolation(f))
+        if (f < 1f) android.view.Choreographer.getInstance().postFrameCallback(this) else onEnd()
     }
 }

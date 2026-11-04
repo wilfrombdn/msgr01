@@ -33,7 +33,7 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
     val ui = android.os.Handler(android.os.Looper.getMainLooper())
     var armed = false; var cancelled = false
     var sx = 0f; var sy = 0f
-    var grow: android.animation.ValueAnimator? = null
+    var grow: Tween? = null
     val base = dp(56); val swell = dp(63); val big = dp(93)   // normal, filling up while you hold, and the finished camera (1 2/3 bigger)
     // The button really changes size (not a stretched picture of itself), so the circle and icon stay sharp the whole way.
     fun setSize(lp: ViewGroup.LayoutParams, s: Int) {
@@ -46,11 +46,8 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
         val lp = fab.layoutParams ?: return
         grow?.cancel()
         if (!animationsOn()) { setSize(lp, target); return }
-        grow = android.animation.ValueAnimator.ofFloat(lp.width.toFloat(), target.toFloat()).apply {
-            duration = ms; interpolator = ease
-            addUpdateListener { a -> setSize(lp, (a.animatedValue as Float).toInt()) }
-            start()
-        }
+        val from = lp.width
+        grow = Tween(ms, ease, { f -> setSize(lp, (from + (target - from) * f).toInt()) }).start()
     }
     // Like a balloon: it slowly fills while you hold, then pops out to full size with a bounce and the camera appears.
     // Let go early or drag away and the air goes back out.

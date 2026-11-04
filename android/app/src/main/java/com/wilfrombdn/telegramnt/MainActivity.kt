@@ -150,6 +150,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        updatePoll.removeCallbacks(updatePollRun)
         emojiPopup?.dismiss(); emojiPopup = null
         super.onPause()
     }
@@ -157,10 +158,17 @@ class MainActivity : Activity() {
     // ---------- in-app updates ----------
 
     internal var updateChecked = 0L
+    internal var updateShown = 0L          // newest version already offered in this run, so a "Not now" is not nagged again every minute
+    internal var updateDialogOpen = false
+    internal val updatePoll = android.os.Handler(android.os.Looper.getMainLooper())
+    internal val updatePollRun = object : Runnable {   // while the app is open: look for a new version every minute
+        override fun run() { pollUpdate(); updatePoll.postDelayed(this, 60_000) }
+    }
     internal var pendingApk: File? = null
 
     override fun onResume() {
         super.onResume()
+        updatePoll.removeCallbacks(updatePollRun); updatePoll.postDelayed(updatePollRun, 5_000)   // an update that dropped while the app was away shows within seconds
         // back from "allow installs from Tellem": carry on with the update
         if (newContactPending) { newContactPending = false; Messenger.run({ Texts.forgetNames(); Texts.threads.forEach { t -> t.addresses.forEach { Texts.name(this, it) } } }, { if (screen == Screen.TEXT_THREAD) showTextThread(textThread) else if (screen == Screen.CHATS) showChats() }) }
         pendingApk?.let { f -> if (packageManager.canRequestPackageInstalls()) { pendingApk = null; Messenger.run({ Updater.install(this, f) }) } }

@@ -340,7 +340,7 @@ internal fun MainActivity.messageResults(list: LinearLayout, q: String) {
 internal fun MainActivity.switchWindow() {
     val old = if (animationsOn()) contentRoot() else null
     val dir = if (textsTab) -1 else 1   // to Phone: it comes in from the right; back to Tellem: from the left
-    textsTab = !textsTab; chatsScrollY = 0; flipAnim = old == null
+    textsTab = !textsTab; chatsScrollY = 0
     showChats()
     old?.let { slideScreens(it, dir) }
 }
