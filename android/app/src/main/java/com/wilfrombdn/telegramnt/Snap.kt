@@ -1,6 +1,8 @@
 package com.wilfrombdn.telegramnt
 
 import android.content.Intent
+import android.graphics.Color
+import android.widget.ImageView
 import android.text.InputType
 import android.text.TextUtils
 import android.view.Gravity
@@ -17,11 +19,28 @@ import android.widget.ScrollView
  * Hold it until it buzzes and let go: the camera opens for a snap, no menu in between.
  * Moving your finger off the button before it buzzes cancels both.
  */
-internal fun MainActivity.snapHold(fab: View) {
+internal fun MainActivity.fab(res: Int, onTap: () -> Unit) = ImageView(this).apply {
+    setImageResource(res)
+    setColorFilter(if (dark) Color.WHITE else Color.BLACK)   // white in dark mode, black in light mode
+    setPadding(dp(16), dp(16), dp(16), dp(16))
+    background = circle(blue)
+    elevation = dp(6).toFloat()
+    setOnClickListener { onTap() }
+    snapHold(this, res)
+}
+
+internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
     val ui = android.os.Handler(android.os.Looper.getMainLooper())
     var armed = false; var cancelled = false
     var sx = 0f; var sy = 0f
-    val arm = Runnable { armed = true; fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) }
+    // held long enough: the icon turns into a camera and the button grows by two thirds
+    fun morph(on: Boolean) {
+        fab.setImageResource(if (on) R.drawable.ic_camera else res)
+        fab.pivotX = fab.width.toFloat(); fab.pivotY = fab.height.toFloat()   // grows up and left, stays on screen
+        val s = if (on) 5f / 3f else 1f
+        fab.animate().scaleX(s).scaleY(s).setDuration(150).start()
+    }
+    val arm = Runnable { armed = true; fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); morph(true) }
     fab.setOnTouchListener { v, e ->
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -31,13 +50,13 @@ internal fun MainActivity.snapHold(fab: View) {
             }
             MotionEvent.ACTION_MOVE ->
                 if (!armed && !cancelled && Math.hypot((e.rawX - sx).toDouble(), (e.rawY - sy).toDouble()) > dp(12)) {
-                    cancelled = true; ui.removeCallbacks(arm); v.isPressed = false   // dragged off before it buzzed: neither a tap nor a snap
+                    cancelled = true; ui.removeCallbacks(arm); v.isPressed = false; if (armed) morph(false)   // dragged off before it buzzed: neither a tap nor a snap
                 }
             MotionEvent.ACTION_UP -> {
                 ui.removeCallbacks(arm); v.isPressed = false
-                if (armed) startSnap() else if (!cancelled) v.performClick()
+                if (armed) { morph(false); startSnap() } else if (!cancelled) v.performClick()
             }
-            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false }
+            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false; if (armed) morph(false) }
         }
         true
     }

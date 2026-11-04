@@ -115,14 +115,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     enableFolderDrops(list, scroll)
     val frame = FrameLayout(this)
     frame.addView(scroll)
-    frame.addView(ImageView(this).apply {
-        setImageResource(R.drawable.ic_camera)
-        setColorFilter(ink)
-        setPadding(dp(12), dp(12), dp(12), dp(12))
-        background = circle(white)
-        elevation = dp(6).toFloat()
-        setOnClickListener { showNewChat() }
-    }.let { if (phoneOnly) phoneButton() else it }.also { snapHold(it) }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
+    frame.addView(if (phoneOnly) phoneButton() else fab(R.drawable.ic_edit) { showNewChat() }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
     if (q.isEmpty() && !screenSearch && !showArchive) frame.addView(windowSwitch(all.sumOf { it.unread } + grps.sumOf { it.unread }, textsUnread()),
         FrameLayout.LayoutParams(-2, dp(56), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(16), 0, 0, dp(16)) })
 

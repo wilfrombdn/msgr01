@@ -258,15 +258,11 @@ internal fun MainActivity.showTextList() {
     addTextRows(list, "")
     val frame = FrameLayout(this)
     frame.addView(ScrollView(this).apply { addView(list); isFillViewport = true })
-    frame.addView(newTextButton().also { snapHold(it) }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
+    frame.addView(newTextButton(), FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
     setContentView(page(topBar("Texts", "Normal texts · not encrypted", icon(R.drawable.ic_back) { showWelcome() }), frame))
 }
 
-internal fun MainActivity.newTextButton() = ImageView(this).apply {
-    setImageResource(R.drawable.ic_camera); setColorFilter(Color.WHITE)
-    setPadding(dp(12), dp(12), dp(12), dp(12)); background = circle(smsGreen); elevation = dp(6).toFloat()
-    setOnClickListener { showNewText() }
-}
+internal fun MainActivity.newTextButton() = fab(R.drawable.ic_edit) { showNewText() }
 
 internal fun MainActivity.leaveTexts() {
     if (screen == Screen.TEXT_THREAD) textScroll?.let { s -> if (atBottom(s)) textSpots.remove(textThread) else textSpots[textThread] = s.scrollY }

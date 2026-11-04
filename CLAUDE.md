@@ -15,7 +15,7 @@
 - Server backups run nightly from the owner's PC (accounts only, encrypted; see `SERVER-SETUP.md`). Keep the server holding as little as possible.
 
 ## Waiting for the next release (since 7.7)
-- Nothing yet. 7.5 (Snap, Saved Messages), 7.6 (full-screen camera, flash/timer, cleanup into feature files) and 7.7 (hold-and-release camera button, bottom Tellem|Phone switch) and 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) have not been tested on a real phone, so expect fixes.
+- Nothing yet (7.8 shipped the pencil/phone/plus round button with hold-to-big-camera). 7.5 (Snap, Saved Messages), 7.6 (full-screen camera, flash/timer, cleanup into feature files) and 7.7 (hold-and-release camera button, bottom Tellem|Phone switch) and 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) have not been tested on a real phone, so expect fixes.
 
 ## Checking a refactor
 - Screens live in feature files (see README "Where things live"); `ScreenshotTest` writes a `.tree.txt` (view tree: types, text, sizes, positions) next to each PNG in `app/build/shots/`. Keep a copy before a refactor and diff afterwards: identical trees = same UI. Five call/download screens have live timers and always differ.
