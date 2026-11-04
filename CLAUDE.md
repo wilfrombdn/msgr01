@@ -15,7 +15,9 @@
 - Server backups run nightly from the owner's PC (accounts only, encrypted; see `SERVER-SETUP.md`). Keep the server holding as little as possible.
 
 ## Waiting for the next release (since 7.0)
-- Nothing yet. 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) has not been tested on a real phone, so expect fixes.
+- Snap mode: hold the pencil, slide onto "Snap", release → camera → tap to caption → pick Tellem friends/groups or texts → back where you were (MainActivity `snapHold`/`showSnapSend`, CameraActivity `snap` extra). Compiles; untested on a phone.
+- Saved Messages: hidden until the first save; "Save" in the long-press menu of Tellem and SMS messages (SMS ones keep "Forwarded from <name> (text)" via `fwd = "sms:<name>"`); setting "Keep saved messages in the Tellem window only" (pref `savedTellemOnly`, default off). Compiles; untested on a phone.
+- 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) has not been tested on a real phone, so expect fixes.
 
 ## Setting up another computer
 - Clone this repo and `git@github.com:wilfrombdn/wilfrombdn.github.io.git` to `~/wilfrombdn.github.io` (download page + update.json).

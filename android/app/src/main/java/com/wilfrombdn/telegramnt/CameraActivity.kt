@@ -57,6 +57,9 @@ class CameraActivity : ComponentActivity() {
     private var pressY = 0f
     private var zoomAtPress = 1f
     private var holding = false
+    private var snap = false                       // snap mode: after the shot, add a caption and send
+    private lateinit var rootView: FrameLayout
+    private var editLayer: FrameLayout? = null
     private val ui = android.os.Handler(android.os.Looper.getMainLooper())
     private val startVideo = Runnable { beginVideo() }
 
@@ -68,6 +71,7 @@ class CameraActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)   // no screenshots / recents preview
+        snap = intent.getBooleanExtra("snap", false)
         cacheDir.resolve("camera").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
         setContentView(buildUi())
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
@@ -79,6 +83,7 @@ class CameraActivity : ComponentActivity() {
     private fun buildUi(): View {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         preview = PreviewView(this).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
+        rootView = root
         root.addView(preview, FrameLayout.LayoutParams(-1, -1))
 
         // pinch-to-zoom anywhere on the viewfinder
@@ -204,7 +209,7 @@ class CameraActivity : ComponentActivity() {
         shutter.isEnabled = false
         ic.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(r: ImageCapture.OutputFileResults) = handBack(file, true)
+                override fun onImageSaved(r: ImageCapture.OutputFileResults) = if (snap) showEdit(file, true) else handBack(file, true)
                 override fun onError(e: ImageCaptureException) { shutter.isEnabled = true; toast("Couldn't take the photo") }
             })
     }
@@ -223,7 +228,7 @@ class CameraActivity : ComponentActivity() {
                 val hardError = ev.hasError() && ev.error != VideoRecordEvent.Finalize.ERROR_FILE_SIZE_LIMIT_REACHED
                 if (hardError || !file.exists() || file.length() == 0L) {
                     file.delete(); resetShutter(); toast("Couldn't record that video")
-                } else handBack(file, false)
+                } else if (snap) showEdit(file, false) else handBack(file, false)
             }
         }
         tick()   // start the timer only once `recording` is set, or its null-guard bails out immediately
@@ -248,9 +253,116 @@ class CameraActivity : ComponentActivity() {
         timer.visibility = View.GONE; hint.visibility = View.VISIBLE
     }
 
-    private fun handBack(file: File, isPhoto: Boolean) {
+    // ---- snap mode: look at the shot, tap to type a caption (drag it up/down), send ----
+
+    private fun showEdit(file: File, isPhoto: Boolean) {
+        shutter.isEnabled = false
+        val layer = FrameLayout(this).apply { setBackgroundColor(Color.BLACK); isClickable = true }
+        val stage = FrameLayout(this)
+        layer.addView(stage, FrameLayout.LayoutParams(-1, -1))
+        var shot: android.graphics.Bitmap? = null
+        if (isPhoto) {
+            shot = decodeUpright(file, 2000)
+            stage.addView(ImageView(this).apply { setImageBitmap(shot); scaleType = ImageView.ScaleType.FIT_CENTER }, FrameLayout.LayoutParams(-1, -1))
+        } else {
+            val vv = android.widget.VideoView(this)
+            vv.setVideoURI(android.net.Uri.fromFile(file))
+            vv.setOnPreparedListener { it.isLooping = true; vv.start() }
+            stage.addView(vv, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        }
+        val imm = getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+        val cap = android.widget.EditText(this).apply {
+            setTextColor(Color.WHITE); textSize = 19f; gravity = Gravity.CENTER
+            setBackgroundColor(0x99000000.toInt()); setPadding(d(14), d(10), d(14), d(10))
+            setRawInputType(android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+            filters = arrayOf(android.text.InputFilter.LengthFilter(140))
+            maxLines = 3; visibility = View.GONE
+        }
+        stage.addView(cap, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
+        fun typing() { cap.visibility = View.VISIBLE; cap.requestFocus(); imm.showSoftInput(cap, 0) }
+        fun doneTyping() { cap.clearFocus(); imm.hideSoftInputFromWindow(cap.windowToken, 0); if (cap.text.isNullOrBlank()) cap.visibility = View.GONE }
+        cap.setOnEditorActionListener { _, _, _ -> doneTyping(); true }
+        // not typing: drag the caption up or down, tap it to edit
+        var downY = 0f; var startTy = 0f; var moved = false
+        cap.setOnTouchListener { v, e ->
+            if (v.isFocused) return@setOnTouchListener false
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { downY = e.rawY; startTy = v.translationY; moved = false }
+                MotionEvent.ACTION_MOVE -> { if (Math.abs(e.rawY - downY) > d(8)) moved = true; if (moved) v.translationY = startTy + e.rawY - downY }
+                MotionEvent.ACTION_UP -> if (!moved) typing()
+            }
+            true
+        }
+        stage.setOnClickListener { if (cap.isFocused) doneTyping() else typing() }
+
+        layer.addView(iconButton("✕") {
+            doneTyping(); rootView.removeView(layer); editLayer = null
+            file.delete(); shutter.isEnabled = true
+        }, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.START).apply { leftMargin = d(12); topMargin = d(20) })
+        layer.addView(TextView(this).apply {
+            text = "Send  ➤"; setTextColor(Color.parseColor("#111111")); textSize = 17f; gravity = Gravity.CENTER
+            setPadding(d(26), d(13), d(26), d(13))
+            background = GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = d(28).toFloat() }
+            setOnClickListener {
+                doneTyping(); isEnabled = false
+                val text = cap.text.toString().trim()
+                if (!isPhoto || text.isEmpty() || shot == null) return@setOnClickListener handBack(file, isPhoto, text)
+                // photos: the caption is burned into the picture, like Snapchat
+                val stageW = stage.width; val stageH = stage.height
+                val centerY = cap.top + cap.translationY + cap.height / 2f
+                val textPx = cap.textSize; val padPx = cap.paddingTop.toFloat()
+                Thread {
+                    runCatching { bake(file, shot!!, text, stageW, stageH, centerY, textPx, padPx) }
+                    runOnUiThread { handBack(file, true, text) }
+                }.start()
+            }
+        }, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { rightMargin = d(18); bottomMargin = d(28) })
+        rootView.addView(layer, FrameLayout.LayoutParams(-1, -1))
+        editLayer = layer
+    }
+
+    /** Photo decoded the right way up, no bigger than [maxSide]. */
+    private fun decodeUpright(file: File, maxSide: Int): android.graphics.Bitmap? {
+        val b = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(file.path, b)
+        val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = maxOf(1, maxOf(b.outWidth, b.outHeight) / maxSide) }
+        val raw = android.graphics.BitmapFactory.decodeFile(file.path, o) ?: return null
+        val deg = when (runCatching { android.media.ExifInterface(file.path).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1) }.getOrDefault(1)) {
+            6 -> 90f; 3 -> 180f; 8 -> 270f; else -> 0f
+        }
+        if (deg == 0f) return raw
+        return android.graphics.Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, android.graphics.Matrix().apply { postRotate(deg) }, true)
+    }
+
+    /** Draws the caption band onto the photo and saves it back over [file] as a JPEG. */
+    private fun bake(file: File, shot: android.graphics.Bitmap, text: String, stageW: Int, stageH: Int, centerY: Float, textPx: Float, padPx: Float) {
+        val out = shot.copy(android.graphics.Bitmap.Config.ARGB_8888, true)
+        val scale = minOf(stageW.toFloat() / out.width, stageH.toFloat() / out.height)   // how the picture was fitted on screen
+        val dispW = out.width * scale; val dispH = out.height * scale
+        val frac = ((centerY - (stageH - dispH) / 2f) / dispH).coerceIn(0f, 1f)
+        val k = out.width / dispW
+        val c = android.graphics.Canvas(out)
+        val tp = android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = textPx * k }
+        val pad = padPx * k
+        val layout = android.text.StaticLayout.Builder.obtain(text, 0, text.length, tp, (out.width - 2 * pad).toInt().coerceAtLeast(1))
+            .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER).build()
+        val bandH = layout.height + 2 * pad
+        val top = (frac * out.height - bandH / 2).coerceIn(0f, maxOf(0f, out.height - bandH))
+        c.drawRect(0f, top, out.width.toFloat(), top + bandH, android.graphics.Paint().apply { color = 0x99000000.toInt() })
+        c.save(); c.translate(pad, top + pad); layout.draw(c); c.restore()
+        file.outputStream().use { out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        val l = editLayer
+        if (l != null) { rootView.removeView(l); editLayer = null; shutter.isEnabled = true } else @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    private fun handBack(file: File, isPhoto: Boolean, caption: String = "") {
         val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
-        setResult(RESULT_OK, Intent().setData(uri).putExtra("photo", isPhoto)
+        setResult(RESULT_OK, Intent().setData(uri).putExtra("photo", isPhoto).putExtra("caption", caption)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
         finish()
     }
