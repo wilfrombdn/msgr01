@@ -13,7 +13,7 @@ import android.widget.ScrollView
 import android.provider.ContactsContract.CommonDataKinds.Phone as P
 
 // Adding and editing a contact on the phone: one screen for both (a big initials circle, name, numbers with labels, emails),
-// and the contact pop-up that offers Edit contact, Call and Text.
+// and the contact pop-up (pencil in the top right to edit; Call and Text).
 
 private val PHONE_LABELS = listOf(P.TYPE_MOBILE to "Mobile", P.TYPE_HOME to "Home", P.TYPE_WORK to "Work", P.TYPE_OTHER to "Other")
 
@@ -176,7 +176,7 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
 }
 
 /**
- * The contact pop-up: Edit contact first (only when it's a saved contact and [edit] is true, i.e. opened from the Contacts tab),
+ * The contact pop-up: a pencil in the top right to edit (only when it's a saved contact and [edit] is true, i.e. opened from the Contacts tab),
  * then everything saved about them: company, each number (Call, Text; hold a number to copy it) and each email (tap to write
  * to them in an email app of your choice; hold to copy it). A number that isn't saved gets "Add to contacts" instead.
  */
@@ -186,16 +186,11 @@ internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
     fun copy(what: String, value: String) {
         getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText(what, value)); toast("Copied")
     }
-    if (p.id == 0L || edit) col.addView(LinearLayout(this).apply {
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, dp(8), 0, dp(10)); background = pressable(); isClickable = true
-        addView(icon(R.drawable.ic_edit, white, 22, 0))
-        addView(tv(if (p.id != 0L) "Edit contact" else "Add to contacts", 16f, white, true).apply { setPadding(dp(14), 0, 0, 0) })
-        setOnClickListener {
-            dialog?.dismiss()
-            if (p.id != 0L) showEditContact(p) { showChats() } else showAddContact(p.numbers.firstOrNull()?.first) { showChats() }
-        }
-    })
+    // The pencil in the top right corner: edit a saved contact (only from the Contacts tab), or save a number that isn't a contact yet.
+    val pencil = if (p.id == 0L || edit) icon(R.drawable.ic_edit, white, 22) {
+        dialog?.dismiss()
+        if (p.id != 0L) showEditContact(p) { showChats() } else showAddContact(p.numbers.firstOrNull()?.first) { showChats() }
+    }.apply { background = pressable(); contentDescription = if (p.id != 0L) "Edit contact" else "Add to contacts" } else null
     if (p.company.isNotEmpty()) col.addView(LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(6))
         setOnLongClickListener { copy("company", p.company); true }
@@ -236,7 +231,7 @@ internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
         }
         setOnLongClickListener { copy("email", m); true }
     })
-    popup(p.name, "Hold a number or email to copy it. Calls and texts go through your carrier, not private.", col, "Close" to dim, dialogOut = { dialog = it })
+    popup(p.name, "Hold a number or email to copy it. Calls and texts go through your carrier, not private.", col, "Close" to dim, dialogOut = { dialog = it }, titleAction = pencil)
 }
 
 /** Tapping a phone call in the Calls list: the contact's numbers with Call and Text (no editing here), or the bare number with "Add to contacts". */

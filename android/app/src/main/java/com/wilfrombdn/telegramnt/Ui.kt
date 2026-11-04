@@ -313,7 +313,7 @@ internal fun MainActivity.dropdown(anchor: View, side: Int, vararg items: Pair<S
     val box = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(0, dp(8), 0, dp(8))
-        background = GradientDrawable().apply { setColor(menuBg); setStroke(dp(1), divider); cornerRadius = dp(16).toFloat() }
+        background = GradientDrawable().apply { setColor(menuBg); setStroke(dp(1), divider); cornerRadius = dp(4).toFloat() }
     }
     val pw = android.widget.PopupWindow(box, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true)
     for ((label, action) in items) box.addView(tv(label, 16f, white).apply {
@@ -322,12 +322,12 @@ internal fun MainActivity.dropdown(anchor: View, side: Int, vararg items: Pair<S
         setOnClickListener { tapBuzz(); pw.dismiss(); action() }
     })
     pw.elevation = dp(12).toFloat()
-    pw.setBackgroundDrawable(GradientDrawable().apply { setColor(menuBg); setStroke(dp(1), divider); cornerRadius = dp(16).toFloat() })
+    pw.setBackgroundDrawable(GradientDrawable().apply { setColor(menuBg); setStroke(dp(1), divider); cornerRadius = dp(4).toFloat() })
     pw.showAsDropDown(anchor, 0, 0, side)
 }
 
-/** The panel every pop-up sits on: softly rounded, a hairline edge, and it eases in (scale + fade) unless animations are off. */
-internal fun MainActivity.panelBackground(radiusDp: Int = 22) = GradientDrawable().apply {
+/** The panel every pop-up sits on: Telegram-style squared-off corners and a hairline edge; it eases in (scale + fade) unless animations are off. */
+internal fun MainActivity.panelBackground(radiusDp: Int = 4) = GradientDrawable().apply {
     setColor(bar); setStroke(dp(1), divider); cornerRadius = dp(radiusDp).toFloat()
 }
 
@@ -342,40 +342,43 @@ internal fun MainActivity.presentDialog(d: android.app.Dialog, panel: View) {
 }
 
 /**
- * The app's own pop-up (instead of Android's): title, optional text or [content], and the buttons as soft pills along the bottom.
- * The main action (white) is filled, red is a gentle red, anything else is quiet. [onButton] gets the index of the button tapped.
+ * The app's own pop-up (instead of Android's), laid out like Telegram's: title (with an optional small [titleAction] icon at its
+ * top right), optional text or [content], and the buttons as plain words in the bottom right. The main action (white) is bold,
+ * red stays red, anything else is quiet. [onButton] gets the index of the button tapped.
  */
-internal fun MainActivity.popup(title: String, message: String?, content: View?, vararg buttons: Pair<String, Int>, dialogOut: ((android.app.Dialog) -> Unit)? = null, onButton: (Int) -> Unit = {}) {
+internal fun MainActivity.popup(title: String, message: String?, content: View?, vararg buttons: Pair<String, Int>, dialogOut: ((android.app.Dialog) -> Unit)? = null, titleAction: View? = null, onButton: (Int) -> Unit = {}) {
     val d = android.app.Dialog(this)
     d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
     val col = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(24), dp(24), dp(24), dp(18))
+        setPadding(dp(24), dp(22), dp(24), dp(10))
         background = panelBackground()
         elevation = dp(10).toFloat()
     }
-    col.addView(tv(title, 19f, white, true).apply { setPadding(0, 0, 0, dp(8)) })
+    if (titleAction == null) col.addView(tv(title, 19f, white, true).apply { setPadding(0, 0, 0, dp(8)) })
+    else col.addView(LinearLayout(this).apply {   // title on the left, the small icon tucked into the top right corner
+        gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(8))
+        addView(tv(title, 19f, white, true), LinearLayout.LayoutParams(0, -2, 1f))
+        addView(titleAction, (titleAction.layoutParams as? LinearLayout.LayoutParams ?: LinearLayout.LayoutParams(-2, -2)).apply { topMargin = -dp(10); bottomMargin = -dp(10); marginEnd = -dp(12) })
+    }, LinearLayout.LayoutParams(-1, -2))
     message?.let { col.addView(tv(it, 15f, dim).apply { setLineSpacing(0f, 1.18f); setPadding(0, 0, 0, dp(6)) }) }
     content?.let { col.addView(it, LinearLayout.LayoutParams(-1, -2)) }
     val stacked = buttons.size > 2
-    val row = LinearLayout(this).apply { orientation = if (stacked) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(0, dp(14), 0, 0) }
+    val row = LinearLayout(this).apply {
+        orientation = if (stacked) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        gravity = Gravity.END                                        // buttons sit in the bottom right, like Telegram
+        setPadding(0, dp(10), 0, 0)
+    }
     buttons.forEachIndexed { i, (label, color) ->
         val main = color == white && i == buttons.size - 1          // the action you came here to do
-        val fill = when {
-            main -> white
-            color == red -> (red and 0x00FFFFFF) or (0x2E shl 24)
-            color == dim -> pick("#1FFFFFFF", "#12000000")
-            else -> (color and 0x00FFFFFF) or (0x2E shl 24)
-        }
-        val ink2 = if (main) ink else if (color == dim) white else color
-        row.addView(tv(label, 15f, ink2, true).apply {
-            gravity = Gravity.CENTER; maxLines = 1
+        row.addView(tv(label, 15.5f, color, main || color == red).apply {
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END; maxLines = 1
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = GradientDrawable().apply { setColor(fill); cornerRadius = dp(26).toFloat() }
+            background = pressable()
             setOnClickListener { tapBuzz(); d.dismiss(); onButton(i) }
-        }, if (stacked) LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) } else LinearLayout.LayoutParams(0, -2, 1f).apply { if (i > 0) leftMargin = dp(10) })
+        }, LinearLayout.LayoutParams(-2, -2).apply { if (!stacked && i > 0) leftMargin = dp(4) })
     }
-    col.addView(row, LinearLayout.LayoutParams(-1, -2))
+    col.addView(row, LinearLayout.LayoutParams(-1, -2).apply { marginEnd = -dp(12) })
     d.setContentView(col)
     d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
     d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.88).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)

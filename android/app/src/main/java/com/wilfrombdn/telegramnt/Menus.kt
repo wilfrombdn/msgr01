@@ -21,7 +21,7 @@ import androidx.drawerlayout.widget.DrawerLayout
 internal fun MainActivity.quickReactions(): List<String> = MainActivity.quickReactions(synchronized(Messenger.emojiUse) { Messenger.emojiUse.toMap() }, fixedReactions, fillerReactions)
 
 /**
- * Long-press menu: softly rounded panel that grows out of the spot you pressed, with an optional
+ * Long-press menu: squared-off panel (like Telegram) that grows out of the spot you pressed, with an optional
  * reaction bar on top ([mine] = your current reaction) and the actions below.
  */
 internal fun MainActivity.longPressMenu(mine: String?, onReact: ((String) -> Unit)?, actions: List<Pair<String, () -> Unit>>) {
@@ -30,7 +30,7 @@ internal fun MainActivity.longPressMenu(mine: String?, onReact: ((String) -> Uni
     val root = FrameLayout(this).apply { setBackgroundColor(0x55000000); setOnClickListener { d.dismiss() } }
     val col = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = GradientDrawable().apply { setColor(bar); setStroke(dp(1), divider); cornerRadius = dp(18).toFloat() }
+        background = GradientDrawable().apply { setColor(bar); setStroke(dp(1), divider); cornerRadius = dp(4).toFloat() }
         clipToOutline = true
         elevation = dp(14).toFloat()
         setPadding(dp(6), dp(8), dp(6), dp(8))
