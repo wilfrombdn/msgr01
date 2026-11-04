@@ -26,7 +26,7 @@ import android.telecom.TelecomManager
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.widget.GridLayout
+
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.concurrent.CopyOnWriteArrayList
@@ -197,7 +197,7 @@ class PhoneCallActivity : Activity() {
         window.statusBarColor = Color.TRANSPARENT; window.navigationBarColor = Color.TRANSPARENT
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; fitsSystemWindows = true
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF17212B.toInt(), 0xFF0E1621.toInt()))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF1F1F1F.toInt(), 0xFF0B0B0B.toInt()))
         }
         setContentView(root)
     }
@@ -239,7 +239,7 @@ class PhoneCallActivity : Activity() {
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 0.5f))
         root.addView(TextView(this).apply {   // initial in a circle
             text = name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "#"; textSize = 54f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF2B5278.toInt()) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF3A3A3C.toInt()) }
         }, LinearLayout.LayoutParams(dp(140), dp(140)))
         root.addView(TextView(this).apply {
             text = name; setTextColor(Color.WHITE); textSize = 28f; gravity = Gravity.CENTER; maxLines = 2
@@ -260,11 +260,7 @@ class PhoneCallActivity : Activity() {
             return
         }
         if (keypad) {
-            val grid = GridLayout(this).apply { columnCount = 3 }
-            for (k in listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#")) grid.addView(circle(k, 64, 0x33FFFFFF) {
-                c.playDtmfTone(k[0]); root.postDelayed({ c.stopDtmfTone() }, 160)
-            }, GridLayout.LayoutParams().apply { setMargins(dp(10), dp(6), dp(10), dp(6)) })
-            root.addView(grid)
+            root.addView(keypad(62, 8) { k -> c.playDtmfTone(k[0]); root.postDelayed({ c.stopDtmfTone() }, 160) })
         } else {
             root.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER
@@ -309,15 +305,12 @@ class DialerActivity : Activity() {
         intent?.data?.takeIf { it.scheme == "tel" }?.schemeSpecificPart?.let { digits.append(it) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; fitsSystemWindows = true
-            setBackgroundColor(0xFF0E1621.toInt())
+            setBackgroundColor(0xFF141414.toInt())
         }
-        shown = TextView(this).apply { textSize = 34f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; maxLines = 1; setPadding(dp(16), dp(24), dp(16), dp(16)) }
+        shown = TextView(this).apply { textSize = 36f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; maxLines = 1; minHeight = dp(72); setPadding(dp(16), dp(8), dp(16), dp(8)) }
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         root.addView(shown, LinearLayout.LayoutParams(-1, -2))
-        val grid = GridLayout(this).apply { columnCount = 3 }
-        for (k in listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#")) grid.addView(circle(k, 72, 0x33FFFFFF) { digits.append(k); refresh() },
-            GridLayout.LayoutParams().apply { setMargins(dp(12), dp(8), dp(12), dp(8)) })
-        root.addView(grid)
+        root.addView(keypad(74, 9) { k -> digits.append(k); refresh() })
         root.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER
             addView(View(context), LinearLayout.LayoutParams(dp(72), 1))
@@ -333,7 +326,11 @@ class DialerActivity : Activity() {
         refresh()
     }
 
-    private fun refresh() { shown.text = digits.toString() }
+    private fun refresh() {
+        val raw = digits.toString()
+        shown.text = if (raw.length >= 4 && raw.all { it.isDigit() || it == '+' }) (android.telephony.PhoneNumberUtils.formatNumber(raw, java.util.Locale.getDefault().country) ?: raw) else raw
+        shown.textSize = if (raw.length > 14) 24f else if (raw.length > 10) 30f else 36f
+    }
 
     private fun call() {
         val n = digits.toString()
@@ -350,5 +347,24 @@ class DialerActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) call()
+    }
+}
+
+private val KEY_LETTERS = mapOf("2" to "ABC", "3" to "DEF", "4" to "GHI", "5" to "JKL", "6" to "MNO", "7" to "PQRS", "8" to "TUV", "9" to "WXYZ", "0" to "+")
+
+/** A phone keypad: four rows of three round keys with letters under the digits. [size] and [gap] are in dp. */
+private fun Activity.keypad(size: Int, gap: Int, onKey: (String) -> Unit): LinearLayout = LinearLayout(this).apply {
+    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+    for (row in listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("*", "0", "#"))) {
+        addView(LinearLayout(context).apply {
+            gravity = Gravity.CENTER
+            for (k in row) addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x26FFFFFF) }
+                addView(TextView(context).apply { text = k; setTextColor(Color.WHITE); textSize = if (size >= 70) 30f else 24f; gravity = Gravity.CENTER; includeFontPadding = false })
+                if (k in KEY_LETTERS) addView(TextView(context).apply { text = KEY_LETTERS[k]; setTextColor(0x99FFFFFF.toInt()); textSize = 9f; letterSpacing = 0.15f; gravity = Gravity.CENTER; includeFontPadding = false })
+                setOnClickListener { onKey(k) }
+            }, LinearLayout.LayoutParams(dp(size), dp(size)).apply { setMargins(dp(gap), dp(gap), dp(gap), dp(gap)) })
+        })
     }
 }

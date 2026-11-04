@@ -1454,7 +1454,7 @@ class MainActivity : Activity() {
         val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         line1.addView(tv(title, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
         if (pinned) line1.addView(pinMark())
-        line1.addView(tv("SMS", 10.5f, Color.WHITE, true).apply { setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(smsGreen, 4) })
+        if (Texts.mixed(this)) line1.addView(tv("SMS", 10.5f, Color.WHITE, true).apply { setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(smsGreen, 4) })   // only needed when texts sit among the chats
         line1.addView(tv(time(t.date), 13f, dim).apply { setPadding(dp(6), 0, 0, 0) })
         mid.addView(line1)
         val line2 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
@@ -1814,7 +1814,7 @@ class MainActivity : Activity() {
         val meta = (ink and 0x00FFFFFF) or (0x99 shl 24)
         b.addView(LinearLayout(this).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            addView(tv("SMS · " + time(t.date), 12f, meta))
+            addView(tv(time(t.date), 12f, meta))
             when (t.state) {
                 Texts.SENDING -> addView(tv("  🕓", 11f, meta))
                 Texts.FAILED -> addView(tv("  not sent · tap to retry", 12f, if (t.mine) Color.WHITE else red, true).apply {
