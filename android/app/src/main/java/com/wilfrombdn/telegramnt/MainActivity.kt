@@ -146,6 +146,7 @@ class MainActivity : Activity() {
             screen == Screen.CHATS && showArchive -> { showArchive = false; showChats() }
             Messenger.signedIn && screen != Screen.CHATS -> showChats()
             search.isNotEmpty() -> { search = ""; showChats() }
+            screen == Screen.CHATS && textsTab -> switchWindow()   // back on the Phone window goes to Tellem first, then a second back leaves the app
             else -> super.onBackPressed()
         }
     }

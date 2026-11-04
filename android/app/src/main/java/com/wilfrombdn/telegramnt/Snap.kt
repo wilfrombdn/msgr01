@@ -19,17 +19,24 @@ import android.widget.ScrollView
  * Hold it until it buzzes and let go: the camera opens for a snap, no menu in between.
  * Moving your finger off the button before it buzzes cancels both.
  */
-internal fun MainActivity.fab(res: Int, onTap: () -> Unit) = ImageView(this).apply {
+/** The round button; when the app comes back into view (say from the camera) it asks the touch handler to forget any half-finished hold. */
+internal class FabView(ctx: android.content.Context) : ImageView(ctx) {
+    var onReset: (() -> Unit)? = null
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) { super.onWindowFocusChanged(hasWindowFocus); if (hasWindowFocus) onReset?.invoke() }
+    override fun onVisibilityAggregated(isVisible: Boolean) { super.onVisibilityAggregated(isVisible); if (isVisible) onReset?.invoke() }
+}
+
+internal fun MainActivity.fab(res: Int, onTap: () -> Unit) = FabView(this).apply {
     setImageResource(res)
     setColorFilter(ink)            // icon: black in dark mode's white button, white in light mode's black button
     setPadding(dp(16), dp(16), dp(16), dp(16))
     background = circle(white)     // the button: white in dark mode, black in light mode
     elevation = dp(6).toFloat()
     setOnClickListener { onTap() }
-    snapHold(this, res)
+    onReset = snapHold(this, res)
 }
 
-internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
+internal fun MainActivity.snapHold(fab: ImageView, res: Int): () -> Unit {
     val ui = android.os.Handler(android.os.Looper.getMainLooper())
     var armed = false; var cancelled = false
     var sx = 0f; var sy = 0f
@@ -79,6 +86,7 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 v.parent?.requestDisallowInterceptTouchEvent(true)
+                ui.removeCallbacks(arm); ui.removeCallbacks(launch); grow?.cancel()   // nothing left over from an earlier press
                 sx = e.rawX; sy = e.rawY; armed = false; cancelled = false; launched = false
                 v.isPressed = true; ui.postDelayed(arm, 200)
                 sizeTo(swell, 200, android.view.animation.AccelerateInterpolator(1.3f))   // starts filling right away
@@ -101,6 +109,13 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
             MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false; if (!launched) { ui.removeCallbacks(launch); if (armed) cancelArmed() else deflate() } }
         }
         true
+    }
+    // Forget any half-finished hold and put the button back to normal at once (it used to stay stuck after backing out of the camera).
+    return {
+        ui.removeCallbacks(arm); ui.removeCallbacks(launch)
+        armed = false; cancelled = false; launched = false
+        grow?.cancel(); fab.isPressed = false; fab.setImageResource(res)
+        fab.layoutParams?.let { setSize(it, base) }
     }
 }
 
