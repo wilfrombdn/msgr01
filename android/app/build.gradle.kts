@@ -19,8 +19,8 @@ android {
         applicationId = "com.wilfrombdn.telegramnt"
         minSdk = 26
         targetSdk = 34
-        versionCode = 85
-        versionName = "9.2"
+        versionCode = 87
+        versionName = "9.4"
     }
     signingConfigs {
         create("release") {
