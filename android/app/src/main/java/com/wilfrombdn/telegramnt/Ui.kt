@@ -209,7 +209,7 @@ internal fun MainActivity.updateCallBar() {
     val k = Messenger.core.call
     if (k == null || k.phase == Core.Call.ENDED) { b.visibility = View.GONE; return }
     val name = Messenger.core.contact(k.user)?.name ?: "@${k.user}"
-    b.text = "$name · ${CallActivity.statusText(k, Messenger.connected)} · Tap to return"
+    b.text = T("$name · ${CallActivity.statusText(k, Messenger.connected)} · Tap to return")
     b.visibility = View.VISIBLE
 }
 
@@ -249,9 +249,9 @@ internal fun MainActivity.presence(c: Contact): CharSequence? {
     val now = System.currentTimeMillis()
     fun blueText(t: String) = android.text.SpannableString(t).apply { setSpan(android.text.style.ForegroundColorSpan(blue), 0, t.length, 0) }
     return when {
-        c.theirTypingUntil > now -> blueText("typing…")
-        c.theirOnlineUntil > now -> blueText("online")
-        c.theirSeen > 0 -> "last seen " + lastSeen(c.theirSeen, now)
+        c.theirTypingUntil > now -> blueText(T("typing…"))
+        c.theirOnlineUntil > now -> blueText(T("online"))
+        c.theirSeen > 0 -> T("last seen ") + lastSeen(c.theirSeen, now)
         else -> null
     }
 }
@@ -261,18 +261,18 @@ internal fun MainActivity.lastSeen(ts: Long, now: Long): String {
     val day = { t: Long -> Calendar.getInstance().apply { timeInMillis = t }.let { it.get(Calendar.YEAR) * 400 + it.get(Calendar.DAY_OF_YEAR) } }
     val clock = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
     return when {
-        mins < 1 -> "just now"
-        mins < 60 -> if (mins == 1L) "1 minute ago" else "$mins minutes ago"
-        day(ts) == day(now) -> "today at $clock"
-        day(ts) == day(now - 86_400_000) -> "yesterday at $clock"
+        mins < 1 -> T("just now")
+        mins < 60 -> if (mins == 1L) T("1 minute ago") else T("$mins minutes ago")
+        day(ts) == day(now) -> T("today at $clock")
+        day(ts) == day(now - 86_400_000) -> T("yesterday at $clock")
         else -> "on " + SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(ts))
     }
 }
 
 internal fun MainActivity.errorText(e: Exception) = when (e) {
-    is UserError -> e.message ?: "Something went wrong"
-    is Relay.RelayError -> e.reason.ifEmpty { "Server error" }.replaceFirstChar { it.uppercase() }
-    else -> "No connection right now. Try again in a moment."
+    is UserError -> e.message ?: T("Something went wrong")
+    is Relay.RelayError -> e.reason.ifEmpty { T("Server error") }.replaceFirstChar { it.uppercase() }
+    else -> T("No connection right now. Try again in a moment.")
 }
 
 /** A simple dark list dialog (used where there are more than a few choices). */

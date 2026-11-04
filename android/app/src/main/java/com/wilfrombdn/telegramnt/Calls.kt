@@ -44,7 +44,7 @@ internal fun MainActivity.callBubble(c: Contact, m: Msg): View {
     })
     b.addView(icon(R.drawable.ic_call, ink, 22, 12) { callFriend(c) }.apply { (layoutParams as LinearLayout.LayoutParams).leftMargin = dp(18) })
     b.setOnLongClickListener {
-        longPressMenu(null, null, listOf("Delete for me" to { Messenger.core.deleteMessage(c, m, forEveryone = false); fillChat() })); true
+        longPressMenu(null, null, listOf(T("Delete for me") to { Messenger.core.deleteMessage(c, m, forEveryone = false); fillChat() })); true
     }
     wrap.addView(b, LinearLayout.LayoutParams(-2, -2).apply { if (m.mine) leftMargin = dp(56) else rightMargin = dp(56) })
     return wrap

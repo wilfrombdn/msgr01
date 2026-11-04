@@ -57,7 +57,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
         for (t in rows.filter { it.first in arch }.sortedByDescending { it.second }) list.addView(rowFor(t))
     } else {
     if (q.isEmpty() && !phoneOnly) ringFixes().firstOrNull()?.let { f ->   // messages arrive late while the phone is set to cut Tellem's internet
-        list.addView(note("Messages can arrive late: ${f.first.replaceFirstChar { it.lowercase() }} isn't set up. Tap to fix.") { f.third() })
+        list.addView(note(T("Messages can arrive late: ${f.first.replaceFirstChar { it.lowercase() }} isn't set up. Tap to fix.")) { f.third() })
     }
     if (mixed && q.isEmpty() && folderPlace() == "top") folderRows(list)
     // pinned chats: at the very top, above folders, in the order you pinned them
@@ -94,8 +94,8 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     if (q.length >= 2 && !phoneOnly) messageResults(list, q)
     if (!phoneOnly && all.isEmpty() && grps.isEmpty() && (!mixed || Texts.threads.isEmpty()) && (q.length < 2 || list.childCount == 0)) {
         list.addView(tv(
-            if (q.isNotEmpty()) "No chats match \"$search\""
-            else "Welcome, ${core.me?.name}!\n\nTap the pencil to add a friend by their @username.\n\nYour username is @${core.me?.user}. Share it so friends can add you.",
+            if (q.isNotEmpty()) T("No chats match \"$search\"")
+            else T("Welcome, ${core.me?.name}!\n\nTap the pencil to add a friend by their @username.\n\nYour username is @${core.me?.user}. Share it so friends can add you."),
             15.5f, dim,
         ).apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
     }
@@ -129,14 +129,14 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
         frame.addView(sw, FrameLayout.LayoutParams(-2, dp(56), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(16), 0, 0, dp(16)) })
     }
 
-    val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
+    val top = if (showArchive && search.isEmpty() && !screenSearch) topBar(T("Archived chats"), null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
     else if (search.isNotEmpty() || screenSearch) searchBar() else {
         // the name at the top shows Tellem (chats) or Phone; the bottom-left switch changes between them
         val flip = android.text.SpannableStringBuilder()
-        if (textsTab) flip.append("Phone")
-        else flip.append(if (!Messenger.connected) "Connecting…" else if (Messenger.direct) APP_NAME else torTitle())
+        if (textsTab) flip.append(T("Phone"))
+        else flip.append(if (!Messenger.connected) T("Connecting…") else if (Messenger.direct) APP_NAME else torTitle())
         topBar(flip,
-            if (textsTab) null else if (Messenger.connected) null else if (Messenger.direct) (Messenger.directProblem ?: "Direct connection") else Tor.status(),
+            if (textsTab) null else if (Messenger.connected) null else if (Messenger.direct) (Messenger.directProblem ?: T("Direct connection")) else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             *listOfNotNull<View>(
                 if (textsTab && phoneSub == "contacts") icon(R.drawable.ic_sort) { showSortMenu() } else null,   // sort button (Contacts tab)
@@ -170,14 +170,14 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
 /** A friend's group invitation: nothing is joined (and nobody sees your username) until you tap Join. */
 internal fun MainActivity.inviteRow(inv: Core.Invite): View = LinearLayout(this).apply {
     orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(12)); setBackgroundColor(listBg)
-    addView(tv("@${inv.from} invited you to a group", 15.5f, white, true))
-    addView(tv("\"${inv.name}\". Everyone in a group can see your username.", 13.5f, dim).apply { setPadding(0, dp(2), 0, dp(6)) })
+    addView(tv(T("@${inv.from} invited you to a group"), 15.5f, white, true))
+    addView(tv(T("\"${inv.name}\". Everyone in a group can see your username."), 13.5f, dim).apply { setPadding(0, dp(2), 0, dp(6)) })
     addView(LinearLayout(context).apply {
-        addView(tv("Join", 15.5f, blue, true).apply {
+        addView(tv(T("Join"), 15.5f, blue, true).apply {
             setPadding(0, dp(6), dp(28), dp(6)); background = pressable()
             setOnClickListener { Messenger.run({ Messenger.core.acceptInvite(inv); Messenger.kick() }, { showChats() }) { e -> toast(errorText(e)) } }
         })
-        addView(tv("Decline", 15.5f, dim, true).apply {
+        addView(tv(T("Decline"), 15.5f, dim, true).apply {
             setPadding(0, dp(6), dp(28), dp(6)); background = pressable()
             setOnClickListener { Messenger.core.declineInvite(inv); showChats() }
         })
@@ -192,8 +192,8 @@ internal fun MainActivity.torTitle() = android.text.SpannableString("$APP_NAME T
 /** Tor's latest messages in a pop-up, with Copy, so a stuck connection can be sent to whoever is fixing it. */
 internal fun MainActivity.torDetails() {
     val text = (listOf(Tor.status()) + Tor.log()).joinToString("\n")
-    popup("Tor details", text, null, "Close" to dim, "Copy" to white) { i ->
-        if (i == 1) { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("tor", text)); toast("Copied") }
+    popup(T("Tor details"), text, null, T("Close") to dim, T("Copy") to white) { i ->
+        if (i == 1) { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("tor", text)); toast(T("Copied")) }
     }
 }
 
@@ -206,8 +206,8 @@ internal fun MainActivity.archiveRow(unread: Int, count: Int): View = LinearLayo
     }, LinearLayout.LayoutParams(dp(54), dp(54)))
     addView(LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0)
-        addView(tv("Archived chats", 16.5f, white, true))
-        addView(tv("$count chat" + if (count != 1) "s" else "", 15f, dim).apply { setPadding(0, dp(3), 0, 0) })
+        addView(tv(T("Archived chats"), 16.5f, white, true))
+        addView(tv(TP(count, "chat", "chats"), 15f, dim).apply { setPadding(0, dp(3), 0, 0) })
     }, LinearLayout.LayoutParams(0, -2, 1f))
     if (unread > 0) addView(tv("$unread", 12.5f, white, true).apply {
         gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1)); background = round(faint, 11)
@@ -216,7 +216,7 @@ internal fun MainActivity.archiveRow(unread: Int, count: Int): View = LinearLayo
 }
 
 internal fun MainActivity.searchBar(): View {
-    val box = field("Search", search, boxed = false).apply {
+    val box = field(T("Search"), search, boxed = false).apply {
         background = null
         addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -253,12 +253,12 @@ internal fun MainActivity.chatRowMenu(key: String) {
     val pinned = key in Messenger.pins
     val archived = key in Messenger.archived
     longPressMenu(null, null, listOf(
-        (if (archived) "Unarchive" else "Archive") to {
+        (if (archived) T("Unarchive") else T("Archive")) to {
             if (archived) Messenger.archived.remove(key) else { Messenger.archived.add(key); Messenger.pins.remove(key) }
             Messenger.settingsChanged(); showChats()
         },
-        (if (key in Messenger.muted) "Unmute" else "Mute") to { toggleMute(key) },
-        (if (pinned) "Unpin" else "Pin to top") to {
+        (if (key in Messenger.muted) T("Unmute") else T("Mute")) to { toggleMute(key) },
+        (if (pinned) T("Unpin") else T("Pin to top")) to {
             val ps = Messenger.pins
             if (pinned) ps.remove(key) else { ps.remove(key); ps.add(0, key) }
             Messenger.settingsChanged(); showChats()
@@ -285,12 +285,12 @@ internal fun MainActivity.chatRow(c: Contact, key: String? = null, bg: Int = lis
     mid.addView(line1)
     val line2 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
     val (preview, previewColor) = when {
-        c.status == Contact.ASKING -> (last?.takeIf { it.state == Msg.RECEIVED }?.let { "Message request: ${it.text}" } ?: "Wants to be your friend") to blue
-        c.status == Contact.ASKED && last?.state == Msg.NOTE -> "Friend request sent" to dim
-        c.status == Contact.FRIENDS && c.theirTypingUntil > System.currentTimeMillis() && c.user !in Messenger.core.blocked -> "typing…" to blue
-        Messenger.drafts["u:${c.user}"] != null -> "Draft: ${Messenger.drafts["u:${c.user}"]!!.replace('\n', ' ')}" to red
+        c.status == Contact.ASKING -> (last?.takeIf { it.state == Msg.RECEIVED }?.let { T("Message request: ${it.text}") } ?: T("Wants to be your friend")) to blue
+        c.status == Contact.ASKED && last?.state == Msg.NOTE -> T("Friend request sent") to dim
+        c.status == Contact.FRIENDS && c.theirTypingUntil > System.currentTimeMillis() && c.user !in Messenger.core.blocked -> T("typing…") to blue
+        Messenger.drafts["u:${c.user}"] != null -> T("Draft: ${Messenger.drafts["u:${c.user}"]!!.replace('\n', ' ')}") to red
         last == null -> "" to dim
-        last.mine && last.call == null -> "You: ${preview(last)}" to dim
+        last.mine && last.call == null -> T("You: ${preview(last)}") to dim
         last.call?.optString("s") == "missed" -> preview(last) to red
         else -> preview(last) to dim
     }
@@ -307,7 +307,7 @@ internal fun MainActivity.chatRow(c: Contact, key: String? = null, bg: Int = lis
     row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
     key?.let { k -> row.setOnLongClickListener { startChatDrag(row, k); true } }
     val swipe = SwipeRow(this, row, R.drawable.ic_trash, onOpen = { showChat(c.user) }, onDelete = { deleteChatConfirm(c) },
-        onPin = { togglePinKey("u:${c.user}") }, pinLabel = if ("u:${c.user}" in Messenger.pins) "Unpin" else "Pin")
+        onPin = { togglePinKey("u:${c.user}") }, pinLabel = if ("u:${c.user}" in Messenger.pins) T("Unpin") else T("Pin"))
     return LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         addView(swipe, LinearLayout.LayoutParams(-1, -2))
@@ -316,8 +316,8 @@ internal fun MainActivity.chatRow(c: Contact, key: String? = null, bg: Int = lis
 }
 
 internal fun MainActivity.deleteChatConfirm(c: Contact) {
-    popup("Delete chat with ${c.name}?", "This erases the whole chat from this phone for good. The server keeps no copy, no backup and no way to recover it — once it's gone, it's gone. Are you sure?",
-        null, "Cancel" to dim, "Delete" to red) { i -> if (i == 1) { Messenger.core.remove(c); showChats() } }
+    popup(T("Delete chat with ${c.name}?"), T("This erases the whole chat from this phone for good. The server keeps no copy, no backup and no way to recover it — once it's gone, it's gone. Are you sure?"),
+        null, T("Cancel") to dim, T("Delete") to red) { i -> if (i == 1) { Messenger.core.remove(c); showChats() } }
 }
 
 /** Search results inside messages (all chats and groups): tap one to open the chat at that message. */
@@ -331,7 +331,7 @@ internal fun MainActivity.messageResults(list: LinearLayout, q: String) {
             .map { m -> Hit(g.name, m) { showGroup(g.id, m.id to dp(80)) } } }
     }.sortedByDescending { it.m.ts }.take(60)
     if (hits.isEmpty()) return
-    list.addView(tv("Messages", 14f, dim, true).apply { setPadding(dp(16), dp(14), dp(16), dp(6)); setBackgroundColor(nestedBg) })
+    list.addView(tv(T("Messages"), 14f, dim, true).apply { setPadding(dp(16), dp(14), dp(16), dp(6)); setBackgroundColor(nestedBg) })
     for (h in hits) list.addView(LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(10)); background = pressable()
         addView(LinearLayout(context).apply {
@@ -371,7 +371,7 @@ internal fun MainActivity.windowSwitch(tellemUnread: Int, phoneUnread: Int): Vie
     setPadding(dp(5), dp(5), dp(5), dp(5))
     // a tap anywhere on the pill (either side) switches window
     isClickable = true
-    contentDescription = "Switch between $APP_NAME and Phone"
+    contentDescription = T("Switch between $APP_NAME and Phone")
     setOnClickListener { switchWindow() }
     fun seg(label: String, unread: Int, on: Boolean) = addView(LinearLayout(context).apply {
         gravity = Gravity.CENTER
@@ -380,9 +380,9 @@ internal fun MainActivity.windowSwitch(tellemUnread: Int, phoneUnread: Int): Vie
         addView(tv(label, 15f, if (on) ink else dim, true))
         if (!on && unread > 0) addView(tv(if (unread > 99) "99+" else "$unread", 11.5f, android.graphics.Color.WHITE, true).apply {
             gravity = Gravity.CENTER; minWidth = dp(20); setPadding(dp(5), dp(1), dp(5), dp(1))
-            background = round(if (label == "Phone") smsGreen else blue, 10)
+            background = round(if (label == T("Phone")) smsGreen else blue, 10)
         }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(6) })
     }, LinearLayout.LayoutParams(-2, -1))
     seg(APP_NAME, tellemUnread, !textsTab)
-    seg("Phone", phoneUnread, textsTab)
+    seg(T("Phone"), phoneUnread, textsTab)
 }

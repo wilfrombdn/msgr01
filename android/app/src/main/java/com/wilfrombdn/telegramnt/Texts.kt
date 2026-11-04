@@ -123,7 +123,7 @@ object Texts {
                 val people = (c.getString(2) ?: "").split(' ').mapNotNull { it.toLongOrNull()?.let(addr::get) }.filter { it.isNotEmpty() }
                 var snip = c.getString(3) ?: ""
                 if (c.getInt(4) != 0 && snip.isNotEmpty()) snip = String(snip.toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8)
-                if (snip.isEmpty() && c.getInt(6) != 0) snip = "📷 Picture"
+                if (snip.isEmpty() && c.getInt(6) != 0) snip = T("📷 Picture")
                 val blocked = people.any { isBlocked(ctx, it) }
                 val spam = blocked || spamVerdict(ctx, id, people, snip, id in replied)
                 val arch = !spam && id in archivedIds
@@ -300,7 +300,7 @@ object Texts {
         names.getOrPut(address) { contact(ctx, address) ?: PhoneNumberUtils.formatNumber(address, Locale.getDefault().country) ?: address }
     }
 
-    fun title(ctx: Context, addresses: List<String>) = addresses.joinToString(", ") { name(ctx, it) }.ifEmpty { "Unknown" }
+    fun title(ctx: Context, addresses: List<String>) = addresses.joinToString(", ") { name(ctx, it) }.ifEmpty { T("Unknown") }
 
     fun forgetNames() { synchronized(names) { names.clear() }; synchronized(contacts) { contacts.clear() } }
 
@@ -464,28 +464,28 @@ object Texts {
         val recent = messages(ctx, thread, 30)
         val spam = spamVerdict(ctx, thread, people, recent.lastOrNull { !it.mine }?.body.orEmpty(), recent.any { it.mine })
         if (spam) return   // spam never notifies; it waits quietly in Spam & blocked
-        val title = (if (spam) "Possible spam · " else "") + if (showNames) title(ctx, people) else APP_NAME
+        val title = (if (spam) T("Possible spam · ") else "") + if (showNames) title(ctx, people) else APP_NAME
         val open = PendingIntent.getActivity(ctx, ("t$thread").hashCode(), Intent(ctx, MainActivity::class.java).putExtra("textThread", thread),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val b = Notification.Builder(ctx, if (spam) SPAM_CHANNEL else CHANNEL)
             .setSmallIcon(R.drawable.ic_notify)
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
-            .setPublicVersion(Notification.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_notify).setContentTitle(title).setContentText("New text message").build())
+            .setPublicVersion(Notification.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_notify).setContentTitle(title).setContentText(T("New text message")).build())
             .setContentIntent(open)
             .setAutoCancel(true)
             .setContentTitle(title)
         // what they sent since your last reply (at most 6 lines)
         val unread = if (showNames && showText) recent.takeLastWhile { !it.mine }.takeLast(6) else emptyList()
-        if (unread.isEmpty()) b.setContentText("New text message")
+        if (unread.isEmpty()) b.setContentText(T("New text message"))
         else {
             @Suppress("DEPRECATION")
-            val style = if (Build.VERSION.SDK_INT >= 28) Notification.MessagingStyle(android.app.Person.Builder().setName("You").build())
-            else Notification.MessagingStyle("You")
+            val style = if (Build.VERSION.SDK_INT >= 28) Notification.MessagingStyle(android.app.Person.Builder().setName(T("You")).build())
+            else Notification.MessagingStyle(T("You"))
             if (people.size > 1) { style.conversationTitle = title; if (Build.VERSION.SDK_INT >= 28) style.isGroupConversation = true }
             for (t in unread) {
                 val who = t.from?.let { name(ctx, it) } ?: title
-                val line = t.body.ifEmpty { if (t.attachments.isNotEmpty()) "📷 Picture" else "Picture message" }
+                val line = t.body.ifEmpty { if (t.attachments.isNotEmpty()) T("📷 Picture") else T("Picture message") }
                 @Suppress("DEPRECATION")
                 if (Build.VERSION.SDK_INT >= 28) style.addMessage(line, t.date, android.app.Person.Builder().setName(who).build())
                 else style.addMessage(line, t.date, who)
@@ -495,7 +495,7 @@ object Texts {
         if (showNames && people.isNotEmpty() && !spam) {
             val pi = PendingIntent.getBroadcast(ctx, ("r$thread").hashCode(), Intent(ctx, TextReplyReceiver::class.java).putExtra("thread", thread),
                 PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)   // mutable: Android fills in the typed reply
-            b.addAction(Notification.Action.Builder(null, "Reply", pi).also { ReplyReceiver.noUnlock(ctx, it) }.addRemoteInput(RemoteInput.Builder(TextReplyReceiver.KEY).setLabel("Text message").build()).build())
+            b.addAction(Notification.Action.Builder(null, T("Reply"), pi).also { ReplyReceiver.noUnlock(ctx, it) }.addRemoteInput(RemoteInput.Builder(TextReplyReceiver.KEY).setLabel(T("Text message")).build()).build())
         }
         ctx.getSystemService(NotificationManager::class.java).notify(NOTE_TAG, thread.toInt(), b.build())
     }

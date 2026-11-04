@@ -74,7 +74,7 @@ class CameraActivity : ComponentActivity() {
 
     private val askPerms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants[Manifest.permission.CAMERA] == true) startCamera()
-        else { toast("Camera permission is needed to take photos"); finish() }
+        else { toast(T("Camera permission is needed to take photos")); finish() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -140,7 +140,7 @@ class CameraActivity : ComponentActivity() {
 
         hint = TextView(this).apply {
             setTextColor(0xCCFFFFFF.toInt()); textSize = 13f; gravity = Gravity.CENTER
-            text = "Tap for photo  ·  hold for video  ·  slide up to zoom\nDouble-tap the screen to flip the camera"
+            text = T("Tap for photo  ·  hold for video  ·  slide up to zoom\nDouble-tap the screen to flip the camera")
         }
         root.addView(hint, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = d(130) })
 
@@ -199,11 +199,11 @@ class CameraActivity : ComponentActivity() {
                     p.unbindAll()
                     videoCapture = null
                     camera = p.bindToLifecycle(this, selector, screenShaped(prev, imageCapture!!, null))
-                    hint.text = "Tap for photo"
-                } catch (e2: Exception) { toast("Couldn't open the camera"); finish() }
+                    hint.text = T("Tap for photo")
+                } catch (e2: Exception) { toast(T("Couldn't open the camera")); finish() }
             }
             imageCapture?.screenFlash = preview.screenFlash   // front camera flash = the screen
-            if (photoOnly) hint.text = "Tap for a photo\nDouble-tap the screen to flip the camera"
+            if (photoOnly) hint.text = T("Tap for a photo\nDouble-tap the screen to flip the camera")
             applyFlash()
         }, ContextCompat.getMainExecutor(this))
     }
@@ -278,8 +278,8 @@ class CameraActivity : ComponentActivity() {
         style(timerBtn, timerSecs > 0)
         timerBtn.text = if (timerSecs > 0) "${timerSecs}s" else "⏱"
         timerBtn.textSize = if (timerSecs > 0) 15f else 22f
-        if (videoCapture != null) hint.text = if (timerSecs > 0) "Tap to start the ${timerSecs}s timer"
-            else "Tap for photo  ·  hold for video  ·  slide up to zoom\nDouble-tap the screen to flip the camera"
+        if (videoCapture != null) hint.text = if (timerSecs > 0) T("Tap to start the ${timerSecs}s timer")
+            else T("Tap for photo  ·  hold for video  ·  slide up to zoom\nDouble-tap the screen to flip the camera")
     }
 
     private fun startCountdown(from: Int) {
@@ -323,7 +323,7 @@ class CameraActivity : ComponentActivity() {
                     android.util.Log.d("TellemPerf", "photo saved " + (SystemClock.uptimeMillis() - tapped) + " ms after the tap")
                     if (snap) showEdit(file, true) else handBack(file, true)
                 }
-                override fun onError(e: ImageCaptureException) { shutter.isEnabled = true; toast("Couldn't take the photo") }
+                override fun onError(e: ImageCaptureException) { shutter.isEnabled = true; toast(T("Couldn't take the photo")) }
             })
     }
 
@@ -342,7 +342,7 @@ class CameraActivity : ComponentActivity() {
                 camera?.cameraControl?.enableTorch(false)
                 val hardError = ev.hasError() && ev.error != VideoRecordEvent.Finalize.ERROR_FILE_SIZE_LIMIT_REACHED
                 if (hardError || !file.exists() || file.length() == 0L) {
-                    file.delete(); resetShutter(); toast("Couldn't record that video")
+                    file.delete(); resetShutter(); toast(T("Couldn't record that video"))
                 } else if (snap) showEdit(file, false) else handBack(file, false)
             }
         }
@@ -420,7 +420,7 @@ class CameraActivity : ComponentActivity() {
             file.delete(); resetShutter()   // back to a ready camera: white button, no red timer
         }, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.START).apply { leftMargin = d(12); topMargin = d(20) })
         layer.addView(TextView(this).apply {
-            text = "Send  ➤"; setTextColor(Color.parseColor("#111111")); textSize = 17f; gravity = Gravity.CENTER
+            text = T("Send  ➤"); setTextColor(Color.parseColor("#111111")); textSize = 17f; gravity = Gravity.CENTER
             setPadding(d(26), d(13), d(26), d(13))
             background = GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = d(28).toFloat() }
             setOnClickListener {

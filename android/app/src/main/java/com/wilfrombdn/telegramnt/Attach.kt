@@ -29,28 +29,28 @@ internal fun MainActivity.attachMenu(anchor: View) {   // target already set in 
         addView(tv(label, 16f, white).apply { setPadding(dp(16), 0, 0, 0) })
         setOnClickListener { pw.dismiss(); go() }
     })
-    row(R.drawable.ic_camera, "Camera") {
+    row(R.drawable.ic_camera, T("Camera")) {
         @Suppress("DEPRECATION") startActivityForResult(Intent(this, CameraActivity::class.java), TAKE_MEDIA)
     }
-    row(R.drawable.ic_attach, "Media") {
+    row(R.drawable.ic_attach, T("Media")) {
         val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
         else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
         @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_PHOTO)
     }
     attachTo?.let { Messenger.core.contact(it) }?.takeIf { it.status != Contact.SAVED }?.let {
-        row(R.drawable.ic_camera, "View once photo") {
+        row(R.drawable.ic_camera, T("View once photo")) {
             sendOnce = true
             val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
             else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
             @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_PHOTO)
         }
     }
-    row(R.drawable.ic_file, "File") {
+    row(R.drawable.ic_file, T("File")) {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
         @Suppress("DEPRECATION") startActivityForResult(i, PICK_ATTACH_FILE)
     }
-    row(R.drawable.ic_location, "Location") { shareLocation() }
-    attachGroupId?.let { gid -> row(R.drawable.ic_poll, "Poll") { Messenger.core.group(gid)?.let { createPoll(it) } } }
+    row(R.drawable.ic_location, T("Location")) { shareLocation() }
+    attachGroupId?.let { gid -> row(R.drawable.ic_poll, T("Poll")) { Messenger.core.group(gid)?.let { createPoll(it) } } }
     pw.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
     pw.isOutsideTouchable = true
     // expand upward, just above the clip
@@ -68,7 +68,7 @@ internal fun MainActivity.attachPicked(uri: android.net.Uri, asPhoto: Boolean) {
     fun out(name: String, mime: String, data: ByteArray, thumb: ByteArray?) {
         if (g != null) Messenger.sendGroupFile(g, name, mime, data, thumb) else Messenger.sendFile(c!!, name, mime, data, thumb, once)
     }
-    toast("Locking and sending…")
+    toast(T("Locking and sending…"))
     Messenger.run({
         var name = "file"
         var size = -1L
@@ -81,11 +81,11 @@ internal fun MainActivity.attachPicked(uri: android.net.Uri, asPhoto: Boolean) {
         val mime = contentResolver.getType(uri) ?: "application/octet-stream"
         if (mime != "image/gif" && (asPhoto || mime.startsWith("image/"))) {
             // re-saved as JPEG: smaller, and hidden details like GPS location are dropped
-            val bmp = loadPhoto(uri, if (fromCamera) CAMERA_SIDE else 2000) ?: throw UserError("Couldn't open that photo")
+            val bmp = loadPhoto(uri, if (fromCamera) CAMERA_SIDE else 2000) ?: throw UserError(T("Couldn't open that photo"))
             out(name.substringBeforeLast('.') + ".jpg", "image/jpeg", jpeg(bmp, if (fromCamera) CAMERA_SIDE else 1600, if (fromCamera) 90 else 85), thumbOf(bmp))
         } else {
-            if (size > Core.MAX_FILE) throw UserError("Files can be up to ${Core.MAX_FILE / 1024 / 1024} MB")
-            val raw = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError("Couldn't read that file")
+            if (size > Core.MAX_FILE) throw UserError(T("Files can be up to ${Core.MAX_FILE / 1024 / 1024} MB"))
+            val raw = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError(T("Couldn't read that file"))
             // videos: blank out where/when it was filmed and the phone's tags (photos are re-saved above for the same reason)
             val data = if (mime.startsWith("video/")) Mp4Clean.strip(raw) else raw
             out(name, mime, data, if (mime == "image/gif") decodeSmall(data, 400)?.let { thumbOf(it) } else null)

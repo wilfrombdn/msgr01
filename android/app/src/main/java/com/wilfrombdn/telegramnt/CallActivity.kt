@@ -83,7 +83,7 @@ class CallActivity : Activity() {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; background = bg; fitsSystemWindows = true
             addView(top, LinearLayout.LayoutParams(-1, d(56)))
             addView(TextView(context).apply {
-                text = "If you both see these 4 emoji, the call is private"; setTextColor(0x99FFFFFF.toInt()); textSize = 12f; gravity = Gravity.CENTER
+                text = T("If you both see these 4 emoji, the call is private"); setTextColor(0x99FFFFFF.toInt()); textSize = 12f; gravity = Gravity.CENTER
             })
             addView(View(context), LinearLayout.LayoutParams(1, 0, 0.6f))
             addView(photo, LinearLayout.LayoutParams(d(230), d(230)))
@@ -94,7 +94,7 @@ class CallActivity : Activity() {
             addView(status)
             addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
             addView(TextView(context).apply {
-                text = "🔒 End-to-end encrypted"; setTextColor(0x99FFFFFF.toInt()); textSize = 12.5f; gravity = Gravity.CENTER; setPadding(0, 0, 0, d(18))
+                text = T("🔒 End-to-end encrypted"); setTextColor(0x99FFFFFF.toInt()); textSize = 12.5f; gravity = Gravity.CENTER; setPadding(0, 0, 0, d(18))
             })
             addView(buttons, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = d(40) })
         })
@@ -185,7 +185,7 @@ class CallActivity : Activity() {
         val k = Messenger.core.call
         if (k == null || k.phase == Core.Call.ENDED) {
             val why = shown?.problem
-            status.text = why ?: "Call ended"; buttons.removeAllViews(); shownPhase = Core.Call.ENDED
+            status.text = why ?: T("Call ended"); buttons.removeAllViews(); shownPhase = Core.Call.ENDED
             status.postDelayed({ finish() }, if (why != null) 3500 else 1200)
             return
         }
@@ -197,16 +197,16 @@ class CallActivity : Activity() {
         buttons.removeAllViews()
         fun add(v: View) = buttons.addView(v, LinearLayout.LayoutParams(0, -2, 1f))
         if (k.phase == Core.Call.INCOMING) {
-            add(round(R.drawable.ic_call_end, RED, "Decline", size = 68) { Messenger.hangUp() })
-            add(round(R.drawable.ic_call, GREEN, "Accept", size = 68) { answer() })
+            add(round(R.drawable.ic_call_end, RED, T("Decline"), size = 68) { Messenger.hangUp() })
+            add(round(R.drawable.ic_call, GREEN, T("Accept"), size = 68) { answer() })
         } else {
-            add(round(R.drawable.ic_speaker, BTN, "Speaker", on = CallAudio.speaker) {
+            add(round(R.drawable.ic_speaker, BTN, T("Speaker"), on = CallAudio.speaker) {
                 CallAudio.setSpeaker(this, !CallAudio.speaker); shownPhase = -1; render()
             })
-            add(round(R.drawable.ic_mic_off, BTN, "Mute", on = k.muted) {
+            add(round(R.drawable.ic_mic_off, BTN, T("Mute"), on = k.muted) {
                 k.muted = !k.muted; shownPhase = -1; render()
             })
-            add(round(R.drawable.ic_call_end, RED, "End Call") { Messenger.hangUp() })
+            add(round(R.drawable.ic_call_end, RED, T("End Call")) { Messenger.hangUp() })
         }
         // screen off when the phone is at your ear (not on speaker)
         if (k.phase == Core.Call.ACTIVE && proximity == null) {
@@ -234,7 +234,7 @@ class CallActivity : Activity() {
         if (!answerWhenAllowed) return
         answerWhenAllowed = false
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) Messenger.answer(this)
-        else { status.text = "$APP_NAME needs the microphone for calls"; Messenger.hangUp() }
+        else { status.text = T("$APP_NAME needs the microphone for calls"); Messenger.hangUp() }
     }
 
     companion object {
@@ -261,12 +261,12 @@ class CallActivity : Activity() {
 
         /** What the call screen (and the green bar) says under the name. */
         fun statusText(k: Core.Call, connected: Boolean): String = when (k.phase) {
-            Core.Call.DIALING -> if (connected) "Requesting…" else "Connecting…"
-            Core.Call.RINGING -> "Ringing…"
-            Core.Call.INCOMING -> "$APP_NAME voice call"
-            Core.Call.CONNECTING -> "Exchanging encryption keys…"
+            Core.Call.DIALING -> if (connected) T("Requesting…") else T("Connecting…")
+            Core.Call.RINGING -> T("Ringing…")
+            Core.Call.INCOMING -> T("$APP_NAME voice call")
+            Core.Call.CONNECTING -> T("Exchanging encryption keys…")
             Core.Call.ACTIVE -> ((System.currentTimeMillis() - k.connectedAt) / 1000).let { "%d:%02d".format(it / 60, it % 60) }
-            else -> "Call ended"
+            else -> T("Call ended")
         }
         const val CH_CALL = "calls"
 
@@ -291,11 +291,11 @@ class CallActivity : Activity() {
             val decline = PendingIntent.getService(ctx, 22, Intent(ctx, CallService::class.java).setAction(CallService.DECLINE), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val fullScreenOk = Build.VERSION.SDK_INT < 34 || ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
             return Notification.Builder(ctx, CH_CALL)
-                .setSmallIcon(R.drawable.ic_call).setContentTitle(name).setContentText("Incoming call")
+                .setSmallIcon(R.drawable.ic_call).setContentTitle(name).setContentText(T("Incoming call"))
                 .setCategory(Notification.CATEGORY_CALL).setOngoing(true).setContentIntent(open)
                 .apply { if (fullScreenOk) setFullScreenIntent(open, true) }
-                .addAction(Notification.Action.Builder(null, "Decline", decline).build())
-                .addAction(Notification.Action.Builder(null, "Answer", answer).build())
+                .addAction(Notification.Action.Builder(null, T("Decline"), decline).build())
+                .addAction(Notification.Action.Builder(null, T("Answer"), answer).build())
                 .build()
         }
     }
@@ -316,10 +316,10 @@ class CallService : Service() {
         CallActivity.quietChannel(this)
         val hangUp = PendingIntent.getService(this, 24, Intent(this, CallService::class.java).setAction(DECLINE), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, CallActivity.CH_ONGOING).setSmallIcon(R.drawable.ic_call)
-            .setContentTitle("Call with $name").setContentText("Tap to return to the call").setOngoing(true)
+            .setContentTitle(T("Call with $name")).setContentText(T("Tap to return to the call")).setOngoing(true)
             .setCategory(Notification.CATEGORY_CALL).setContentIntent(open)
-            .addAction(Notification.Action.Builder(null, "Return to call", open).build())
-            .addAction(Notification.Action.Builder(null, "Hang up", hangUp).build())
+            .addAction(Notification.Action.Builder(null, T("Return to call"), open).build())
+            .addAction(Notification.Action.Builder(null, T("Hang up"), hangUp).build())
             .build()
         if (Build.VERSION.SDK_INT >= 30) startForeground(NOTE, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) else startForeground(NOTE, n)
         return START_NOT_STICKY

@@ -38,8 +38,8 @@ class ReplyReceiver : BroadcastReceiver() {
         fun action(ctx: Context, c: Contact): Notification.Action {
             val pi = PendingIntent.getBroadcast(ctx, c.user.hashCode(), Intent(ctx, ReplyReceiver::class.java).putExtra("chat", c.user),
                 PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)   // mutable: Android fills in the typed reply
-            return Notification.Action.Builder(null, "Reply", pi).also { noUnlock(ctx, it) }
-                .addRemoteInput(RemoteInput.Builder(KEY).setLabel("Message").build())
+            return Notification.Action.Builder(null, T("Reply"), pi).also { noUnlock(ctx, it) }
+                .addRemoteInput(RemoteInput.Builder(KEY).setLabel(T("Message")).build())
                 .build()
         }
     }

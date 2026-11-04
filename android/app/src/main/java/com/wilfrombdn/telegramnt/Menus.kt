@@ -84,29 +84,29 @@ internal fun MainActivity.longPressMenu(mine: String?, onReact: ((String) -> Uni
 }
 
 /** Copy / Download for a photo that's on this phone. */
-internal fun MainActivity.imageActions(m: Msg, copyLabel: String = "Copy"): List<Pair<String, () -> Unit>> =
+internal fun MainActivity.imageActions(m: Msg, copyLabel: String = T("Copy")): List<Pair<String, () -> Unit>> =
     if (m.file?.optBoolean("vo") != true && m.file?.optString("m")?.startsWith("image/") == true && m.file?.has("local") == true)
-        listOf(copyLabel to { copyImage(m) }, "Download" to { downloadImage(m) }, "Add to my stickers" to { addToStickers(m) }) else emptyList()
+        listOf(copyLabel to { copyImage(m) }, T("Download") to { downloadImage(m) }, T("Add to my stickers") to { addToStickers(m) }) else emptyList()
 
 internal fun MainActivity.messageMenu(c: Contact, m: Msg) {
     val me = Messenger.core.me?.user
     val opts = mutableListOf<Pair<String, () -> Unit>>()
-    if (m.state == Msg.SCHEDULED) opts.add("Send now" to { Messenger.sendScheduled(m) })
-    if (c.status != Contact.ASKING) opts.add("Reply" to { startReply(m, chatBox) })
-    if (m.text.isNotEmpty()) opts.add((if (m.file != null) "Copy text" else "Copy") to {
-        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
+    if (m.state == Msg.SCHEDULED) opts.add(T("Send now") to { Messenger.sendScheduled(m) })
+    if (c.status != Contact.ASKING) opts.add(T("Reply") to { startReply(m, chatBox) })
+    if (m.text.isNotEmpty()) opts.add((if (m.file != null) T("Copy text") else T("Copy")) to {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast(T("Copied"))
     })
-    opts.addAll(imageActions(m, if (m.text.isNotEmpty()) "Copy photo" else "Copy"))
-    if (canForward(m)) opts.add("Forward" to { forwardPicker(m, authorOf(m)) })
-    if (canForward(m) && c.status != Contact.SAVED) opts.add("Save" to { saveTellem(m, authorOf(m)) })
-    if (c.canChat && m.call == null) opts.add((if (c.pinned == m.id) "Unpin" else "Pin") to {
+    opts.addAll(imageActions(m, if (m.text.isNotEmpty()) T("Copy photo") else T("Copy")))
+    if (canForward(m)) opts.add(T("Forward") to { forwardPicker(m, authorOf(m)) })
+    if (canForward(m) && c.status != Contact.SAVED) opts.add(T("Save") to { saveTellem(m, authorOf(m)) })
+    if (c.canChat && m.call == null) opts.add((if (c.pinned == m.id) T("Unpin") else T("Pin")) to {
         Messenger.run({ Messenger.core.pinMessage(c, if (c.pinned == m.id) null else m) })
     })
-    if (m.mine && m.text.isNotEmpty() && c.canChat) opts.add("Edit" to { startEdit(m, chatBox) })
-    if (m.mine && m.state != Msg.FAILED && m.state != Msg.SCHEDULED) opts.add("Delete for everyone" to {
+    if (m.mine && m.text.isNotEmpty() && c.canChat) opts.add(T("Edit") to { startEdit(m, chatBox) })
+    if (m.mine && m.state != Msg.FAILED && m.state != Msg.SCHEDULED) opts.add(T("Delete for everyone") to {
         Messenger.run({ Messenger.core.deleteMessage(c, m, forEveryone = true) }, { fillChat() })
     })
-    opts.add("Delete for me" to { Messenger.core.deleteMessage(c, m, forEveryone = false); fillChat() })
+    opts.add(T("Delete for me") to { Messenger.core.deleteMessage(c, m, forEveryone = false); fillChat() })
     longPressMenu(m.reactions[me], { e -> Messenger.react(c, m, e); fillChat() }, opts)
 }
 
@@ -117,14 +117,14 @@ internal fun MainActivity.toggleMute(key: String) {
     val on = key !in ms
     if (on) ms.add(key) else ms.remove(key)
     Messenger.settingsChanged()
-    toast(if (on) "Muted: no notifications from this chat" else "Unmuted")
+    toast(if (on) T("Muted: no notifications from this chat") else T("Unmuted"))
     redraw()
 }
 
 internal fun MainActivity.blockConfirm(c: Contact, on: Boolean) {
-    if (!on) { Messenger.core.block(c.user, false); Messenger.save(); toast("Unblocked"); showChat(c.user); return }
-    popup("Block ${c.name}?", "They won't be able to message or call you, and won't see when you're online, typing or have read their messages. They aren't told.",
-        null, "Cancel" to dim, "Block" to red) { i ->
+    if (!on) { Messenger.core.block(c.user, false); Messenger.save(); toast(T("Unblocked")); showChat(c.user); return }
+    popup(T("Block ${c.name}?"), T("They won't be able to message or call you, and won't see when you're online, typing or have read their messages. They aren't told."),
+        null, T("Cancel") to dim, T("Block") to red) { i ->
         if (i == 1) { Messenger.core.block(c.user, true); Messenger.save(); showChat(c.user) }
     }
 }
@@ -134,31 +134,31 @@ internal fun MainActivity.chatMenu(c: Contact, anchor: View) {
     val isMuted = key in Messenger.muted
     val isBlocked = c.user in Messenger.core.blocked
     if (c.status == Contact.SAVED) {
-        dropdown(anchor, Gravity.END, "Delete all saved messages" to { deleteChatConfirm(c) })
+        dropdown(anchor, Gravity.END, T("Delete all saved messages") to { deleteChatConfirm(c) })
         return
     }
     dropdown(anchor, Gravity.END,
-        (if (isMuted) "Unmute" else "Mute") to { toggleMute(key) },
-        (if (isBlocked) "Unblock" else "Block") to { blockConfirm(c, !isBlocked) },
-        "Safety code" to { safety(c) },
-        (if (c.ttl == 0) "Disappearing messages" else "Disappearing: on") to { timerMenu(c) },
-        "Rename" to {
-            val box = field("Name", c.name)
-            popup("Rename", null, box, "Cancel" to dim, "Save" to white) { i ->
+        (if (isMuted) T("Unmute") else T("Mute")) to { toggleMute(key) },
+        (if (isBlocked) T("Unblock") else T("Block")) to { blockConfirm(c, !isBlocked) },
+        T("Safety code") to { safety(c) },
+        (if (c.ttl == 0) T("Disappearing messages") else T("Disappearing: on")) to { timerMenu(c) },
+        T("Rename") to {
+            val box = field(T("Name"), c.name)
+            popup(T("Rename"), null, box, T("Cancel") to dim, T("Save") to white) { i ->
                 if (i == 1) box.text.toString().trim().take(60).takeIf { it.isNotEmpty() }?.let { c.name = it; Messenger.save(); fillChat() }
             }
         },
-        "Remove friend" to {
-            popup("Delete chat with ${c.name}?", "This erases the whole chat from this phone for good. The server keeps no copy, no backup and no way to recover it — once it's gone it's gone. Are you sure?", null,
-                "Cancel" to dim, "Delete" to red) { i -> if (i == 1) { Messenger.core.remove(c); showChats() } }
+        T("Remove friend") to {
+            popup(T("Delete chat with ${c.name}?"), T("This erases the whole chat from this phone for good. The server keeps no copy, no backup and no way to recover it — once it's gone it's gone. Are you sure?"), null,
+                T("Cancel") to dim, T("Delete") to red) { i -> if (i == 1) { Messenger.core.remove(c); showChats() } }
         },
     )
 }
 
 internal fun MainActivity.timerMenu(c: Contact) {
-    val options = listOf("Off" to 0, "1 minute" to 60, "1 hour" to 3600, "1 day" to 86400, "1 week" to 604800)
+    val options = listOf(T("Off") to 0, T("1 minute") to 60, T("1 hour") to 3600, T("1 day") to 86400, T("1 week") to 604800)
     val labels = options.map { it.first }.toTypedArray()
-    pickList("Disappearing messages", "New messages delete themselves on both phones after the time you pick.", labels) { i ->
+    pickList(T("Disappearing messages"), T("New messages delete themselves on both phones after the time you pick."), labels) { i ->
         Messenger.run({ Messenger.core.setTimer(c, options[i].second); Messenger.kick() }, { fillChat() }) { e -> toast(errorText(e)) }
     }
 }
@@ -205,32 +205,32 @@ internal fun MainActivity.drawerPanel(d: DrawerLayout): View {
     col.addView(gap(6))
     if (textsTab) {
         // Phone screen: texts, dialling, contacts and the text folders
-        if (Texts.isDefault(this)) item(R.drawable.ic_edit, "New Text", "a normal text, not encrypted") { showNewText() }
-        else if (Texts.canRead(this)) item(R.drawable.ic_edit, "Use $APP_NAME for texts", "so you can send and receive here") { askTextRole() }
-        item(R.drawable.ic_call, "Dial pad") { runCatching { startActivity(Intent(Intent.ACTION_DIAL)) } }
-        item(R.drawable.ic_add, "New Contact") { showAddContact(null) { showChats() } }
-        if (!PhoneCalls.isDefaultDialer(this)) item(R.drawable.ic_call, "Use $APP_NAME for phone calls", "answer and place calls here") { askCallRole() }
+        if (Texts.isDefault(this)) item(R.drawable.ic_edit, T("New Text"), T("a normal text, not encrypted")) { showNewText() }
+        else if (Texts.canRead(this)) item(R.drawable.ic_edit, T("Use $APP_NAME for texts"), T("so you can send and receive here")) { askTextRole() }
+        item(R.drawable.ic_call, T("Dial pad")) { runCatching { startActivity(Intent(Intent.ACTION_DIAL)) } }
+        item(R.drawable.ic_add, T("New Contact")) { showAddContact(null) { showChats() } }
+        if (!PhoneCalls.isDefaultDialer(this)) item(R.drawable.ic_call, T("Use $APP_NAME for phone calls"), T("answer and place calls here")) { askCallRole() }
         divider()
         if (folderPlace() == "menu" && Texts.canRead(this)) {
             val (a, c, s) = folderCounts()
-            item(R.drawable.ic_folder, "Archive", "$a texts") { showTextSection("archive") }
-            item(R.drawable.ic_folder, "Codes", "$c texts") { showTextSection("codes") }
-            item(R.drawable.ic_folder, "Spam & blocked", "$s texts") { showTextSection("spam") }
+            item(R.drawable.ic_folder, T("Archive"), "$a texts") { showTextSection("archive") }
+            item(R.drawable.ic_folder, T("Codes"), "$c texts") { showTextSection("codes") }
+            item(R.drawable.ic_folder, T("Spam & blocked"), "$s texts") { showTextSection("spam") }
             divider()
         }
     } else {
         // Tellem screen: private chats
-        item(R.drawable.ic_edit, "New Message") { showNewChat() }
-        if (Texts.mixed(this) && Texts.isDefault(this)) item(R.drawable.ic_edit, "New Text", "a normal text, not encrypted") { showNewText() }   // texts sit among the chats
-        item(R.drawable.ic_more, "New Group") { showNewGroup() }
-        item(R.drawable.ic_search, "Join Group", "with an invite link") { joinGroupPrompt() }
-        item(R.drawable.ic_folder, "New Folder", "group chats, e.g. Family") { newFolder() }
-        item(R.drawable.ic_bookmark, "Saved Messages", "notes to yourself, on this phone") { showChat(Messenger.core.savedChat().user) }
+        item(R.drawable.ic_edit, T("New Message")) { showNewChat() }
+        if (Texts.mixed(this) && Texts.isDefault(this)) item(R.drawable.ic_edit, T("New Text"), T("a normal text, not encrypted")) { showNewText() }   // texts sit among the chats
+        item(R.drawable.ic_more, T("New Group")) { showNewGroup() }
+        item(R.drawable.ic_search, T("Join Group"), T("with an invite link")) { joinGroupPrompt() }
+        item(R.drawable.ic_folder, T("New Folder"), T("group chats, e.g. Family")) { newFolder() }
+        item(R.drawable.ic_bookmark, T("Saved Messages"), T("notes to yourself, on this phone")) { showChat(Messenger.core.savedChat().user) }
         divider()
     }
-    item(R.drawable.ic_menu, "Settings") { showSettings() }
+    item(R.drawable.ic_menu, T("Settings")) { showSettings() }
     col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
-    col.addView(tv("$APP_NAME ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
+    col.addView(tv(T("$APP_NAME ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}"), 12f, faint).apply {
         setPadding(dp(22), dp(14), dp(22), dp(16))
     })
     // clickable: taps on empty parts of the sidebar stop here instead of falling through to the screen behind it
@@ -241,13 +241,13 @@ internal fun MainActivity.safety(c: Contact) {
     val code = Messenger.core.safetyCode(c) ?: return
     val view = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        addView(tv("Compare this with ${c.name}'s screen, in person or on a call. If every number matches, nobody is listening in between.", 14.5f, dim))
+        addView(tv(T("Compare this with ${c.name}'s screen, in person or on a call. If every number matches, nobody is listening in between."), 14.5f, dim))
         addView(gap(16))
         addView(tv(code.replace(" ", "  "), 21f, white, true).apply { gravity = Gravity.CENTER; typeface = Typeface.MONOSPACE })
     }
-    if (c.verified) popup("Safety code", null, view, "Mark not checked" to dim, "OK" to white) { i ->
+    if (c.verified) popup(T("Safety code"), null, view, T("Mark not checked") to dim, "OK" to white) { i ->
         if (i == 0) { c.verified = false; Messenger.save(); fillChat() }
-    } else popup("Safety code", null, view, "Not now" to dim, "They match" to white) { i ->
+    } else popup(T("Safety code"), null, view, T("Not now") to dim, T("They match") to white) { i ->
         if (i == 1) { c.verified = true; Messenger.save(); fillChat() }
     }
 }

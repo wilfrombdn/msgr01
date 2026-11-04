@@ -21,15 +21,15 @@ import java.util.Locale
 /** Attach > Poll (groups): a question and 2-10 options. */
 internal fun MainActivity.createPoll(g: Group) {
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    val q = field("Ask a question", "")
+    val q = field(T("Ask a question"), "")
     col.addView(q)
     val opts = mutableListOf<EditText>()
     val optCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    fun addOpt() { if (opts.size < 10) field("Option ${opts.size + 1}", "").also { opts.add(it); optCol.addView(it) } }
+    fun addOpt() { if (opts.size < 10) field(T("Option ${opts.size + 1}"), "").also { opts.add(it); optCol.addView(it) } }
     addOpt(); addOpt()
     col.addView(optCol)
-    col.addView(tv("+ Add an option", 15f, blue, true).apply { setPadding(dp(4), dp(10), dp(4), dp(4)); setOnClickListener { addOpt() } })
-    popup("New poll", null, ScrollView(this).apply { addView(col) }, "Cancel" to dim, "Create" to white) { i ->
+    col.addView(tv(T("+ Add an option"), 15f, blue, true).apply { setPadding(dp(4), dp(10), dp(4), dp(4)); setOnClickListener { addOpt() } })
+    popup(T("New poll"), null, ScrollView(this).apply { addView(col) }, T("Cancel") to dim, T("Create") to white) { i ->
         if (i != 1) return@popup
         val options = opts.map { it.text.toString().trim() }.filter { it.isNotEmpty() }
         stick = true
@@ -49,7 +49,7 @@ internal fun MainActivity.pollView(g: Group, m: Msg, ink: Int): View {
         orientation = LinearLayout.VERTICAL
         layoutParams = LinearLayout.LayoutParams(dp(250), -2)
         addView(tv(poll.optString("q"), 16f, ink, true).apply { setPadding(0, dp(2), 0, dp(2)) })
-        addView(tv("Poll", 12.5f, faded).apply { setPadding(0, 0, 0, dp(6)) })
+        addView(tv(T("Poll"), 12.5f, faded).apply { setPadding(0, 0, 0, dp(6)) })
         for (i in 0 until options.length()) {
             val count = m.votes.values.count { it == i }
             val pct = if (total > 0) count * 100 / total else 0
@@ -69,7 +69,7 @@ internal fun MainActivity.pollView(g: Group, m: Msg, ink: Int): View {
                 setOnLongClickListener { groupMessageMenu(g, m); true }
             })
         }
-        addView(tv(if (total == 1) "1 vote" else "$total votes", 13f, faded).apply { setPadding(0, dp(6), 0, 0) })
+        addView(tv(TP(total, "vote", "votes"), 13f, faded).apply { setPadding(0, dp(6), 0, 0) })
     }
 }
 
@@ -84,8 +84,8 @@ internal fun MainActivity.shareLocation() {
     if (checkSelfPermission(fine) != PackageManager.PERMISSION_GRANTED && checkSelfPermission(coarse) != PackageManager.PERMISSION_GRANTED) {
         requestPermissions(arrayOf(fine, coarse), LOCATION_FOR_SHARE); return
     }
-    popup("Send your location?", "Sends where you are right now to ${c?.name ?: g!!.name}. Just this once: it isn't tracked or updated.",
-        null, "Cancel" to dim, "Send" to white) { i -> if (i == 1) locateAndSend(c, g) }
+    popup(T("Send your location?"), T("Sends where you are right now to ${c?.name ?: g!!.name}. Just this once: it isn't tracked or updated."),
+        null, T("Cancel") to dim, T("Send") to white) { i -> if (i == 1) locateAndSend(c, g) }
 }
 
 @android.annotation.SuppressLint("MissingPermission")   // checked in shareLocation
@@ -93,15 +93,15 @@ internal fun MainActivity.locateAndSend(c: Contact?, g: Group?) {
     val lm = getSystemService(android.location.LocationManager::class.java)
     val provider = listOf(android.location.LocationManager.GPS_PROVIDER, android.location.LocationManager.NETWORK_PROVIDER)
         .firstOrNull { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
-        ?: return toast("Turn on Location in your phone's settings first")
-    toast("Finding your location…")
+        ?: return toast(T("Turn on Location in your phone's settings first"))
+    toast(T("Finding your location…"))
     var done = false
     fun send(l: android.location.Location?) {
         if (done) return
         done = true
         val best = l ?: listOf(android.location.LocationManager.GPS_PROVIDER, android.location.LocationManager.NETWORK_PROVIDER)
             .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
-        if (best == null) { toast("Couldn't find your location. Try again outside or with Wi-Fi on."); return }
+        if (best == null) { toast(T("Couldn't find your location. Try again outside or with Wi-Fi on.")); return }
         stick = true
         Messenger.sendLocation(c, g, org.json.JSONObject().put("la", best.latitude).put("lo", best.longitude).put("acc", best.accuracy.toDouble()))
     }
@@ -117,13 +117,13 @@ internal fun MainActivity.locationCard(loc: org.json.JSONObject, ink: Int): View
     addView(icon(R.drawable.ic_location, ink, 26, 8).apply { background = circle(Color.parseColor("#22FFFFFF")) })
     addView(LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
-        addView(tv("Location", 15f, ink, true))
+        addView(tv(T("Location"), 15f, ink, true))
         addView(tv("%.5f, %.5f".format(Locale.US, la, lo) + (loc.optDouble("acc", 0.0).takeIf { it > 0 }?.let { " · ±${it.toInt()} m" } ?: ""), 13f, (ink and 0x00FFFFFF) or (0x99 shl 24)))
-        addView(tv("Open in Maps", 13.5f, blue, true).apply { setPadding(0, dp(2), 0, 0) })
+        addView(tv(T("Open in Maps"), 13.5f, blue, true).apply { setPadding(0, dp(2), 0, 0) })
     })
     setOnClickListener {
         val uri = android.net.Uri.parse("geo:$la,$lo?q=$la,$lo")
-        try { startActivity(Intent(Intent.ACTION_VIEW, uri)) } catch (e: Exception) { toast("No maps app on this phone") }
+        try { startActivity(Intent(Intent.ACTION_VIEW, uri)) } catch (e: Exception) { toast(T("No maps app on this phone")) }
     }
 }
 
@@ -136,7 +136,7 @@ internal fun MainActivity.linkCard(lp: org.json.JSONObject, ink: Int): View = Li
         orientation = LinearLayout.VERTICAL; setPadding(dp(8), 0, 0, 0)
         // the address the tap really opens (the title and site name are whatever the sender chose, so they prove nothing)
         val host = runCatching { android.net.Uri.parse(lp.optString("u")).host }.getOrNull()?.removePrefix("www.").orEmpty()
-        addView(tv(if (host.isNotEmpty()) "🔗 $host" else "🔗 link", 13.5f, blue, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        addView(tv(if (host.isNotEmpty()) "🔗 $host" else T("🔗 link"), 13.5f, blue, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         addView(tv(lp.optString("t"), 14.5f, ink, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
         lp.optString("d").takeIf { it.isNotEmpty() }?.let { addView(tv(it, 13.5f, faded).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }) }
     }, LinearLayout.LayoutParams(-2, -2))

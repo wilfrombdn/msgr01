@@ -18,18 +18,18 @@ internal fun MainActivity.isSticker(m: Msg) = m.file?.optString("n")?.startsWith
 /** Saves a picture/GIF/sticker from a chat into my stickers (photos become 512 px see-through-capable WebP). */
 internal fun MainActivity.addToStickers(m: Msg) {
     Messenger.run({
-        val bytes = Messenger.core.openFile(m) ?: throw UserError("Couldn't open that picture")
+        val bytes = Messenger.core.openFile(m) ?: throw UserError(T("Couldn't open that picture"))
         val mime = m.file?.optString("m") ?: ""
         if (mime == "image/gif" || (mime == "image/webp" && isAnimatedWebp(bytes))) Messenger.addSticker(bytes, mime)
         else {
-            val bmp = decodeSmall(bytes, 1024) ?: throw UserError("Couldn't open that picture")
+            val bmp = decodeSmall(bytes, 1024) ?: throw UserError(T("Couldn't open that picture"))
             val scale = 512f / maxOf(bmp.width, bmp.height)
             val small = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
             val out = java.io.ByteArrayOutputStream()
             @Suppress("DEPRECATION") small.compress(if (Build.VERSION.SDK_INT >= 30) android.graphics.Bitmap.CompressFormat.WEBP_LOSSY else android.graphics.Bitmap.CompressFormat.WEBP, 90, out)
             Messenger.addSticker(out.toByteArray(), "image/webp")
         }
-    }, { toast("Added to your stickers") }) { e -> toast(errorText(e)) }
+    }, { toast(T("Added to your stickers")) }) { e -> toast(errorText(e)) }
 }
 
 internal fun MainActivity.isAnimatedWebp(b: ByteArray) = b.size > 40 && String(b, 12, 4, Charsets.ISO_8859_1) == "VP8X" && (b[20].toInt() and 0x02) != 0
@@ -39,7 +39,7 @@ internal fun MainActivity.showStickerTab(grid: LinearLayout, scroll: ScrollView,
     grid.removeAllViews()
     val ids = Messenger.stickers.toList()
     if (ids.isEmpty()) {
-        grid.addView(tv("No stickers yet.\n\nHold any picture, GIF or sticker in a chat and tap \"Add to my stickers\".", 14.5f, dim).apply {
+        grid.addView(tv(T("No stickers yet.\n\nHold any picture, GIF or sticker in a chat and tap \"Add to my stickers\"."), 14.5f, dim).apply {
             gravity = Gravity.CENTER; setPadding(dp(24), dp(40), dp(24), dp(40))
         }, LinearLayout.LayoutParams(-1, -2))
         return
@@ -64,7 +64,7 @@ internal fun MainActivity.showStickerTab(grid: LinearLayout, scroll: ScrollView,
                 }
             }
             setOnLongClickListener {
-                popup("Remove this sticker?", null, null, "Cancel" to dim, "Remove" to red) { k -> if (k == 1) { Messenger.removeSticker(id); showStickerTab(grid, scroll, target) } }
+                popup(T("Remove this sticker?"), null, null, T("Cancel") to dim, T("Remove") to red) { k -> if (k == 1) { Messenger.removeSticker(id); showStickerTab(grid, scroll, target) } }
                 true
             }
         }, LinearLayout.LayoutParams(0, -1, 1f))

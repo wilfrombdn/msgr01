@@ -44,12 +44,12 @@ object Tor {
 
     /** Short line for the UI, so the user (and I) can see where Tor is. */
     fun status(): String = when {
-        outdated -> "Tor in this app is out of date. Update $APP_NAME, or use Direct for now."
-        socks != null -> "Tor ready"
-        err != null -> "Tor problem" + (if (tries > 1) " (try $tries)" else "") + ": $err"
-        boot.isNotEmpty() -> "Starting Tor… $boot"
-        started -> "Starting Tor…"
-        else -> "Starting Tor…"
+        outdated -> T("Tor in this app is out of date. Update $APP_NAME, or use Direct for now.")
+        socks != null -> T("Tor ready")
+        err != null -> T("Tor problem") + (if (tries > 1) T(" (try $tries)") else "") + ": $err"
+        boot.isNotEmpty() -> T("Starting Tor… $boot")
+        started -> T("Starting Tor…")
+        else -> T("Starting Tor…")
     }
 
     @Synchronized

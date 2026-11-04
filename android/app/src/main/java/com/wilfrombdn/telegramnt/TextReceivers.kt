@@ -61,7 +61,7 @@ class MmsReceiver : BroadcastReceiver() {
             if (seen) return@later
             val from = n.from ?: ""
             val row = cr.insert(Telephony.Mms.CONTENT_URI, ContentValues().apply {
-                put("thread_id", Texts.threadFor(ctx, listOf(from.ifEmpty { "Unknown" })))
+                put("thread_id", Texts.threadFor(ctx, listOf(from.ifEmpty { T("Unknown") })))
                 put("date", System.currentTimeMillis() / 1000); put("msg_box", Telephony.Mms.MESSAGE_BOX_INBOX)
                 put("read", 1); put("seen", 1); put("m_type", Mms.NOTIFICATION_IND); put("v", 0x12)
                 put("ct_l", loc); n.tid?.let { put("tr_id", it) }

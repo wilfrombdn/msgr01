@@ -40,9 +40,9 @@ internal fun MainActivity.groupRow(g: Group, key: String? = null, bg: Int = list
     val typingNow = groupTyping(g)
     val preview = when {
         typingNow != null -> typingNow
-        draft != null -> "Draft: ${draft.replace('\n', ' ')}"
-        last == null -> "${g.members.size} member" + if (g.members.size != 1) "s" else ""
-        last.mine -> "You: ${preview(last)}"
+        draft != null -> T("Draft: ${draft.replace('\n', ' ')}")
+        last == null -> TP(g.members.size, "member", "members")
+        last.mine -> T("You: ${preview(last)}")
         else -> "${last.sender ?: "?"}: ${preview(last)}"
     }
     val line2 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
@@ -59,9 +59,9 @@ internal fun MainActivity.groupRow(g: Group, key: String? = null, bg: Int = list
     row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
     key?.let { k -> row.setOnLongClickListener { startChatDrag(row, k); true } }
     val swipe = SwipeRow(this, row, R.drawable.ic_trash, onOpen = { showGroup(g.id) }, onDelete = {
-        popup("Leave \"${g.name}\"?", "You'll stop getting its messages and it's removed from this phone. Nothing is kept on the server to recover. You can be re-invited later.",
-            null, "Cancel" to dim, "Leave" to red) { i -> if (i == 1) { Messenger.io.execute { Messenger.core.leaveGroup(g) }; showChats() } }
-    }, onPin = { togglePinKey("g:${g.id}") }, pinLabel = if ("g:${g.id}" in Messenger.pins) "Unpin" else "Pin")
+        popup(T("Leave \"${g.name}\"?"), T("You'll stop getting its messages and it's removed from this phone. Nothing is kept on the server to recover. You can be re-invited later."),
+            null, T("Cancel") to dim, T("Leave") to red) { i -> if (i == 1) { Messenger.io.execute { Messenger.core.leaveGroup(g) }; showChats() } }
+    }, onPin = { togglePinKey("g:${g.id}") }, pinLabel = if ("g:${g.id}" in Messenger.pins) T("Unpin") else T("Pin"))
     return LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         addView(swipe, LinearLayout.LayoutParams(-1, -2))
@@ -74,9 +74,9 @@ internal fun MainActivity.groupRow(g: Group, key: String? = null, bg: Int = list
 internal fun MainActivity.showNewGroup() {
     screen = Screen.NEW_GROUP
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(20), dp(20), dp(20)) }
-    col.addView(tv("New group", 20f, white, true))
+    col.addView(tv(T("New group"), 20f, white, true))
     col.addView(gap(14))
-    val name = field("Group name")
+    val name = field(T("Group name"))
     col.addView(name, LinearLayout.LayoutParams(-1, -2))
     col.addView(gap(18))
     // type: private (add friends) or public (invite link)
@@ -84,8 +84,8 @@ internal fun MainActivity.showNewGroup() {
     val priv = tv("", 15f, white)
     val pub = tv("", 15f, white)
     fun paint() {
-        priv.text = "Private — only friends you add can join"
-        pub.text = "Public — anyone with the invite link can join"
+        priv.text = T("Private — only friends you add can join")
+        pub.text = T("Public — anyone with the invite link can join")
         priv.setTextColor(if (!public) ink else white); priv.background = round(if (!public) white else panel2, 8)
         pub.setTextColor(if (public) ink else white); pub.background = round(if (public) white else panel2, 8)
     }
@@ -99,7 +99,7 @@ internal fun MainActivity.showNewGroup() {
     val picked = mutableSetOf<String>()
     val friends = synchronized(Messenger.core) { Messenger.core.contacts.filter { it.canChat } }
     if (friends.isNotEmpty()) {
-        col.addView(tv("Add friends", 14f, dim, true)); col.addView(gap(6))
+        col.addView(tv(T("Add friends"), 14f, dim, true)); col.addView(gap(6))
         for (c in friends) col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(8), 0, dp(8))
@@ -115,21 +115,21 @@ internal fun MainActivity.showNewGroup() {
         })
     }
     col.addView(gap(20))
-    col.addView(cta("Create group") {
+    col.addView(cta(T("Create group")) {
         val n = name.text.toString().trim()
-        if (n.isEmpty()) { toast("Give the group a name"); return@cta }
+        if (n.isEmpty()) { toast(T("Give the group a name")); return@cta }
         Messenger.run({ val g = Messenger.core.createGroup(n, public, if (public) emptyList() else picked.toList()); Messenger.kick(); groupToOpen = g.id }, {
             groupToOpen?.let { showGroup(it) }
         }) { e -> toast(errorText(e)) }
     }, ctaParams())
-    setContentView(page(topBar("New Group", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
+    setContentView(page(topBar(T("New Group"), left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
 }
 
 internal fun MainActivity.joinGroupPrompt() {
-    val box = field("Paste the group invite link")
+    val box = field(T("Paste the group invite link"))
     (getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString())
         ?.let { if (it.contains("msgr01://group")) box.setText(it) }
-    popup("Join a group", "Paste a public group's invite link.", box, "Cancel" to dim, "Join" to white) { i ->
+    popup(T("Join a group"), T("Paste a public group's invite link."), box, T("Cancel") to dim, T("Join") to white) { i ->
         if (i == 1) Messenger.run({ val g = Messenger.core.joinGroupLink(box.text.toString().trim()); Messenger.kick(); groupToOpen = g.id }, {
             groupToOpen?.let { showGroup(it) }
         }) { e -> toast(errorText(e)) }
@@ -151,14 +151,14 @@ internal fun MainActivity.showGroup(id: String, restore: Pair<String, Int>? = nu
         gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(listBg); setPadding(dp(14), dp(4), dp(6), dp(4))
     }
     val box = ChatBox(this) { uri, mime, done -> keyboardContent(uri, mime, done, g) }.apply {
-        hint = "Message"; setHintTextColor(dim); setTextColor(white); textSize = look.msg; background = null
+        hint = T("Message"); setHintTextColor(dim); setTextColor(white); textSize = look.msg; background = null
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         setHorizontallyScrolling(false); maxLines = 5   // after inputType, so the box still wraps
     }
     fun sendWith(silent: Boolean, at: Long) {
         val t = box.text.toString().trim(); if (t.isEmpty()) return
-        if (t.length > Core.MAX_TEXT) { toast("Too long"); return }
+        if (t.length > Core.MAX_TEXT) { toast(T("Too long")); return }
         editing?.let { e ->
             val g2 = Messenger.core.group(id) ?: return
             cancelReply(); box.setText("")
@@ -169,7 +169,7 @@ internal fun MainActivity.showGroup(id: String, restore: Pair<String, Int>? = nu
         val g2 = Messenger.core.group(id) ?: return
         val r = replyTo?.let { replyRef(it) }; cancelReply()
         Messenger.sendGroup(g2, t, r, links.ready(t), silent, at)
-        if (at > 0) toast("Scheduled for ${whenText(at)}")
+        if (at > 0) toast(T("Scheduled for ${whenText(at)}"))
     }
     fun doSend() = sendWith(false, 0)
     box.setText(Messenger.drafts["g:$id"] ?: "")
@@ -193,7 +193,7 @@ internal fun MainActivity.showGroup(id: String, restore: Pair<String, Int>? = nu
     val picker = mentionPicker(box, g)
     val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(picker); addView(links.bar); addView(replyBar); addView(bar2) }
     composer = compose
-    val bottom: View = if (canPost) compose else tv("🔒  Only admins can post in this group", 14f, dim).apply {
+    val bottom: View = if (canPost) compose else tv(T("🔒  Only admins can post in this group"), 14f, dim).apply {
         gravity = Gravity.CENTER; setBackgroundColor(listBg); setPadding(dp(16), dp(16), dp(16), dp(16))
     }
     setContentView(LinearLayout(this).apply {
@@ -211,7 +211,7 @@ internal fun MainActivity.fillGroup() {
     if (g.unread != 0 || g.mentioned) { g.unread = 0; g.mentioned = false; Messenger.save() }
     groupTop?.removeAllViews()
     val typing = groupTyping(g)
-    val info = "${g.members.size} member" + (if (g.members.size != 1) "s" else "") + (if (g.public) " · public" else "") + if (g.readOnly) " · read-only" else ""
+    val info = TP(g.members.size, "member", "members") + (if (g.public) T(" · public") else "") + if (g.readOnly) T(" · read-only") else ""
     groupTop?.addView(topBar(g.name, typing?.let { android.text.SpannableString(it).apply { setSpan(android.text.style.ForegroundColorSpan(blue), 0, it.length, 0) } } ?: info,
         LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; addView(icon(R.drawable.ic_back) { showChats() }); addView(avatar(g.name, 40)) },
         icon(R.drawable.ic_more) { groupMenu(g) }), LinearLayout.LayoutParams(-1, -2))
@@ -220,7 +220,7 @@ internal fun MainActivity.fillGroup() {
     val msgs = synchronized(Messenger.core) { g.msgs.takeLast(300) }
     if (!stick && restoreTo == null) restoreTo = anchorOf(groupScroller, list)
     list.removeAllViews()
-    list.addView(note("Messages in this group are end-to-end encrypted."))
+    list.addView(note(T("Messages in this group are end-to-end encrypted.")))
     for (m in msgs) list.addView(if (m.state == Msg.NOTE) note(m.text) else groupBubble(g, m))
 }
 
@@ -246,12 +246,12 @@ internal fun MainActivity.groupBubble(g: Group, m: Msg): View {
     if (m.poll != null) b.addView(pollView(g, m, tcol))
     val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
     val mc = (tcol and 0x00FFFFFF) or (0x99 shl 24)
-    meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
+    meta.addView(tv((if (m.edited) T("edited") + "  " else "") + time(m.ts), 12f, mc).apply { setPadding(0, 0, dp(6), 0) })
     if (m.mine) when (m.state) {
         Msg.SENT -> meta.addView(icon(R.drawable.ic_check, mc, 14, 1))
         Msg.SENDING -> meta.addView(tv("🕓", 11f, mc))
         Msg.SCHEDULED -> meta.addView(tv("🕓 ${whenText(m.sendAt)}", 12f, mc))
-        Msg.FAILED -> meta.addView(tv("  not sent · tap", 12f, red).apply { setOnClickListener { Messenger.io.execute { Messenger.core.deliverGroup(g, m) } } })
+        Msg.FAILED -> meta.addView(tv(T("  not sent · tap"), 12f, red).apply { setOnClickListener { Messenger.io.execute { Messenger.core.deliverGroup(g, m) } } })
     }
     b.addView(meta, LinearLayout.LayoutParams(-1, -2))
     addReactions(b, m) { e -> val me = Messenger.core.me?.user; Messenger.reactGroup(g, m, if (m.reactions[me] == e) "" else e); fillGroup() }
@@ -263,36 +263,36 @@ internal fun MainActivity.groupBubble(g: Group, m: Msg): View {
 internal fun MainActivity.groupMessageMenu(g: Group, m: Msg) {
     val me = Messenger.core.me?.user
     val opts = mutableListOf<Pair<String, () -> Unit>>()
-    if (m.state == Msg.SCHEDULED) opts.add("Send now" to { Messenger.sendScheduled(m) })
-    if (g.canPost(me ?: "")) opts.add("Reply" to { startReply(m, groupBox) })
-    if (m.text.isNotEmpty()) opts.add((if (m.file != null) "Copy text" else "Copy") to {
-        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast("Copied")
+    if (m.state == Msg.SCHEDULED) opts.add(T("Send now") to { Messenger.sendScheduled(m) })
+    if (g.canPost(me ?: "")) opts.add(T("Reply") to { startReply(m, groupBox) })
+    if (m.text.isNotEmpty()) opts.add((if (m.file != null) T("Copy text") else T("Copy")) to {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("msg", m.text)); toast(T("Copied"))
     })
-    opts.addAll(imageActions(m, if (m.text.isNotEmpty()) "Copy photo" else "Copy"))
-    if (canForward(m)) opts.add("Forward" to { forwardPicker(m, authorOf(m)) })
-    if (canForward(m)) opts.add("Save" to { saveTellem(m, authorOf(m)) })
-    if (Messenger.core.canPin(g)) opts.add((if (g.pinned == m.id) "Unpin" else "Pin") to {
+    opts.addAll(imageActions(m, if (m.text.isNotEmpty()) T("Copy photo") else T("Copy")))
+    if (canForward(m)) opts.add(T("Forward") to { forwardPicker(m, authorOf(m)) })
+    if (canForward(m)) opts.add(T("Save") to { saveTellem(m, authorOf(m)) })
+    if (Messenger.core.canPin(g)) opts.add((if (g.pinned == m.id) T("Unpin") else T("Pin")) to {
         Messenger.run({ Messenger.core.pinGroupMessage(g, if (g.pinned == m.id) null else m) }) { e -> toast(errorText(e)) }
     })
-    if (m.mine && m.text.isNotEmpty() && g.canPost(me ?: "")) opts.add("Edit" to { startEdit(m, groupBox) })
-    if (m.mine && m.state != Msg.FAILED && m.state != Msg.SCHEDULED) opts.add("Delete for everyone" to {
+    if (m.mine && m.text.isNotEmpty() && g.canPost(me ?: "")) opts.add(T("Edit") to { startEdit(m, groupBox) })
+    if (m.mine && m.state != Msg.FAILED && m.state != Msg.SCHEDULED) opts.add(T("Delete for everyone") to {
         Messenger.io.execute { Messenger.core.deleteGroupMessage(g, m, forEveryone = true) }
     })
-    opts.add("Delete for me" to { Messenger.core.deleteGroupMessage(g, m, forEveryone = false); fillGroup() })
+    opts.add(T("Delete for me") to { Messenger.core.deleteGroupMessage(g, m, forEveryone = false); fillGroup() })
     longPressMenu(m.reactions[me], { e -> Messenger.reactGroup(g, m, e); fillGroup() }, opts)
 }
 
 internal fun MainActivity.groupMenu(g: Group) {
     val items = mutableListOf<Pair<String, () -> Unit>>()
     val key = "g:${g.id}"
-    items.add((if (key in Messenger.muted) "Unmute" else "Mute") to { toggleMute(key) })
-    if (g.public) items.add("Copy invite link" to {
+    items.add((if (key in Messenger.muted) T("Unmute") else T("Mute")) to { toggleMute(key) })
+    if (g.public) items.add(T("Copy invite link") to {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("group", Messenger.core.groupInviteLink(g)))
-        toast("Invite link copied")
-    }) else items.add("Add a friend" to { addToGroup(g) })
-    if (g.owner.isNotEmpty() && g.isLeader(Messenger.core.me?.user ?: "")) items.add("Group settings" to { showGroupSettings(g) })
-    items.add("Leave group" to {
-        popup("Leave \"${g.name}\"?", "You'll stop getting its messages. You can be re-invited later.", null, "Cancel" to dim, "Leave" to red) { i ->
+        toast(T("Invite link copied"))
+    }) else items.add(T("Add a friend") to { addToGroup(g) })
+    if (g.owner.isNotEmpty() && g.isLeader(Messenger.core.me?.user ?: "")) items.add(T("Group settings") to { showGroupSettings(g) })
+    items.add(T("Leave group") to {
+        popup(T("Leave \"${g.name}\"?"), T("You'll stop getting its messages. You can be re-invited later."), null, T("Cancel") to dim, T("Leave") to red) { i ->
             if (i == 1) { Messenger.io.execute { Messenger.core.leaveGroup(g) }; showChats() }
         }
     })
@@ -301,8 +301,8 @@ internal fun MainActivity.groupMenu(g: Group) {
 
 internal fun MainActivity.addToGroup(g: Group) {
     val friends = synchronized(Messenger.core) { Messenger.core.contacts.filter { it.canChat && it.user !in g.members } }
-    if (friends.isEmpty()) { toast("No friends left to add"); return }
-    pickList("Add to ${g.name}", null, friends.map { it.name }.toTypedArray()) { i ->
+    if (friends.isEmpty()) { toast(T("No friends left to add")); return }
+    pickList(T("Add to ${g.name}"), null, friends.map { it.name }.toTypedArray()) { i ->
         Messenger.run({ Messenger.core.inviteToGroup(g, friends[i].user); Messenger.kick() }, { fillGroup() }) { e -> toast(errorText(e)) }
     }
 }
@@ -311,14 +311,14 @@ internal fun MainActivity.addToGroup(g: Group) {
 internal fun MainActivity.showGroupSettings(g: Group) {
     screen = Screen.GROUP_SETTINGS
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    col.addView(tv("Name", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
-    val nameBox = field("Group name", g.name)
+    col.addView(tv(T("Name"), 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
+    val nameBox = field(T("Group name"), g.name)
     col.addView(nameBox, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(20), 0, dp(20), 0) })
     col.addView(gap(10))
     var readOnly = g.readOnly
-    col.addView(settingSwitch("Read-only", g.readOnly) { readOnly = it })
-    col.addView(settingNote("When on, only admins can post. Anyone can still react. Note: this is enforced by the app, not the server — a modified app could still post, so don't treat it as a security guarantee."))
-    col.addView(tv("Admins", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
+    col.addView(settingSwitch(T("Read-only"), g.readOnly) { readOnly = it })
+    col.addView(settingNote(T("When on, only admins can post. Anyone can still react. Note: this is enforced by the app, not the server — a modified app could still post, so don't treat it as a security guarantee.")))
+    col.addView(tv(T("Admins"), 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
     val chosen = g.leaders.toMutableSet()
     val iAmOwner = g.owner.isNotEmpty() && g.owner == Messenger.core.me?.user
     synchronized(Messenger.core) { g.members.sorted() }.forEach { member ->
@@ -331,11 +331,11 @@ internal fun MainActivity.showGroupSettings(g: Group) {
             col.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 addView(sw, LinearLayout.LayoutParams(0, -2, 1f))
-                addView(tv("Remove", 15f, red).apply {
+                addView(tv(T("Remove"), 15f, red).apply {
                     setPadding(dp(16), dp(14), dp(20), dp(14)); background = pressable(); isClickable = true
                     setOnClickListener {
-                        popup("Remove @$member?", "They'll lose access to new messages. The group gets a new key, so this only works for members on the latest app version.",
-                            null, "Cancel" to dim, "Remove" to red) { i ->
+                        popup(T("Remove @$member?"), T("They'll lose access to new messages. The group gets a new key, so this only works for members on the latest app version."),
+                            null, T("Cancel") to dim, T("Remove") to red) { i ->
                             if (i == 1) Messenger.run({ Messenger.core.rekeyGroup(g, setOf(member)); Messenger.kick() }, { showGroupSettings(Messenger.core.group(g.id) ?: g) }) { e -> toast(errorText(e)) }
                         }
                     }
@@ -344,9 +344,9 @@ internal fun MainActivity.showGroupSettings(g: Group) {
         } else col.addView(sw)
     }
     col.addView(gap(20))
-    col.addView(cta("Save") {
+    col.addView(cta(T("Save")) {
         Messenger.run({ Messenger.core.setGroup(g, nameBox.text.toString(), readOnly, chosen); Messenger.kick() }, { showGroup(g.id) }) { e -> toast(errorText(e)) }
     }, ctaParams())
     col.addView(gap(20))
-    setContentView(page(topBar("Group settings", left = icon(R.drawable.ic_back) { showGroup(g.id) }), ScrollView(this).apply { addView(col) }))
+    setContentView(page(topBar(T("Group settings"), left = icon(R.drawable.ic_back) { showGroup(g.id) }), ScrollView(this).apply { addView(col) }))
 }

@@ -18,7 +18,7 @@ class ChatBox(ctx: Context, private val onContent: (Uri, String, () -> Unit) -> 
         // select some text: Bold / Italic / Strike / Spoiler / Mono join Copy, Paste… in the menu
         customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
             override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
-                Format.MARKS.forEachIndexed { i, (_, name) -> menu.add(0, FORMAT_ID + i, 100 + i, name) }
+                Format.MARKS.forEachIndexed { i, (_, name) -> menu.add(0, FORMAT_ID + i, 100 + i, T(name)) }
                 return true
             }
             override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu) = false

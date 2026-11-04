@@ -22,12 +22,12 @@ internal fun MainActivity.savedWithMessages(): Contact? = synchronized(Messenger
 /** Save a Tellem message (text or a photo/file on this phone) into Saved Messages. */
 internal fun MainActivity.saveTellem(m: Msg, author: String) {
     val from = m.fwd ?: author
-    Messenger.run({ Messenger.forward(m, from, Messenger.core.savedChat(), null) }, { toast("Saved") }) { e -> toast(errorText(e)) }
+    Messenger.run({ Messenger.forward(m, from, Messenger.core.savedChat(), null) }, { toast(T("Saved")) }) { e -> toast(errorText(e)) }
 }
 
 /** Save a normal text (and its first picture, if any) into Saved Messages; it remembers who it was from. */
 internal fun MainActivity.saveText(t: Texts.Text) {
-    val who = "sms:" + if (t.mine) "You" else Texts.name(this, t.from ?: Texts.threadTitle(this, textThread, textPeople))
+    val who = "sms:" + if (t.mine) T("You") else Texts.name(this, t.from ?: Texts.threadTitle(this, textThread, textPeople))
     Messenger.run({
         val core = Messenger.core
         val saved = core.savedChat()
@@ -42,7 +42,7 @@ internal fun MainActivity.saveText(t: Texts.Text) {
             val msg = core.queue(saved, t.body); msg.fwd = who
             core.deliver(saved, msg)
         }
-    }, { toast("Saved") }) { e -> toast(errorText(e)) }
+    }, { toast(T("Saved")) }) { e -> toast(errorText(e)) }
 }
 
 internal fun MainActivity.savedAvatar(sizeDp: Int): View = FrameLayout(this).apply {

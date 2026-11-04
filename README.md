@@ -63,6 +63,12 @@ won't install over the old app.
 Not yet: forward secrecy (Double Ratchet), groups, pictures, multiple phones per account.
 
 
+## Languages (9.3)
+
+Tellem speaks English, Russian (Русский) and Ukrainian (Українська). It follows the phone's language by default; Settings > Language changes
+it. Only Tellem's own screens are translated, never your messages. The text is in `android/app/src/main/assets/i18n/` (one JSON file per
+language), so adding a language means adding a file; see `CLAUDE.md`.
+
 ## Who you're talking to, and the connection (9.0)
 
 - **Tor by default.** The server's .onion address is built into the app, so the address itself proves which server you reached,

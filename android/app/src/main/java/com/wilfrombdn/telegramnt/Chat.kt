@@ -44,7 +44,7 @@ internal fun MainActivity.showChat(user: String, restore: Pair<String, Int>? = n
         setPadding(dp(14), dp(4), dp(6), dp(4))
     }
     val box = ChatBox(this) { uri, mime, done -> keyboardContent(uri, mime, done, c) }.apply {
-        hint = "Message"
+        hint = T("Message")
         setHintTextColor(dim)
         setTextColor(white)
         textSize = look.msg
@@ -59,7 +59,7 @@ internal fun MainActivity.showChat(user: String, restore: Pair<String, Int>? = n
     fun sendWith(silent: Boolean, at: Long) {
         val t = box.text.toString().trim()
         if (t.isEmpty()) return
-        if (t.length > Core.MAX_TEXT) { toast("Too long (max ${Core.MAX_TEXT} characters)"); return }
+        if (t.length > Core.MAX_TEXT) { toast(T("Too long (max ${Core.MAX_TEXT} characters)")); return }
         editing?.let { e ->
             cancelReply(); box.setText("")
             Messenger.io.execute { Messenger.core.editMessage(c, e, t) }
@@ -71,7 +71,7 @@ internal fun MainActivity.showChat(user: String, restore: Pair<String, Int>? = n
         stick = true                       // your own message always brings you to the bottom
         val r = replyTo?.let { replyRef(it) }; cancelReply()
         Messenger.send(c, t, r, links.ready(t), silent, at)
-        if (at > 0) toast("Scheduled for ${whenText(at)}")
+        if (at > 0) toast(T("Scheduled for ${whenText(at)}"))
     }
     fun doSend() = sendWith(false, 0)
     box.setText(Messenger.drafts["u:${c.user}"] ?: "")   // what you left unsent last time
@@ -91,7 +91,7 @@ internal fun MainActivity.showChat(user: String, restore: Pair<String, Int>? = n
     val compose = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(links.bar); addView(replyBar); addView(input) }
     composer = compose
     // blocked: no message box, just a way back
-    val bottom: View = if (c.user in Messenger.core.blocked && c.status != Contact.SAVED) tv("Unblock", 16f, blue, true).apply {
+    val bottom: View = if (c.user in Messenger.core.blocked && c.status != Contact.SAVED) tv(T("Unblock"), 16f, blue, true).apply {
         gravity = Gravity.CENTER; setBackgroundColor(listBg); setPadding(dp(16), dp(16), dp(16), dp(16)); background = pressable()
         setOnClickListener { blockConfirm(c, false) }
     } else compose
@@ -116,17 +116,17 @@ internal fun MainActivity.fillChat() {
     Messenger.run({ Messenger.core.markRead(c) }, { Messenger.save() })
 
     val sub = when (c.status) {
-        Contact.ASKED -> "friend request sent"
-        Contact.ASKING -> if (c.msgs.any { !it.mine && it.state == Msg.RECEIVED }) "message request" else "wants to be your friend"
-        Contact.CHATTING -> if (c.waitingForAdd) "@${c.user} · hasn't added you yet" else "@${c.user} · not your friend"
-        Contact.SAVED -> "only on this phone"
-        else -> if (c.user in Messenger.core.blocked) "@${c.user} · blocked" else if (c.verified) "@${c.user} · verified ✓" else "@${c.user} · not verified"
+        Contact.ASKED -> T("friend request sent")
+        Contact.ASKING -> if (c.msgs.any { !it.mine && it.state == Msg.RECEIVED }) T("message request") else T("wants to be your friend")
+        Contact.CHATTING -> if (c.waitingForAdd) T("@${c.user} · hasn't added you yet") else T("@${c.user} · not your friend")
+        Contact.SAVED -> T("only on this phone")
+        else -> if (c.user in Messenger.core.blocked) T("@${c.user} · blocked") else if (c.verified) T("@${c.user} · verified ✓") else T("@${c.user} · not verified")
     }
     chatTop?.removeAllViews()
     val blocked = Messenger.core.callBlocked(c)
     val netNote = blocked?.takeIf { c.status == Contact.FRIENDS }   // "your network differs…" shows under the name
     val live = presence(c).takeIf { c.user !in Messenger.core.blocked }
-    val head: CharSequence = if (live?.toString() == "typing…") live else netNote ?: live ?: sub
+    val head: CharSequence = if (live?.toString() == T("typing…")) live else netNote ?: live ?: sub
     val left = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         addView(icon(R.drawable.ic_back) { showChats() })
@@ -148,11 +148,11 @@ internal fun MainActivity.fillChat() {
     }
     val actions = when {
         c.status == Contact.ASKING -> listOf(
-            bannerButton("Decline", red) { Messenger.core.remove(c) },
-            bannerButton("Accept", white) { Messenger.core.accept(c, friend = false) },
-            bannerButton("Add Friend", white) { Messenger.core.accept(c, friend = true) },
+            bannerButton(T("Decline"), red) { Messenger.core.remove(c) },
+            bannerButton(T("Accept"), white) { Messenger.core.accept(c, friend = false) },
+            bannerButton(T("Add Friend"), white) { Messenger.core.accept(c, friend = true) },
         )
-        c.status == Contact.CHATTING && !c.waitingForAdd -> listOf(bannerButton("Add @${c.user} as a friend", white) { Messenger.core.makeFriend(c) })
+        c.status == Contact.CHATTING && !c.waitingForAdd -> listOf(bannerButton(T("Add @${c.user} as a friend"), white) { Messenger.core.makeFriend(c) })
         else -> emptyList()
     }
     if (actions.isNotEmpty()) banner?.addView(LinearLayout(this).apply {
@@ -165,15 +165,15 @@ internal fun MainActivity.fillChat() {
     val msgs = synchronized(Messenger.core) { c.msgs.takeLast(300) }
     if (!stick && restoreTo == null) restoreTo = anchorOf(scroller, list)
     list.removeAllViews()
-    if (c.status != Contact.SAVED) list.addView(note(if (c.verified) "Messages are end-to-end encrypted. Safety code checked ✓"
-    else "Messages are end-to-end encrypted. Tap here to check the safety code.") { safety(c) })
+    if (c.status != Contact.SAVED) list.addView(note(if (c.verified) T("Messages are end-to-end encrypted. Safety code checked ✓")
+    else T("Messages are end-to-end encrypted. Tap here to check the safety code.")) { safety(c) })
     for (m in msgs) list.addView(if (m.state == Msg.NOTE) note(m.text) else bubble(c, m))
 }
 
 internal fun MainActivity.authorOf(m: Msg): String = if (m.mine) Messenger.core.me?.user ?: "" else m.sender ?: chatUser ?: ""
 
 internal fun MainActivity.displayName(user: String): String = when (user) {
-    Messenger.core.me?.user -> "You"
+    Messenger.core.me?.user -> T("You")
     else -> if (user.startsWith("sms:")) user.drop(4) + " (text)" else Messenger.core.contact(user)?.name ?: "@$user"
 }
 
@@ -190,14 +190,14 @@ internal fun MainActivity.makeReplyBar() = LinearLayout(this).apply {
 internal fun MainActivity.startReply(m: Msg, box: EditText?) {
     if (editing != null) { editing = null; box?.setText("") }
     replyTo = m
-    showBar("Reply to ${displayName(authorOf(m))}", m, box)
+    showBar(T("Reply to ${displayName(authorOf(m))}"), m, box)
 }
 
 /** Puts my message back in the box to change it; sending then edits it on both phones. */
 internal fun MainActivity.startEdit(m: Msg, box: EditText?) {
     replyTo = null
     editing = m
-    showBar("Edit message", m, box)
+    showBar(T("Edit message"), m, box)
     box?.setText(m.text); box?.setSelection(box.text.length)
 }
 
@@ -244,7 +244,7 @@ internal fun MainActivity.quoteView(r: org.json.JSONObject, all: List<Msg>, ink:
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(4), 0, dp(4))
             addView(tv(displayName(who), 13.5f, accent, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-            addView(tv(orig?.let { preview(it) } ?: r.optString("p").ifEmpty { "Message deleted" }, 14f, faded).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
+            addView(tv(orig?.let { preview(it) } ?: r.optString("p").ifEmpty { T("Message deleted") }, 14f, faded).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
         })
         setOnClickListener { jumpTo(r.optString("id"), list, sc) }
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(4) }
@@ -339,7 +339,7 @@ internal fun MainActivity.bubble(c: Contact, m: Msg): View {
     m.loc?.let { b.addView(locationCard(it, ink)) }
     val meta = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
     val metaColor = (ink and 0x00FFFFFF) or (0x99 shl 24)
-    meta.addView(tv((if (m.edited) "edited  " else "") + time(m.ts), 12f, metaColor).apply { setPadding(0, 0, dp(6), 0) }) // gap before the tick
+    meta.addView(tv((if (m.edited) T("edited") + "  " else "") + time(m.ts), 12f, metaColor).apply { setPadding(0, 0, dp(6), 0) }) // gap before the tick
     if (m.mine) when (m.state) {
         Msg.SENT -> {
             val read = m.ts <= c.theirReadUpto
@@ -351,7 +351,7 @@ internal fun MainActivity.bubble(c: Contact, m: Msg): View {
         }
         Msg.SENDING -> meta.addView(tv("🕓", 11f, metaColor))
         Msg.SCHEDULED -> meta.addView(tv("🕓 ${whenText(m.sendAt)}", 12f, metaColor))
-        Msg.FAILED -> meta.addView(tv("  not sent · tap to retry", 12f, red).apply { setOnClickListener { Messenger.retry(c, m) } })
+        Msg.FAILED -> meta.addView(tv(T("  not sent · tap to retry"), 12f, red).apply { setOnClickListener { Messenger.retry(c, m) } })
     }
     b.addView(meta, LinearLayout.LayoutParams(-1, -2))
     addReactions(b, m) { e -> val me = Messenger.core.me?.user; Messenger.react(c, m, if (m.reactions[me] == e) "" else e); fillChat() }
@@ -396,8 +396,8 @@ internal fun MainActivity.whenText(at: Long): String {
     val now = System.currentTimeMillis()
     val clock = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(at))
     return when (day(at)) {
-        day(now) -> "today at $clock"
-        day(now + 86_400_000) -> "tomorrow at $clock"
+        day(now) -> T("today at $clock")
+        day(now + 86_400_000) -> T("tomorrow at $clock")
         else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(at)) + " at $clock"
     }
 }
@@ -408,10 +408,10 @@ internal fun MainActivity.pickSendTime(done: (Long) -> Unit) {
     fun at(daysAhead: Int, hour: Int) = Calendar.getInstance().apply {
         add(Calendar.DAY_OF_YEAR, daysAhead); set(Calendar.HOUR_OF_DAY, hour); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }.timeInMillis
-    val opts = mutableListOf("In 30 minutes" to now + 30 * 60_000L, "In 1 hour" to now + 3_600_000L, "In 3 hours" to now + 3 * 3_600_000L)
-    if (at(0, 21) > now + 30 * 60_000L) opts.add("Tonight at 21:00" to at(0, 21))
-    opts.add("Tomorrow at 08:00" to at(1, 8)); opts.add("Tomorrow at 18:00" to at(1, 18))
-    pickList("Schedule message", "It waits on this phone and goes out at that time ($APP_NAME needs to be running in the background).",
+    val opts = mutableListOf(T("In 30 minutes") to now + 30 * 60_000L, T("In 1 hour") to now + 3_600_000L, T("In 3 hours") to now + 3 * 3_600_000L)
+    if (at(0, 21) > now + 30 * 60_000L) opts.add(T("Tonight at 21:00") to at(0, 21))
+    opts.add(T("Tomorrow at 08:00") to at(1, 8)); opts.add(T("Tomorrow at 18:00") to at(1, 18))
+    pickList(T("Schedule message"), T("It waits on this phone and goes out at that time ($APP_NAME needs to be running in the background)."),
         opts.map { it.first }.toTypedArray()) { i -> done(opts[i].second) }
 }
 
@@ -428,7 +428,7 @@ internal fun MainActivity.jumpTo(id: String, list: LinearLayout?, sc: ScrollView
             return
         }
     }
-    toast("That message isn't loaded any more")
+    toast(T("That message isn't loaded any more"))
 }
 
 /** The "📌 Pinned message" strip under a chat's title: tap to jump to it, ✕ unpins it (for everyone). */
@@ -439,7 +439,7 @@ internal fun MainActivity.pinnedBar(id: String?, msgs: List<Msg>, list: LinearLa
         addView(View(context).apply { setBackgroundColor(blue) }, LinearLayout.LayoutParams(dp(3), dp(34)))
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
-            addView(tv("Pinned message", 13.5f, blue, true))
+            addView(tv(T("Pinned message"), 13.5f, blue, true))
             addView(tv(preview(m), 14f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         }, LinearLayout.LayoutParams(0, -2, 1f))
         if (canUnpin) addView(tv("✕", 17f, dim).apply { setPadding(dp(14), dp(6), dp(14), dp(6)); setOnClickListener { unpin() } })

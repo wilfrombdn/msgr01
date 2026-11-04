@@ -36,7 +36,7 @@ internal fun MainActivity.askCallRole() {
 internal fun MainActivity.callRoleResult() {
     if (PhoneCalls.isDefaultDialer(this)) {
         PhoneCalls.channels(this)
-        toast("$APP_NAME now handles phone calls")
+        toast(T("$APP_NAME now handles phone calls"))
         if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.ANSWER_PHONE_CALLS), CALL_PERM)
     }
     if (screen == Screen.SETTINGS) showSettings()
@@ -47,7 +47,7 @@ internal fun MainActivity.askTextRole() {
         .takeIf { it.isRoleAvailable(android.app.role.RoleManager.ROLE_SMS) }?.createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS)
     else @Suppress("DEPRECATION") Intent(android.provider.Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
         .putExtra(android.provider.Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, packageName)
-    if (i == null) return toast("This phone can't send texts")
+    if (i == null) return toast(T("This phone can't send texts"))
     @Suppress("DEPRECATION") startActivityForResult(i, TEXT_ROLE)
 }
 
@@ -56,10 +56,10 @@ internal fun MainActivity.textRoleResult() {
         Texts.listen(this, textsChanged)   // now allowed to read texts: start watching them
         // names instead of numbers, and this phone's own number (left out of group texts); both optional
         requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.READ_PHONE_NUMBERS, Manifest.permission.READ_PHONE_STATE), TEXT_PERMS)
-        toast("$APP_NAME is now your texting app")
-    } else popup("$APP_NAME isn't your texting app",
-        "If Android didn't ask, it may be blocking this for apps installed outside the Play Store. Open $APP_NAME's App info, tap ⋮ (top right), choose \"Allow restricted settings\", then try again.",
-        null, "Cancel" to dim, "Open App info" to white) { b ->
+        toast(T("$APP_NAME is now your texting app"))
+    } else popup(T("$APP_NAME isn't your texting app"),
+        T("If Android didn't ask, it may be blocking this for apps installed outside the Play Store. Open $APP_NAME's App info, tap ⋮ (top right), choose \"Allow restricted settings\", then try again."),
+        null, T("Cancel") to dim, T("Open App info") to white) { b ->
         if (b == 1) startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", packageName, null)))
     }
     rebuildTextScreen()
@@ -89,10 +89,10 @@ internal fun MainActivity.textTabs(chatsUnread: Int, mixed: Boolean): View = Lin
     if (textsTab) {
         val sub = row().apply { setBackgroundColor(listBg) }
         fun go(k: String) { if (phoneSub != k) { val o = phoneTabOrder(); gotoPhoneTab(k, if (o.indexOf(k) > o.indexOf(phoneSub)) 1 else -1) } }
-        sub.tab("Contacts", 0, phoneSub == "contacts", 14f) { go("contacts") }
-        sub.tab("Calls", 0, phoneSub == "calls", 14f) { go("calls") }
-        if (!mixed) sub.tab("Texts", textsUnread(), phoneSub == "texts", 14f) { go("texts") }
-        if (folderPlace() == "tab") sub.tab("Folders", 0, phoneSub == "folders", 14f) { go("folders") }
+        sub.tab(T("Contacts"), 0, phoneSub == "contacts", 14f) { go("contacts") }
+        sub.tab(T("Calls"), 0, phoneSub == "calls", 14f) { go("calls") }
+        if (!mixed) sub.tab(T("Texts"), textsUnread(), phoneSub == "texts", 14f) { go("texts") }
+        if (folderPlace() == "tab") sub.tab(T("Folders"), 0, phoneSub == "folders", 14f) { go("folders") }
         addView(sub)
     }
 }
@@ -102,14 +102,14 @@ internal fun MainActivity.textMatches(t: Texts.Thread, q: String) = q.isEmpty() 
 
 /** The text threads, newest first (the Texts tab and the signed-out texts screen). */
 internal fun MainActivity.addTextRows(list: LinearLayout, q: String) {
-    if (!Texts.isDefault(this)) list.addView(note("$APP_NAME isn't your texting app right now, so texts can't be sent or received here. Tap to change that.") { askTextRole() })
+    if (!Texts.isDefault(this)) list.addView(note(T("$APP_NAME isn't your texting app right now, so texts can't be sent or received here. Tap to change that.")) { askTextRole() })
     val pins = Texts.pins(this)
     val ts = Texts.threads.filter { !it.spam && ((!it.code && !it.archived) || q.isNotEmpty()) && textMatches(it, q) }.sortedByDescending { it.id in pins }   // pinned first, then newest (list is already newest first)
     if (q.isEmpty() && folderPlace() == "top") folderRows(list)
-    if (!savedTellemOnly() && !Texts.mixed(this)) savedWithMessages()?.takeIf { q.isEmpty() || "saved messages".contains(q) }?.let { list.addView(chatRow(it)) }
+    if (!savedTellemOnly() && !Texts.mixed(this)) savedWithMessages()?.takeIf { q.isEmpty() || T("saved messages").contains(q) }?.let { list.addView(chatRow(it)) }
     addBatched(list, ts, 72, q.isNotEmpty() || folderPlace() == "bottom") { t -> textRow(t, pins) }
     if (q.isEmpty() && folderPlace() == "bottom") folderRows(list)
-    if (ts.isEmpty()) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
+    if (ts.isEmpty()) list.addView(tv(if (q.isNotEmpty()) T("No texts match \"$search\"") else T("No texts yet.\n\nTap the pencil to text a phone number."), 15.5f, dim)
         .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
 }
 
@@ -121,9 +121,9 @@ internal fun MainActivity.textRow(t: Texts.Thread, pins: Set<Long> = Texts.pins(
         setBackgroundColor(listBg)
         setPadding(dp(10), dp(8), dp(14), dp(8))
         setOnClickListener { showTextThread(t.id) }
-        setOnLongClickListener { v -> dropdown(v, Gravity.END, (if (pinned) "Unpin" else "Pin to top") to { Texts.setPinned(this@textRow, t.id, !pinned) },
-            (if (t.archived) "Unarchive" else "Archive") to { Texts.setArchived(this@textRow, t.id, !t.archived); toast(if (t.archived) "Moved back to your texts" else "Archived") },
-            (if (t.spam) "Not spam" else "Move to spam") to { Texts.markSpam(this@textRow, t.id, !t.spam); toast(if (t.spam) "Moved back to your texts" else "Moved to spam") }); true }
+        setOnLongClickListener { v -> dropdown(v, Gravity.END, (if (pinned) T("Unpin") else T("Pin to top")) to { Texts.setPinned(this@textRow, t.id, !pinned) },
+            (if (t.archived) T("Unarchive") else T("Archive")) to { Texts.setArchived(this@textRow, t.id, !t.archived); toast(if (t.archived) T("Moved back to your texts") else T("Archived")) },
+            (if (t.spam) T("Not spam") else T("Move to spam")) to { Texts.markSpam(this@textRow, t.id, !t.spam); toast(if (t.spam) T("Moved back to your texts") else T("Moved to spam")) }); true }
     }
     row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54))   // a bare number gets "#", not "+5"
     val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
@@ -141,14 +141,14 @@ internal fun MainActivity.textRow(t: Texts.Thread, pins: Set<Long> = Texts.pins(
     mid.addView(line2)
     row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
     val swipe = SwipeRow(this, row, R.drawable.ic_trash, onOpen = { showTextThread(t.id) }, onDelete = {
-        popup("Delete texts with $title?", "This deletes these texts from the phone for good.", null, "Cancel" to dim, "Delete" to red) { i ->
+        popup(T("Delete texts with $title?"), T("This deletes these texts from the phone for good."), null, T("Cancel") to dim, T("Delete") to red) { i ->
             if (i == 1) Texts.deleteThread(this, t.id) else redraw()
         }
     }, onPin = {
-        when { t.spam -> { Texts.markSpam(this, t.id, false); toast("Moved back to your texts") }
-            t.archived -> { Texts.setArchived(this, t.id, false); toast("Moved back to your texts") }
-            else -> { Texts.setArchived(this, t.id, true); toast("Archived") } }
-    }, pinLabel = if (t.spam) "Not spam" else if (t.archived) "Unarchive" else "Archive", directRight = true, pinEmoji = "✉️",
+        when { t.spam -> { Texts.markSpam(this, t.id, false); toast(T("Moved back to your texts")) }
+            t.archived -> { Texts.setArchived(this, t.id, false); toast(T("Moved back to your texts")) }
+            else -> { Texts.setArchived(this, t.id, true); toast(T("Archived")) } }
+    }, pinLabel = if (t.spam) T("Not spam") else if (t.archived) T("Unarchive") else T("Archive"), directRight = true, pinEmoji = "✉️",
         holdToSwipe = textsTab && screen == Screen.CHATS)
     return LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -177,29 +177,29 @@ internal fun MainActivity.showTextSection(kind: String) {
     textSectionKind = kind
     val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     list.addView(settingNote(when (kind) {
-        "codes" -> "Texts with a one-time code, like logins and two-factor. They stay out of your normal texts. Decided on your phone; nothing is sent anywhere."
-        "archive" -> "Texts you put away. Open one to read it, or tap Unarchive to bring it back."
-        else -> "Texts from numbers that aren't in your contacts and have a link or typical scam wording, plus numbers you blocked. They arrive silently. Tap Not spam to bring one back, or clear them all. Decided on your phone; nothing is sent anywhere."
+        "codes" -> T("Texts with a one-time code, like logins and two-factor. They stay out of your normal texts. Decided on your phone; nothing is sent anywhere.")
+        "archive" -> T("Texts you put away. Open one to read it, or tap Unarchive to bring it back.")
+        else -> T("Texts from numbers that aren't in your contacts and have a link or typical scam wording, plus numbers you blocked. They arrive silently. Tap Not spam to bring one back, or clear them all. Decided on your phone; nothing is sent anywhere.")
     }).apply { setPadding(dp(20), dp(14), dp(20), dp(10)) })
     val ts = Texts.threads.filter { when (kind) { "codes" -> it.code; "archive" -> it.archived; else -> it.spam } }
     for (t in ts) {
         list.addView(textRow(t))
-        if (kind != "codes") list.addView(tv(if (kind == "archive") "UNARCHIVE" else "NOT SPAM", 13f, blue, true).apply {
+        if (kind != "codes") list.addView(tv(if (kind == "archive") "UNARCHIVE" else T("NOT SPAM"), 13f, blue, true).apply {
             setPadding(dp(76), dp(2), dp(16), dp(12))
             setOnClickListener {
                 if (kind == "archive") Texts.setArchived(this@showTextSection, t.id, false) else Texts.markSpam(this@showTextSection, t.id, false)
-                toast("Moved back to your texts"); showTextSection(kind)
+                toast(T("Moved back to your texts")); showTextSection(kind)
             }
         })
     }
-    if (ts.isEmpty()) list.addView(tv(when (kind) { "codes" -> "No codes"; "archive" -> "Nothing archived"; else -> "No spam" }, 15.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(48), dp(32), dp(32)) })
+    if (ts.isEmpty()) list.addView(tv(when (kind) { "codes" -> T("No codes"); "archive" -> T("Nothing archived"); else -> T("No spam") }, 15.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(48), dp(32), dp(32)) })
     val clear = if (ts.isEmpty() || kind == "archive") null else icon(R.drawable.ic_trash) {
-        popup(if (kind == "codes") "Delete all ${ts.size} code conversations?" else "Clear all ${ts.size} spam conversations?",
-            "This deletes these texts from the phone for good. To keep one, cancel and tap Not spam on it first.", null, "Cancel" to dim, "Delete all" to red) { b ->
+        popup(if (kind == "codes") T("Delete all ${ts.size} code conversations?") else T("Clear all ${ts.size} spam conversations?"),
+            T("This deletes these texts from the phone for good. To keep one, cancel and tap Not spam on it first."), null, T("Cancel") to dim, T("Delete all") to red) { b ->
             if (b == 1) { ts.forEach { Texts.deleteThread(this, it.id) }; showTextSection(kind) }
         }
     }
-    setContentView(page(topBar(when (kind) { "codes" -> "Codes"; "archive" -> "Archive"; else -> "Spam & blocked" }, null, icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(clear).toTypedArray()), ScrollView(this).apply { addView(list) }))
+    setContentView(page(topBar(when (kind) { "codes" -> T("Codes"); "archive" -> T("Archive"); else -> T("Spam & blocked") }, null, icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(clear).toTypedArray()), ScrollView(this).apply { addView(list) }))
 }
 
 /** Everyone in a group text on one scrolling line; tap it for the full list. */
@@ -210,10 +210,10 @@ internal fun MainActivity.peopleStrip(people: List<String>): View = HorizontalSc
     people.forEach { n -> row.addView(tv(Texts.name(this@peopleStrip, n), 13f, dim).apply {
         setPadding(dp(10), dp(3), dp(10), dp(3)); background = round(listBg, 10); maxLines = 1
     }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) }) }
-    row.addView(tv("all ›", 13f, blue, true).apply { setPadding(dp(6), dp(3), dp(6), dp(3)) })
+    row.addView(tv(T("all ›"), 13f, blue, true).apply { setPadding(dp(6), dp(3), dp(6), dp(3)) })
     addView(row)
     val showAll = View.OnClickListener {
-        popup("${people.size} people", people.joinToString("\n") { n -> Texts.name(this@peopleStrip, n).let { nm -> if (nm == n) n else "$nm · $n" } }, null, "Close" to white)
+        popup("${people.size} people", people.joinToString("\n") { n -> Texts.name(this@peopleStrip, n).let { nm -> if (nm == n) n else "$nm · $n" } }, null, T("Close") to white)
     }
     row.setOnClickListener(showAll)
     row.children.forEach { it.setOnClickListener(showAll) }
@@ -225,39 +225,39 @@ internal fun MainActivity.textThreadMenu(anchor: View) {
     val t = Texts.threads.firstOrNull { it.id == id }
     val items = ArrayList<Pair<String, () -> Unit>>()
     val pinned = id in Texts.pins(this)
-    items += (if (t?.archived == true) "Unarchive" else "Archive") to { Texts.setArchived(this, id, t?.archived != true); toast(if (t?.archived == true) "Moved back to your texts" else "Archived"); if (t?.archived != true) leaveTexts() }
-    items += (if (pinned) "Unpin from top" else "Pin to top") to { Texts.setPinned(this, id, !pinned); toast(if (pinned) "Unpinned" else "Pinned to the top of your texts") }
+    items += (if (t?.archived == true) T("Unarchive") else T("Archive")) to { Texts.setArchived(this, id, t?.archived != true); toast(if (t?.archived == true) T("Moved back to your texts") else T("Archived")); if (t?.archived != true) leaveTexts() }
+    items += (if (pinned) T("Unpin from top") else T("Pin to top")) to { Texts.setPinned(this, id, !pinned); toast(if (pinned) T("Unpinned") else T("Pinned to the top of your texts")) }
     people.singleOrNull()?.takeIf { Texts.contact(this, it) == null }?.let { n ->
-        items += "Add to contacts" to { val back = textThread; showAddContact(n) { showTextThread(back, people) } }
+        items += T("Add to contacts") to { val back = textThread; showAddContact(n) { showTextThread(back, people) } }
 
     }
     // someone already in your contacts: change their name, numbers, email or photo (the same screen as the Contacts tab)
     people.singleOrNull()?.takeIf { Texts.contact(this, it) != null }?.let { n ->
-        items += "Edit contact" to {
+        items += T("Edit contact") to {
             val back = textThread
             var match: Phone.Person? = null
             Messenger.run({
                 match = Phone.people(this).firstOrNull { p -> p.numbers.any { android.telephony.PhoneNumberUtils.compare(it.first, n) } }
             }, {
-                match?.let { p -> showEditContact(p) { showTextThread(back, people) } } ?: toast("Couldn't find that contact")
-            }) { toast("Couldn't find that contact") }
+                match?.let { p -> showEditContact(p) { showTextThread(back, people) } } ?: toast(T("Couldn't find that contact"))
+            }) { toast(T("Couldn't find that contact")) }
         }
     }
-    if (people.size > 1) items += "Name this group" to {
-        val box = field("Group name", Texts.groupName(this, id).orEmpty())
-        popup("Name this group", "Only you see this name. Normal group texts can't share one with the others.", box, "Cancel" to dim, "Save" to white) { b ->
+    if (people.size > 1) items += T("Name this group") to {
+        val box = field(T("Group name"), Texts.groupName(this, id).orEmpty())
+        popup(T("Name this group"), T("Only you see this name. Normal group texts can't share one with the others."), box, T("Cancel") to dim, T("Save") to white) { b ->
             if (b == 1) { Texts.setGroupName(this, id, box.text.toString().take(60)); showTextThread(id, people) }
         }
     }
-    if (people.isNotEmpty()) items += if (t?.blocked == true) "Unblock" to { Texts.block(this, people, false); toast("Unblocked") }
-        else "Block number" to {
-            popup("Block ${Texts.title(this, people)}?", "Android will stop their texts and calls from reaching this phone (in every app). You can unblock them later from here.",
-                null, "Cancel" to dim, "Block" to red) { b -> if (b == 1) { Texts.block(this, people, true); Texts.markSpam(this, id, true); leaveTexts() } }
+    if (people.isNotEmpty()) items += if (t?.blocked == true) T("Unblock") to { Texts.block(this, people, false); toast(T("Unblocked")) }
+        else T("Block number") to {
+            popup(T("Block ${Texts.title(this, people)}?"), T("Android will stop their texts and calls from reaching this phone (in every app). You can unblock them later from here."),
+                null, T("Cancel") to dim, T("Block") to red) { b -> if (b == 1) { Texts.block(this, people, true); Texts.markSpam(this, id, true); leaveTexts() } }
         }
-    items += if (t?.spam == true) "Not spam" to { Texts.markSpam(this, id, false); toast("Moved back to your texts") }
-        else "Move to spam" to { Texts.markSpam(this, id, true); leaveTexts() }
-    items += "Delete conversation" to {
-        popup("Delete this conversation?", "This deletes these texts from the phone for good.", null, "Cancel" to dim, "Delete" to red) { b ->
+    items += if (t?.spam == true) T("Not spam") to { Texts.markSpam(this, id, false); toast(T("Moved back to your texts")) }
+        else T("Move to spam") to { Texts.markSpam(this, id, true); leaveTexts() }
+    items += T("Delete conversation") to {
+        popup(T("Delete this conversation?"), T("This deletes these texts from the phone for good."), null, T("Cancel") to dim, T("Delete") to red) { b ->
             if (b == 1) { Texts.deleteThread(this, id); leaveTexts() }
         }
     }
@@ -272,7 +272,7 @@ internal fun MainActivity.showTextList() {
     val frame = FrameLayout(this)
     frame.addView(ScrollView(this).apply { addView(list); isFillViewport = true })
     frame.addView(newTextButton(), FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
-    setContentView(page(topBar("Texts", "Normal texts · not encrypted", icon(R.drawable.ic_back) { showWelcome() }), frame))
+    setContentView(page(topBar(T("Texts"), T("Normal texts · not encrypted"), icon(R.drawable.ic_back) { showWelcome() }), frame))
 }
 
 internal fun MainActivity.newTextButton() = fab(R.drawable.ic_edit) { showNewText() }
@@ -287,31 +287,31 @@ internal fun MainActivity.leaveTexts() {
 internal fun MainActivity.showNewText(body: String? = null) {
     screen = Screen.NEW_TEXT
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16)) }
-    val to = field("Phone number(s), separated by commas").apply { inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher()) }
+    val to = field(T("Phone number(s), separated by commas")).apply { inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher()) }
     newTextTo = to
     col.addView(to)
-    col.addView(tv("Choose from contacts", 16f, blue, true).apply {
+    col.addView(tv(T("Choose from contacts"), 16f, blue, true).apply {
         setPadding(0, dp(14), 0, dp(14))
         setOnClickListener {
             runCatching { @Suppress("DEPRECATION") startActivityForResult(Intent(Intent.ACTION_PICK, android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI), PICK_CONTACT) }
-                .onFailure { toast("No contacts app") }
+                .onFailure { toast(T("No contacts app")) }
         }
     })
-    col.addView(settingNote("Normal texts go through your phone carrier and aren't encrypted. For private messages, use a $APP_NAME chat.").apply { setPadding(0, dp(4), 0, dp(16)) })
-    col.addView(cta("Next") {
+    col.addView(settingNote(T("Normal texts go through your phone carrier and aren't encrypted. For private messages, use a $APP_NAME chat.")).apply { setPadding(0, dp(4), 0, dp(16)) })
+    col.addView(cta(T("Next")) {
         val nums = to.text.split(',', ';').map { it.trim() }.filter { it.any(Char::isDigit) || it.contains('@') }.map { if (it.contains('@')) it else it.filter { c -> c.isDigit() || c == '+' } }   // typed formatting is only for show
-        if (nums.isEmpty()) return@cta toast("Type a phone number")
+        if (nums.isEmpty()) return@cta toast(T("Type a phone number"))
         var id = 0L
-        Messenger.run({ id = Texts.threadFor(this, nums) }, { textDraft = body; showTextThread(id, nums) }) { toast("Couldn't start that text") }
+        Messenger.run({ id = Texts.threadFor(this, nums) }, { textDraft = body; showTextThread(id, nums) }) { toast(T("Couldn't start that text")) }
     }, ctaParams())
-    setContentView(page(topBar("New text", null, icon(R.drawable.ic_back) { leaveTexts() }), ScrollView(this).apply { addView(col) }))
+    setContentView(page(topBar(T("New text"), null, icon(R.drawable.ic_back) { leaveTexts() }), ScrollView(this).apply { addView(col) }))
     to.requestFocus()
 }
 
 internal fun MainActivity.contactPicked(uri: android.net.Uri) {
     val n = runCatching {
         contentResolver.query(uri, arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
-    }.getOrNull() ?: return toast("Couldn't read that contact")
+    }.getOrNull() ?: return toast(T("Couldn't read that contact"))
     newTextTo?.let { f -> val cur = f.text.toString().trim().trimEnd(','); f.setText(if (cur.isEmpty()) n else "$cur, $n"); f.setSelection(f.text.length) }
 }
 
@@ -321,7 +321,7 @@ internal fun MainActivity.openTextIntent(i: Intent) {
     val nums = data.schemeSpecificPart.orEmpty().substringBefore('?').split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }
     val body = i.getStringExtra("sms_body") ?: i.getStringExtra(Intent.EXTRA_TEXT)
         ?: data.schemeSpecificPart?.substringAfter("body=", "")?.takeIf { it.isNotEmpty() }
-    if (!Texts.isDefault(this)) return popup("Use $APP_NAME for texts?", "To send normal texts from $APP_NAME, make it this phone's texting app.", null, "Cancel" to dim, "Set up" to white) { b -> if (b == 1) askTextRole() }
+    if (!Texts.isDefault(this)) return popup(T("Use $APP_NAME for texts?"), T("To send normal texts from $APP_NAME, make it this phone's texting app."), null, T("Cancel") to dim, T("Set up") to white) { b -> if (b == 1) askTextRole() }
     if (nums.isEmpty()) return showNewText(body)
     var id = 0L
     Messenger.run({ id = Texts.threadFor(this, nums) }, { textDraft = body; showTextThread(id, nums) })
@@ -345,15 +345,15 @@ internal fun MainActivity.showTextThread(id: Long, people: List<String>? = null)
     val sc = chatScroller(list); textScroll = sc
     val call = textPeople.singleOrNull()?.let { n -> icon(R.drawable.ic_call) { PhoneCalls.dial(this@showTextThread, n) } }
     val more = icon(R.drawable.ic_more).also { v -> v.setOnClickListener { textThreadMenu(v) } }
-    val top = topBar(title, if (group) "Group text · ${textPeople.size} people · not encrypted" else "Text message · not encrypted",
+    val top = topBar(title, if (group) T("Group text · ${textPeople.size} people · not encrypted") else T("Text message · not encrypted"),
         icon(R.drawable.ic_back) { leaveTexts() }, *listOfNotNull(call, more).toTypedArray())
     val info = Texts.threads.firstOrNull { it.id == id }
     val spamBar: View? = if (info?.spam != true) null else LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setBackgroundColor(bar)
         setPadding(dp(16), dp(8), dp(8), dp(8))
-        addView(tv(if (info.blocked) "🚫 This number is blocked" else "⚠ This looks like spam. Don't tap links or reply with personal info.", 13.5f, amber), LinearLayout.LayoutParams(0, -2, 1f))
-        addView(tv(if (info.blocked) "UNBLOCK" else "NOT SPAM", 13.5f, blue, true).apply {
+        addView(tv(if (info.blocked) T("🚫 This number is blocked") else T("⚠ This looks like spam. Don't tap links or reply with personal info."), 13.5f, amber), LinearLayout.LayoutParams(0, -2, 1f))
+        addView(tv(if (info.blocked) "UNBLOCK" else T("NOT SPAM"), 13.5f, blue, true).apply {
             setPadding(dp(12), dp(8), dp(8), dp(8))
             setOnClickListener {
                 if (info.blocked) Texts.block(this@showTextThread, textPeople, false)
@@ -362,7 +362,7 @@ internal fun MainActivity.showTextThread(id: Long, people: List<String>? = null)
             }
         })
     }
-    val bottom: View = if (!textMadeDefault) tv("Make $APP_NAME your texting app to send", 16f, blue, true).apply {
+    val bottom: View = if (!textMadeDefault) tv(T("Make $APP_NAME your texting app to send"), 16f, blue, true).apply {
         gravity = Gravity.CENTER; setPadding(dp(16), dp(16), dp(16), dp(16)); setBackgroundColor(listBg)
         setOnClickListener { askTextRole() }
     } else LinearLayout(this).apply {
@@ -376,7 +376,7 @@ internal fun MainActivity.showTextThread(id: Long, people: List<String>? = null)
         addView(picBar)
         val input = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(4), dp(6), dp(4)) }
         val box = EditText(context).apply {
-            hint = "Text message · not encrypted"
+            hint = T("Text message · not encrypted")
             setHintTextColor(dim); setTextColor(white); textSize = look.msg; background = null
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             maxLines = 5
@@ -438,7 +438,7 @@ internal fun MainActivity.fillTextThread() {
         val keep = want.toHashSet()
         for (i in list.childCount - 1 downTo 0) if (list.getChildAt(i) !in keep) list.removeViewAt(i)   // only what changed
         want.forEachIndexed { i, v -> if (list.getChildAt(i) !== v) { (v.parent as? ViewGroup)?.removeView(v); list.addView(v, i) } }
-        if (msgs.isEmpty()) list.addView(tv("Texts go through your phone carrier, not Tor, and aren't encrypted.", 13.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) })
+        if (msgs.isEmpty()) list.addView(tv(T("Texts go through your phone carrier, not Tor, and aren't encrypted."), 13.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) })
         // the scroller keeps to the bottom while you're there (see chatScroller)
         if (textRestoreY >= 0) { val y = textRestoreY; textRestoreY = -1; textScroll?.let { s -> s.post { s.scrollTo(0, y); stick = atBottom(s) } } }
     })
@@ -455,9 +455,9 @@ internal fun MainActivity.textBubble(t: Texts.Text, group: Boolean): View {
     }
     if (group && !t.mine && t.from != null) b.addView(tv(Texts.name(this, t.from), 13.5f, avatarColors[Math.floorMod(t.from.hashCode(), avatarColors.size)], true))
     for (a in t.attachments) b.addView(textPicture(a))
-    if (t.state == Texts.DOWNLOADING) b.addView(tv("📷 Downloading picture message…", look.msg, ink))
-    if (t.state == Texts.NOT_DOWNLOADED) b.addView(tv("📷 Picture message didn't download. Tap to try again.", look.msg, ink).apply {
-        setOnClickListener { Texts.retryDownload(this@textBubble, t.id); toast("Downloading…") }
+    if (t.state == Texts.DOWNLOADING) b.addView(tv(T("📷 Downloading picture message…"), look.msg, ink))
+    if (t.state == Texts.NOT_DOWNLOADED) b.addView(tv(T("📷 Picture message didn't download. Tap to try again."), look.msg, ink).apply {
+        setOnClickListener { Texts.retryDownload(this@textBubble, t.id); toast(T("Downloading…")) }
     })
     if (t.body.isNotEmpty()) b.addView(tv(t.body, look.msg, ink).apply {
         android.text.util.Linkify.addLinks(this, android.text.util.Linkify.WEB_URLS or android.text.util.Linkify.PHONE_NUMBERS)
@@ -470,14 +470,14 @@ internal fun MainActivity.textBubble(t: Texts.Text, group: Boolean): View {
         addView(tv(time(t.date), 12f, meta))
         when (t.state) {
             Texts.SENDING -> addView(tv("  🕓", 11f, meta))
-            Texts.FAILED -> addView(tv("  not sent · tap to retry", 12f, if (t.mine) Color.WHITE else red, true).apply {
+            Texts.FAILED -> addView(tv(T("  not sent · tap to retry"), 12f, if (t.mine) Color.WHITE else red, true).apply {
                 setOnClickListener {
                     val people = textPeople
                     var pic: Pair<ByteArray, String>? = null
                     Messenger.run({
                         pic = t.attachments.firstOrNull { it.mime.startsWith("image/") }?.let { a -> contentResolver.openInputStream(a.uri)?.use { it.readBytes() }?.let { it to a.mime } }
                     }, {
-                        if (t.body.isEmpty() && pic == null) return@run toast("Couldn't resend that one")
+                        if (t.body.isEmpty() && pic == null) return@run toast(T("Couldn't resend that one"))
                         Texts.deleteText(this@textBubble, t)
                         Texts.send(this@textBubble, people, t.body, pic)
                     })
@@ -491,9 +491,9 @@ internal fun MainActivity.textBubble(t: Texts.Text, group: Boolean): View {
 }
 
 internal fun MainActivity.textMenu(t: Texts.Text) = longPressMenu(null, null, listOfNotNull(
-    t.body.takeIf { it.isNotEmpty() }?.let { body -> "Copy" to { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("text", body)); toast("Copied") } },
-    if (Messenger.signedIn && (t.body.isNotEmpty() || t.attachments.any { it.mime.startsWith("image/") })) "Save" to { saveText(t) } else null,
-    "Delete" to { Texts.deleteText(this, t) },
+    t.body.takeIf { it.isNotEmpty() }?.let { body -> T("Copy") to { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("text", body)); toast(T("Copied")) } },
+    if (Messenger.signedIn && (t.body.isNotEmpty() || t.attachments.any { it.mime.startsWith("image/") })) T("Save") to { saveText(t) } else null,
+    T("Delete") to { Texts.deleteText(this, t) },
 ))
 
 /** A picture inside a picture text, loaded off the main thread; tap to see it big. */
@@ -502,8 +502,8 @@ internal fun MainActivity.textPicture(a: Texts.Attachment): View {
         adjustViewBounds = true; maxHeight = dp(320); maxWidth = dp(260); minimumHeight = dp(80); minimumWidth = dp(120)
         scaleType = ImageView.ScaleType.FIT_CENTER
     }
-    if (!a.mime.startsWith("image/")) return tv(if (a.mime.startsWith("video/")) "🎬 Video" else "🎵 Audio", look.msg, white).apply {
-        setOnClickListener { toast("Open this one in your old texting app") }
+    if (!a.mime.startsWith("image/")) return tv(if (a.mime.startsWith("video/")) T("🎬 Video") else T("🎵 Audio"), look.msg, white).apply {
+        setOnClickListener { toast(T("Open this one in your old texting app")) }
     }
     val key = a.uri.toString()
     textPics.get(key)?.let { iv.setImageBitmap(it) } ?: run {
@@ -542,10 +542,10 @@ internal fun MainActivity.textAttachMenu(anchor: View) {
         addView(tv(label, 16f, white).apply { setPadding(dp(16), 0, 0, 0) })
         setOnClickListener { pw.dismiss(); go() }
     })
-    row(R.drawable.ic_camera, "Camera") {
+    row(R.drawable.ic_camera, T("Camera")) {
         @Suppress("DEPRECATION") startActivityForResult(Intent(this, CameraActivity::class.java).putExtra("photoOnly", true), TEXT_CAMERA)
     }
-    row(R.drawable.ic_folder, "Photo") {
+    row(R.drawable.ic_folder, T("Photo")) {
         runCatching { @Suppress("DEPRECATION") startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), TEXT_IMAGE) }
     }
     pw.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
@@ -567,8 +567,8 @@ internal fun MainActivity.textImagePicked(uri: android.net.Uri, fromCamera: Bool
         while (b.size > limit && side > 320) { if (q > 60) q -= 10 else side = side * 3 / 4; b = jpeg(bmp, side, q) }
         out = b
     }, {
-        val b = out ?: return@run toast("Couldn't open that photo")
+        val b = out ?: return@run toast(T("Couldn't open that photo"))
         textImage = b to "image/jpeg"
-        textImageBar?.apply { text = "📷 Picture attached (${b.size / 1024} KB) · tap to remove"; visibility = View.VISIBLE }
-    }) { toast("Couldn't open that photo") }
+        textImageBar?.apply { text = T("📷 Picture attached (${b.size / 1024} KB) · tap to remove"); visibility = View.VISIBLE }
+    }) { toast(T("Couldn't open that photo")) }
 }
