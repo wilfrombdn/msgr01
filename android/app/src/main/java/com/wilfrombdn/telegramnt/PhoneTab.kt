@@ -1,5 +1,9 @@
 package com.wilfrombdn.telegramnt
 
+import android.view.ViewGroup
+import android.graphics.drawable.GradientDrawable
+import java.util.Locale
+import java.util.Date
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -62,32 +66,45 @@ internal fun MainActivity.addCallRows(list: LinearLayout, q: String) {
 
 internal fun MainActivity.callName(k: Phone.Call) = k.friend?.let { Messenger.core.contact(it)?.name ?: "@$it" } ?: Texts.name(this, k.number ?: "")
 
+/** The call that is opened out in the log (its time), so it stays open when the list redraws. */
+private var openCallAt = 0L
+
+/**
+ * One line of the call log: name, tag, time and what kind of call. Tap to open it downwards with the details and buttons
+ * (Call, Text, Contact, Copy); tap again to close it. Holding it still gives the old menu.
+ */
 internal fun MainActivity.callRow(k: Phone.Call): View {
     val name = callName(k)
+    val friend = k.friend?.let { Messenger.core.contact(it) }
+    val number = k.number
+    val detail = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = if (openCallAt == k.date) View.VISIBLE else View.GONE }
+    val outer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     val row = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(10), dp(8), dp(14), dp(8))
+        setPadding(dp(18), dp(12), dp(16), dp(12))
         background = pressable()
         setOnClickListener {
-            k.friend?.let { u -> Messenger.core.contact(u)?.takeIf { it.canChat }?.let { callFriend(it) } ?: toast("Can't call them on $APP_NAME") }
-                ?: k.number?.let { callCard(it) }
+            val open = detail.visibility != View.VISIBLE
+            (parent as? ViewGroup)?.let { p -> (p.parent as? ViewGroup ?: p).let { root ->
+                if (animationsOn()) android.transition.TransitionManager.beginDelayedTransition(root, android.transition.AutoTransition().setDuration(180))
+            } }
+            detail.visibility = if (open) View.VISIBLE else View.GONE
+            openCallAt = if (open) k.date else 0L
         }
         setOnLongClickListener {
-            val n = k.number
-            if (n != null) longPressMenu(null, null, listOf(
-                "Text" to { var id = 0L; Messenger.run({ id = Texts.threadFor(this@callRow, listOf(n)) }, { showTextThread(id, listOf(n)) }) },
-                "Copy number" to { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("number", n)); toast("Copied") },
+            if (number != null) longPressMenu(null, null, listOf(
+                "Text" to { var id = 0L; Messenger.run({ id = Texts.threadFor(this@callRow, listOf(number)) }, { showTextThread(id, listOf(number)) }) },
+                "Copy number" to { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("number", number)); toast("Copied") },
             )) else k.friend?.let { showChat(it) }
             true
         }
     }
-    val friend = k.friend?.let { Messenger.core.contact(it) }
-    row.addView(avatar(if (name.any(Char::isLetter)) name else "#", 48, friend?.avatar, friend?.let { avatarSeed(it.user) } ?: k.number?.let { numberSeed(it) }))
-    val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+    val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     val l1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
     l1.addView(tv(name, 16f, if (k.missed) red else white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
     l1.addView(tv(if (k.friend != null) APP_NAME else "Phone", 10.5f, Color.WHITE, true).apply {
-        setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(if (k.friend != null) Color.parseColor("#3A6EA5") else smsGreen, 4)
+        setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(if (k.friend != null) Color.parseColor("#3A6EA5") else look.sms, 4)
+        setTextColor(if (k.friend != null) Color.WHITE else Look.textOn(look.sms))
     })
     l1.addView(tv(time(k.date), 13f, dim).apply { setPadding(dp(6), 0, 0, 0) })
     mid.addView(l1)
@@ -98,11 +115,34 @@ internal fun MainActivity.callRow(k: Phone.Call): View {
     } + if (k.seconds > 0) " · ${callDuration(k.seconds)}" else ""
     mid.addView(tv(what, 14f, if (k.missed) red else dim).apply { setPadding(0, dp(2), 0, 0) })
     row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
-    return LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        addView(row, LinearLayout.LayoutParams(-1, -2))
-        addView(View(context).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(70) })
+
+    // ---- the part that opens: details, then buttons ----
+    val full = java.text.SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date(k.date))
+    detail.setPadding(dp(18), 0, dp(16), dp(12))
+    detail.addView(tv(full, 13.5f, dim))
+    detail.addView(tv(if (k.seconds > 0) "Lasted ${callDuration(k.seconds)}" else if (k.missed) "Not answered" else "Not connected", 13.5f, dim).apply { setPadding(0, dp(2), 0, 0) })
+    detail.addView(tv(if (k.friend != null) "@${k.friend} · $APP_NAME call, end-to-end encrypted" else "${number ?: ""} · normal phone call, not encrypted", 13.5f, dim).apply { setPadding(0, dp(2), 0, dp(10)) })
+    val buttons = LinearLayout(this)
+    fun button(label: String, go: () -> Unit) = buttons.addView(tv(label, 14.5f, white, true).apply {
+        gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(10)); maxLines = 1
+        background = GradientDrawable().apply { setColor(Color.TRANSPARENT); setStroke(dp(1), raised); cornerRadius = dp(8).toFloat() }
+        setOnClickListener { go() }
+    }, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
+    if (friend != null) {
+        button("Call") { if (friend.canChat) callFriend(friend) else toast("Can't call them on $APP_NAME") }
+        button("Message") { showChat(friend.user) }
+    } else if (number != null) {
+        button("Call") { PhoneCalls.dial(this, number) }
+        button("Text") { var id = 0L; Messenger.run({ id = Texts.threadFor(this, listOf(number)) }, { showTextThread(id, listOf(number)) }) }
+        button("Contact") { callCard(number) }
+        button("Copy") { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("number", number)); toast("Copied") }
     }
+    detail.addView(buttons)
+
+    outer.addView(row, LinearLayout.LayoutParams(-1, -2))
+    outer.addView(detail, LinearLayout.LayoutParams(-1, -2))
+    outer.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(18) })
+    return outer
 }
 
 /** The phone's contacts, in the order chosen with the sort button (names A to Z unless changed), optionally grouped by company; tap for a card with Edit, Call and Text. */
