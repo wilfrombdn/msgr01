@@ -65,8 +65,6 @@ object Format {
         return sb
     }
 
-    fun hasSpoiler(text: String) = Regex("(?s)\\|\\|(.+?)\\|\\|").containsMatchIn(text)
-
     /** Text with the markers taken out (chat list, notifications, reply quotes). Spoilers stay hidden. */
     fun plain(text: String): String {
         var t = Regex("(?s)\\|\\|(.+?)\\|\\|").replace(text) { "▒".repeat(minOf(it.groupValues[1].length, 12)) }

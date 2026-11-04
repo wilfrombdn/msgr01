@@ -1,0 +1,6 @@
+# Keep line endings the same on every computer (the repo stores LF; Windows would otherwise warn on every file).
+* text=auto eol=lf
+*.jks binary
+*.apk binary
+*.png binary
+*.jar binary

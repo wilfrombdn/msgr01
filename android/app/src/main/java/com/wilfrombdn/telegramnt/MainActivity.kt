@@ -2,17 +2,12 @@ package com.wilfrombdn.telegramnt
 
 import android.Manifest
 import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.text.Editable
-import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
@@ -20,26 +15,14 @@ import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowManager
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.HorizontalScrollView
-import androidx.core.view.children
 import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 
 /** Telegram-style dark look, every screen built in code (like League Radio). */
 class MainActivity : Activity() {

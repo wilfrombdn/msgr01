@@ -194,14 +194,4 @@ class Relay(server: String, private val socks: () -> Int? = { null }) {
     class RelayError(val code: Int, val reason: String) : IOException("server said $code $reason")
 
     private fun b64(b: ByteArray) = Base64.getEncoder().encodeToString(b)
-
-    companion object {
-        /** "192.168.1.98:8080" -> "http://192.168.1.98:8080" */
-        fun normalize(s: String): String {
-            var t = s.trim().trimEnd('/')
-            if (t.isEmpty()) return t
-            if (!t.startsWith("http://") && !t.startsWith("https://")) t = "http://$t"
-            return t
-        }
-    }
 }

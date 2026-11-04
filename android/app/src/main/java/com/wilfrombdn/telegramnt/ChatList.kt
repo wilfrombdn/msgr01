@@ -36,7 +36,6 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     if (mixed && phoneSub == "texts") phoneSub = "calls"   // texts already sit among the chats
     if (phoneSub == "folders" && folderPlace() != "tab") phoneSub = if (mixed) "calls" else "texts"
     val phoneOnly = textsTab && !showArchive
-    val textsOnly = phoneOnly && phoneSub == "texts"
     // everything else, keyed "u:<user>" / "g:<group>" so folders can hold either
     val rows = (all - requests.toSet()).map { Triple("u:${it.user}", it.lastTs, it as Any) } + grps.map { Triple("g:${it.id}", it.lastTs, it as Any) }
     fun rowFor(t: Triple<String, Long, Any>, bg: Int = listBg) = (t.third as? Contact)?.let { chatRow(it, t.first, bg) } ?: groupRow(t.third as Group, t.first, bg)
