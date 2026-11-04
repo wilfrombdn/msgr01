@@ -45,15 +45,19 @@ internal class BlobAvatar(private val seed: String) : Drawable() {
         canvas.restore()
     }
 
-    /** Two soft grey lights on a dark ground. */
+    /** A clearly visible grey disc: a mid-grey base that never matches the dark background, a bright soft light, a shadow, and a thin rim. */
     private fun drawGlow(c: Canvas) {
-        val r = { next() }
-        for (i in 0 until 2) {
-            val grey = if (i == 0) (150 + r() * 80).toInt() else (70 + r() * 60).toInt()
-            val col = Color.rgb(grey, grey, grey)
-            paint.shader = RadialGradient(8f + r() * 32f, 8f + r() * 32f, 22f + r() * 12f, col, Color.TRANSPARENT, Shader.TileMode.CLAMP)
-            c.drawRect(0f, 0f, 48f, 48f, paint)
-        }
+        val base = (88 + next() * 40).toInt()
+        val x0 = next() * 20f; val y0 = next() * 20f
+        paint.shader = LinearGradient(x0, y0, 48f - x0, 48f - y0, Color.rgb(base + 55, base + 55, base + 57), Color.rgb(base - 20, base - 20, base - 18), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, 48f, 48f, paint)
+        paint.shader = RadialGradient(6f + next() * 36f, 6f + next() * 36f, 24f, 0x66FFFFFF, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, 48f, 48f, paint)
+        paint.shader = RadialGradient(6f + next() * 36f, 6f + next() * 36f, 22f, 0x44000000, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, 48f, 48f, paint)
+        paint.shader = null; paint.style = Paint.Style.STROKE; paint.strokeWidth = 1.2f; paint.color = 0x40FFFFFF
+        c.drawCircle(24f, 24f, 23.4f, paint)
+        paint.style = Paint.Style.FILL
     }
 
     /** A rounded organic shape in greys with the faintest colour, and a glow behind it. */
