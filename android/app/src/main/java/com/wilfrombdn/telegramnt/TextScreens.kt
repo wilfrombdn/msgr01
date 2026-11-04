@@ -258,7 +258,7 @@ internal fun MainActivity.showTextList() {
     addTextRows(list, "")
     val frame = FrameLayout(this)
     frame.addView(ScrollView(this).apply { addView(list); isFillViewport = true })
-    frame.addView(newTextButton().also { snapHold(it, frame) }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
+    frame.addView(newTextButton().also { snapHold(it) }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
     setContentView(page(topBar("Texts", "Normal texts · not encrypted", icon(R.drawable.ic_back) { showWelcome() }), frame))
 }
 

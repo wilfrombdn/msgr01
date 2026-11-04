@@ -27,11 +27,11 @@ internal fun MainActivity.loadPhone() {
     })
 }
 
-/** The pencil of the Phone tab: new text, dial pad, or new contact. */
+/** The round button of the Phone tab: new text, dial pad, or new contact on a tap (always the camera icon; hold to snap). */
 internal fun MainActivity.phoneButton() = newTextButton().apply {
     when (phoneSub) {
-        "calls" -> { setImageResource(R.drawable.ic_call); setOnClickListener { runCatching { startActivity(Intent(Intent.ACTION_DIAL)) } } }
-        "contacts" -> { setImageResource(R.drawable.ic_add); setOnClickListener { showAddContact(null) { showChats() } } }
+        "calls" -> { setOnClickListener { runCatching { startActivity(Intent(Intent.ACTION_DIAL)) } } }
+        "contacts" -> { setOnClickListener { showAddContact(null) { showChats() } } }
     }
 }
 

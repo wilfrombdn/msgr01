@@ -7,61 +7,37 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
-// Snap: hold the camera button, slide onto Snap, caption it and send it to friends or by text.
+// Snap: hold the camera button and let go to open the camera, caption the shot and send it to friends or by text.
 
-/** Tap = the button's normal job. Hold = a "Snap" bubble pops up above it; slide onto it and release to open the camera. */
-internal fun MainActivity.snapHold(fab: View, frame: FrameLayout) {
+/**
+ * The round camera button. A tap does the button's normal job (new chat, new text, new contact, dial pad).
+ * Hold it until it buzzes and let go: the camera opens for a snap, no menu in between.
+ * Moving your finger off the button before it buzzes cancels both.
+ */
+internal fun MainActivity.snapHold(fab: View) {
     val ui = android.os.Handler(android.os.Looper.getMainLooper())
-    var bubble: View? = null
-    var open = false; var over = false; var cancelled = false
+    var armed = false; var cancelled = false
     var sx = 0f; var sy = 0f
-    val show = Runnable {
-        open = true
-        fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-        val b = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            background = round(menuBg, 28); elevation = dp(8).toFloat()
-            setPadding(dp(18), dp(12), dp(22), dp(12))
-            addView(icon(R.drawable.ic_camera, white, 22, 0))
-            addView(tv("Snap", 16f, white, true).apply { setPadding(dp(10), 0, 0, 0) })
-        }
-        frame.addView(b, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16 + 56 + 14)) })
-        bubble = b
-    }
-    fun close() { ui.removeCallbacks(show); bubble?.let { frame.removeView(it) }; bubble = null; open = false; fab.isPressed = false }
+    val arm = Runnable { armed = true; fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) }
     fab.setOnTouchListener { v, e ->
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 v.parent?.requestDisallowInterceptTouchEvent(true)
-                sx = e.rawX; sy = e.rawY; open = false; over = false; cancelled = false
-                v.isPressed = true; ui.postDelayed(show, 380)
+                sx = e.rawX; sy = e.rawY; armed = false; cancelled = false
+                v.isPressed = true; ui.postDelayed(arm, 380)
             }
-            MotionEvent.ACTION_MOVE -> {
-                val b = bubble
-                if (open && b != null) {
-                    val at = IntArray(2); b.getLocationOnScreen(at)
-                    val m = dp(14)
-                    val inside = e.rawX >= at[0] - m && e.rawX <= at[0] + b.width + m && e.rawY >= at[1] - m && e.rawY <= at[1] + b.height + m
-                    if (inside != over) {
-                        over = inside
-                        b.background = round(if (over) blue else menuBg, 28)
-                        b.animate().scaleX(if (over) 1.08f else 1f).scaleY(if (over) 1.08f else 1f).setDuration(90).start()
-                        if (over) b.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
-                    }
-                } else if (!open && Math.hypot((e.rawX - sx).toDouble(), (e.rawY - sy).toDouble()) > dp(12)) {
-                    cancelled = true; ui.removeCallbacks(show); v.isPressed = false   // dragged off before it opened: not a tap
+            MotionEvent.ACTION_MOVE ->
+                if (!armed && !cancelled && Math.hypot((e.rawX - sx).toDouble(), (e.rawY - sy).toDouble()) > dp(12)) {
+                    cancelled = true; ui.removeCallbacks(arm); v.isPressed = false   // dragged off before it buzzed: neither a tap nor a snap
                 }
-            }
             MotionEvent.ACTION_UP -> {
-                val go = open && over; val tap = !open && !cancelled
-                close()
-                if (go) startSnap() else if (tap) v.performClick()
+                ui.removeCallbacks(arm); v.isPressed = false
+                if (armed) startSnap() else if (!cancelled) v.performClick()
             }
-            MotionEvent.ACTION_CANCEL -> close()
+            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false }
         }
         true
     }

@@ -122,7 +122,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
         background = circle(white)
         elevation = dp(6).toFloat()
         setOnClickListener { showNewChat() }
-    }.let { if (phoneOnly) phoneButton() else it }.also { snapHold(it, frame) }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
+    }.let { if (phoneOnly) phoneButton() else it }.also { snapHold(it) }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
 
     val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
     else if (search.isNotEmpty() || screenSearch) searchBar() else {
