@@ -4,6 +4,13 @@
   `RELEASING.md` exactly: bump the version, build signed, copy the APK + write `update.json` with 2–4 brief plain-words
   notes in `~/wilfrombdn.github.io/telegramnt/`, push both repos, then run the live update check.
   Keep the list below of what's waiting, and use it for the update notes.
+- **Releasing is one command: `./release.sh <version> "note" "note" ...`** (2–4 plain-words notes). It does every step of
+  `RELEASING.md`: bump, ONE signed build, signing-key + version check, publish, push both repos, live check. Use it instead of doing the steps by hand.
+- **Keep builds fast:** do not run the full test suite or `ScreenshotTest` before a release (GitHub Actions runs everything on the push);
+  run only tests related to the change while working. Never run two Gradle builds at once (they lock each other's files and one fails);
+  wait for the first to finish. Leave the Gradle daemon running between builds (don't `--stop` it). On this Windows PC use
+  `JAVA_HOME="C:/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"` (there is no `~/opt/jdk21`).
+- The work lives in `~/msgr01` (the live repo). `~/Desktop/tellem` is an old copy: don't edit or release from it.
 - Explain things to the owner in plain words, keep lists short, give one recommendation.
 - While working, run only the tests related to the change. The full suite runs on GitHub Actions after each push.
 - Build: `cd android && JAVA_HOME=~/opt/jdk21 ANDROID_HOME=~/Android/Sdk bash ./gradlew assembleRelease`.

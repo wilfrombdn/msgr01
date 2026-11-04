@@ -48,3 +48,9 @@ The same APK is also posted at the usual download link for new installs.
 - `versionCode` must always go up, or phones won't offer the update.
 - The APK must be signed with the same key, or Android refuses to install it over the old one.
 - In the app, Settings → "Check for updates" checks right away and shows the result.
+
+## The quick way
+
+`./release.sh <version> "note" "note" ...` runs steps 1–5 above in one go (bump, one signed build, key + version check, publish,
+push both repos, live check). It skips the local test suite on purpose: GitHub Actions runs it on the push. Run it with no other
+Gradle build going.
