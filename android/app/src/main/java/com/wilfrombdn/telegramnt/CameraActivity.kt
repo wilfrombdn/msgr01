@@ -57,6 +57,12 @@ class CameraActivity : ComponentActivity() {
     private var pressY = 0f
     private var zoomAtPress = 1f
     private var holding = false
+    private var flashOn = false                    // per visit: a new camera always starts with the flash off
+    private var timerSecs = 0                      // per visit: a new camera always starts instant (0)
+    private var counting = false
+    private lateinit var flashBtn: TextView
+    private lateinit var timerBtn: TextView
+    private lateinit var countdown: TextView
     private var snap = false                       // snap mode: after the shot, add a caption and send
     private lateinit var rootView: FrameLayout
     private var editLayer: FrameLayout? = null
@@ -74,6 +80,7 @@ class CameraActivity : ComponentActivity() {
         snap = intent.getBooleanExtra("snap", false)
         cacheDir.resolve("camera").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
         setContentView(buildUi())
+        refreshControls()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
         else askPerms.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
     }
@@ -112,9 +119,20 @@ class CameraActivity : ComponentActivity() {
         root.addView(timer, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = d(28) })
 
         // close (X)
-        root.addView(iconButton("✕") { finish() }, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.START).apply { leftMargin = d(12); topMargin = d(20) })
+        root.addView(iconButton("✕") { cancelCountdown(); finish() }, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.START).apply { leftMargin = d(12); topMargin = d(20) })
         // flip camera
         root.addView(iconButton("⟲") { front = !front; startCamera() }, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.END).apply { rightMargin = d(12); topMargin = d(20) })
+        // flash and timer: both are off every time the camera opens (nothing is remembered)
+        flashBtn = iconButton("⚡") { flashOn = !flashOn; applyFlash(); refreshControls() }
+        root.addView(flashBtn, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.END).apply { rightMargin = d(12); topMargin = d(76) })
+        timerBtn = iconButton("⏱") { timerSecs = TIMER_STEPS[(TIMER_STEPS.indexOf(timerSecs) + 1) % TIMER_STEPS.size]; refreshControls() }
+        root.addView(timerBtn, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.END).apply { rightMargin = d(12); topMargin = d(132) })
+        countdown = TextView(this).apply {
+            setTextColor(Color.WHITE); textSize = 110f; gravity = Gravity.CENTER; visibility = View.GONE
+            setShadowLayer(d(8).toFloat(), 0f, 0f, 0xAA000000.toInt())
+        }
+        root.addView(countdown, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+        preview.setScreenFlashWindow(window)   // front camera: the screen lights up as the flash
 
         hint = TextView(this).apply {
             setTextColor(0xCCFFFFFF.toInt()); textSize = 13f; gravity = Gravity.CENTER
@@ -167,6 +185,8 @@ class CameraActivity : ComponentActivity() {
                     hint.text = "Tap for photo"
                 } catch (e2: Exception) { toast("Couldn't open the camera"); finish() }
             }
+            imageCapture?.screenFlash = preview.screenFlash   // front camera flash = the screen
+            applyFlash()
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -198,7 +218,7 @@ class CameraActivity : ComponentActivity() {
                 pressY = e.rawY
                 zoomAtPress = camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f
                 holding = true
-                if (videoCapture != null) ui.postDelayed(startVideo, 350)   // becomes a video if held
+                if (videoCapture != null && timerSecs == 0 && !counting) ui.postDelayed(startVideo, 350)   // becomes a video if held (the timer is for photos)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (recording != null) {
@@ -212,9 +232,54 @@ class CameraActivity : ComponentActivity() {
                 holding = false
                 ui.removeCallbacks(startVideo)
                 if (recording != null) stopVideo()
-                else if (SystemClock.uptimeMillis() - pressStart < 350) takePhoto()
+                else if (counting) cancelCountdown()
+                else if (SystemClock.uptimeMillis() - pressStart < 350 || timerSecs > 0) { if (timerSecs > 0) startCountdown(timerSecs) else takePhoto() }
             }
         }
+    }
+
+    // ---- flash and timer ----
+
+    /** Back camera: the LED. Front camera: the screen lights up white (CameraX's screen flash). */
+    private fun applyFlash() {
+        val ic = imageCapture ?: return
+        val hasLed = camera?.cameraInfo?.hasFlashUnit() == true
+        ic.flashMode = when { !flashOn -> ImageCapture.FLASH_MODE_OFF; hasLed -> ImageCapture.FLASH_MODE_ON; else -> ImageCapture.FLASH_MODE_SCREEN }
+        if (!flashOn || hasLed) camera?.cameraControl?.enableTorch(false)
+    }
+
+    private fun refreshControls() {
+        fun style(b: TextView, on: Boolean) {
+            b.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (on) 0xFFFFD60A.toInt() else 0x66000000) }
+            b.setTextColor(if (on) Color.BLACK else Color.WHITE)
+        }
+        style(flashBtn, flashOn)
+        style(timerBtn, timerSecs > 0)
+        timerBtn.text = if (timerSecs > 0) "${timerSecs}s" else "⏱"
+        timerBtn.textSize = if (timerSecs > 0) 15f else 22f
+        if (videoCapture != null) hint.text = if (timerSecs > 0) "Tap to start the ${timerSecs}s timer"
+            else "Tap for photo  ·  hold for video  ·  slide up to zoom\nDouble-tap the screen to flip the camera"
+    }
+
+    private fun startCountdown(from: Int) {
+        counting = true
+        var left = from
+        val step = object : Runnable {
+            override fun run() {
+                if (!counting) return
+                if (left == 0) { counting = false; countdown.visibility = View.GONE; takePhoto(); return }
+                countdown.text = "$left"; countdown.visibility = View.VISIBLE
+                countdown.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                left--
+                ui.postDelayed(this, 1000)
+            }
+        }
+        step.run()
+    }
+
+    private fun cancelCountdown() {
+        counting = false
+        countdown.visibility = View.GONE
     }
 
     private fun takePhoto() {
@@ -235,10 +300,12 @@ class CameraActivity : ComponentActivity() {
         val micOk = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         val pending = vc.output.prepareRecording(this, opts).apply { if (micOk) withAudioEnabled() }
         recordStart = SystemClock.uptimeMillis()
+        if (flashOn && camera?.cameraInfo?.hasFlashUnit() == true) camera?.cameraControl?.enableTorch(true)   // torch while filming
         shutter.background = ring(0xFFE53935.toInt(), 0x55E53935)
         timer.visibility = View.VISIBLE; hint.visibility = View.GONE
         recording = pending.start(ContextCompat.getMainExecutor(this)) { ev ->
             if (ev is VideoRecordEvent.Finalize) {
+                camera?.cameraControl?.enableTorch(false)
                 val hardError = ev.hasError() && ev.error != VideoRecordEvent.Finalize.ERROR_FILE_SIZE_LIMIT_REACHED
                 if (hardError || !file.exists() || file.length() == 0L) {
                     file.delete(); resetShutter(); toast("Couldn't record that video")
@@ -257,6 +324,7 @@ class CameraActivity : ComponentActivity() {
 
     private fun stopVideo() {
         recording?.stop()
+        camera?.cameraControl?.enableTorch(false)
         recording = null
     }
 
@@ -384,6 +452,7 @@ class CameraActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         if (recording != null) stopVideo()
+        cancelCountdown()
     }
 
     /** A short notice at the bottom in the app's style (not Android's grey toast). */
@@ -396,5 +465,9 @@ class CameraActivity : ComponentActivity() {
         }
         root.addView(v, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = d(84) })
         v.postDelayed({ v.animate().alpha(0f).setDuration(220).withEndAction { root.removeView(v) }.start() }, 2200)
+    }
+
+    private companion object {
+        val TIMER_STEPS = listOf(0, 3, 6, 10)   // seconds; 0 = instant
     }
 }
