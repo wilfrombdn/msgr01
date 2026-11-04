@@ -104,6 +104,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
         return
     }
     val scroll = ScrollView(this).apply { addView(list); isFillViewport = true }
+    chatsScroll = scroll
     // keep the list where you had it across refreshes (new messages, folder open/close)
     val y = chatsScrollY
     list.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
@@ -113,7 +114,8 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     })
     scroll.setOnScrollChangeListener { _, _, sy, _, _ -> chatsScrollY = sy }
     enableFolderDrops(list, scroll)
-    val frame = TabSwipeFrame(this, phoneOnly, { drawer?.openDrawer(GravityCompat.START) }) { d -> swipePhoneTab(d) }
+    val frame = TabSwipeFrame(this, phoneOnly, { drawer?.openDrawer(GravityCompat.START) }, { d -> canSwipePhoneTab(d) }, { animationsOn() }) { d, l -> swipePhoneTab(d, l) }
+    chatsFrame = frame
     frame.addView(scroll)
     // The round button sits in the middle of the gap between the Tellem | Phone switch and the right edge of the screen, and a
     // little above the bottom, so either thumb reaches it. (Until the switch has been measured, 3/4 of the way across is close.)
@@ -336,7 +338,11 @@ internal fun MainActivity.messageResults(list: LinearLayout, q: String) {
 
 /** Flip between the Tellem window and the Phone window (the bottom-left switch does this). */
 internal fun MainActivity.switchWindow() {
-    textsTab = !textsTab; chatsScrollY = 0; flipAnim = true; showChats()
+    val old = if (animationsOn()) contentRoot() else null
+    val dir = if (textsTab) -1 else 1   // to Phone: it comes in from the right; back to Tellem: from the left
+    textsTab = !textsTab; chatsScrollY = 0; flipAnim = old == null
+    showChats()
+    old?.let { slideScreens(it, dir) }
 }
 
 /**

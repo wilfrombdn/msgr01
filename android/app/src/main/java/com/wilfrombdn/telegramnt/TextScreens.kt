@@ -88,7 +88,7 @@ internal fun MainActivity.textTabs(chatsUnread: Int, mixed: Boolean): View = Lin
     }, LinearLayout.LayoutParams(0, -2, 1f))
     if (textsTab) {
         val sub = row().apply { setBackgroundColor(listBg) }
-        fun go(k: String) { if (phoneSub != k) { phoneSub = k; chatsScrollY = 0; showChats() } }
+        fun go(k: String) { if (phoneSub != k) { val o = phoneTabOrder(); gotoPhoneTab(k, if (o.indexOf(k) > o.indexOf(phoneSub)) 1 else -1) } }
         sub.tab("Contacts", 0, phoneSub == "contacts", 14f) { go("contacts") }
         sub.tab("Calls", 0, phoneSub == "calls", 14f) { go("calls") }
         if (!mixed) sub.tab("Texts", textsUnread(), phoneSub == "texts", 14f) { go("texts") }

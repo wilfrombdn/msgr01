@@ -17,8 +17,10 @@ sed -i "s/versionCode = $OLD/versionCode = $CODE/; s/versionName = \"[^\"]*\"/ve
 echo "== building $NAME (code $CODE)"
 bash ./gradlew assembleRelease -q
 APK=app/build/outputs/apk/release/app-release.apk
-PATH="$JAVA_HOME/bin:$PATH" "$APKSIGNER" verify --print-certs "$APK" | grep -q "8a1362da10d38afa" || { echo "WRONG SIGNING KEY, stopping"; exit 1; }
-"$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK" | head -1 | grep -q "versionCode='$CODE' versionName='$NAME'" || { echo "APK version mismatch, stopping"; exit 1; }
+SIGN=$(PATH="$JAVA_HOME/bin:$PATH" "$APKSIGNER" verify --print-certs "$APK")
+grep -q "8a1362da10d38afa" <<< "$SIGN" || { echo "WRONG SIGNING KEY, stopping"; exit 1; }
+BADGE=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK")
+grep -q "versionCode='$CODE' versionName='$NAME'" <<< "$BADGE" || { echo "APK version mismatch, stopping"; exit 1; }
 echo "== publishing"
 cd "$SITE" && git pull --rebase -q && cd "$PUB"
 cp "$REPO/android/$APK" msgr01.apk && cp msgr01.apk "tellem-$NAME.apk"

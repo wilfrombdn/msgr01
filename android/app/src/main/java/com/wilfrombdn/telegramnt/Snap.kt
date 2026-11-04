@@ -34,25 +34,33 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
     var armed = false; var cancelled = false
     var sx = 0f; var sy = 0f
     var grow: android.animation.ValueAnimator? = null
-    // Held long enough: the icon turns into a camera and the button grows by two thirds. It grows by really resizing (not by
-    // stretching a picture of itself), so the circle and the icon stay sharp the whole way. Quick: about a tenth of a second.
-    fun morph(on: Boolean) {
-        fab.setImageResource(if (on) R.drawable.ic_camera else res)
+    val base = dp(56); val swell = dp(63); val big = dp(93)   // normal, filling up while you hold, and the finished camera (1 2/3 bigger)
+    // The button really changes size (not a stretched picture of itself), so the circle and icon stay sharp the whole way.
+    fun setSize(lp: ViewGroup.LayoutParams, s: Int) {
+        lp.width = s; lp.height = s
+        val p = s * 16 / 56
+        fab.setPadding(p, p, p, p)
+        fab.layoutParams = lp
+    }
+    fun sizeTo(target: Int, ms: Long, ease: android.animation.TimeInterpolator) {
         val lp = fab.layoutParams ?: return
         grow?.cancel()
-        grow = android.animation.ValueAnimator.ofFloat(lp.width.toFloat(), dp(if (on) 93 else 56).toFloat()).apply {
-            duration = 110
-            addUpdateListener { a ->
-                val s = (a.animatedValue as Float).toInt()
-                lp.width = s; lp.height = s
-                val p = s * 16 / 56
-                fab.setPadding(p, p, p, p)
-                fab.layoutParams = lp
-            }
+        if (!animationsOn()) { setSize(lp, target); return }
+        grow = android.animation.ValueAnimator.ofFloat(lp.width.toFloat(), target.toFloat()).apply {
+            duration = ms; interpolator = ease
+            addUpdateListener { a -> setSize(lp, (a.animatedValue as Float).toInt()) }
             start()
         }
     }
-    val arm = Runnable { armed = true; fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); morph(true) }
+    // Like a balloon: it slowly fills while you hold, then pops out to full size with a bounce and the camera appears.
+    // Let go early or drag away and the air goes back out.
+    val deflate = { sizeTo(base, 140, android.view.animation.DecelerateInterpolator()) }
+    val arm = Runnable {
+        armed = true; fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        fab.setImageResource(R.drawable.ic_camera)
+        sizeTo(big, 320, android.view.animation.OvershootInterpolator(3.2f))
+    }
+    fun cancelArmed() { armed = false; fab.setImageResource(res); deflate() }
     fun outside(v: View, e: MotionEvent): Boolean {
         val m = dp(8)   // a little slack so a shaky thumb doesn't cancel
         return e.x < -m || e.y < -m || e.x > v.width + m || e.y > v.height + m
@@ -63,21 +71,22 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
                 v.parent?.requestDisallowInterceptTouchEvent(true)
                 sx = e.rawX; sy = e.rawY; armed = false; cancelled = false
                 v.isPressed = true; ui.postDelayed(arm, 380)
+                sizeTo(swell, 380, android.view.animation.AccelerateInterpolator(1.3f))   // starts filling right away
             }
             MotionEvent.ACTION_MOVE ->
                 if (!cancelled) {
                     if (armed) {
                         // dragged off the button after it turned into a camera: back to normal, no snap
-                        if (outside(v, e)) { cancelled = true; armed = false; v.isPressed = false; morph(false) }
+                        if (outside(v, e)) { cancelled = true; v.isPressed = false; cancelArmed() }
                     } else if (Math.hypot((e.rawX - sx).toDouble(), (e.rawY - sy).toDouble()) > dp(12)) {
-                        cancelled = true; ui.removeCallbacks(arm); v.isPressed = false   // dragged off before it buzzed: neither a tap nor a snap
+                        cancelled = true; ui.removeCallbacks(arm); v.isPressed = false; deflate()   // dragged off before it popped: neither a tap nor a snap
                     }
                 }
             MotionEvent.ACTION_UP -> {
                 ui.removeCallbacks(arm); v.isPressed = false
-                if (armed) { armed = false; morph(false); startSnap() } else if (!cancelled) v.performClick()
+                if (armed) { cancelArmed(); startSnap() } else { if (!cancelled) deflate(); if (!cancelled) v.performClick() }
             }
-            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false; if (armed) { armed = false; morph(false) } }
+            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false; if (armed) cancelArmed() else deflate() }
         }
         true
     }

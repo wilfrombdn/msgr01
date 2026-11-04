@@ -228,6 +228,8 @@ class MainActivity : Activity() {
 
     internal var screenSearch = false
     internal var chatsScrollY = 0
+    internal var chatsFrame: android.view.ViewGroup? = null   // the list area of the chat screen, and its scrolling list (for slide animations)
+    internal var chatsScroll: android.view.View? = null
     /** A chat is being dragged: hold off rebuilding the list (that would cancel the drag) until it's dropped. */
     internal var dragging = false
 

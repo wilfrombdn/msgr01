@@ -22,6 +22,8 @@ internal fun MainActivity.showSettings() {
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     col.addView(gap(8))
     col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
+    col.addView(settingSwitch("Animations", UiPrefs.animations(this)) { on -> UiPrefs.setAnimations(this, on) })
+    col.addView(settingNote("Sliding between screens and tabs, and the round button growing into a camera. Off: everything changes instantly."))
     col.addView(settingRow("Storage", "Photos, videos and files on this phone") { showStorage() })
     val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")
     col.addView(settingRow("Check for updates", "You have $APP_NAME $ver") { checkUpdateNow() })

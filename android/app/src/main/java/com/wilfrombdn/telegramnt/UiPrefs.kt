@@ -18,6 +18,10 @@ object UiPrefs {
     fun savedTellemOnly(ctx: Context) = prefs(ctx).getBoolean("savedTellemOnly", false)
     fun setSavedTellemOnly(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("savedTellemOnly", on).apply()
 
+    /** Slide and grow animations (on by default). Off: screens, tabs and the round button change instantly. */
+    fun animations(ctx: Context) = prefs(ctx).getBoolean("animations", true)
+    fun setAnimations(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("animations", on).apply()
+
     /** Where the text folders (Archive, Codes, Spam) show: "top", "bottom", "menu" or "tab". */
     fun folderPlace(ctx: Context) = prefs(ctx).getString("folders", "top") ?: "top"
     fun setFolderPlace(ctx: Context, place: String) = prefs(ctx).edit().putString("folders", place).apply()
