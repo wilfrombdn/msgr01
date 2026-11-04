@@ -26,9 +26,10 @@ object UiPrefs {
     fun haptics(ctx: Context) = prefs(ctx).getBoolean("haptics", false)
     fun setHaptics(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("haptics", on).apply()
 
-    /** Where the round button was dragged to: how far from the left edge, as a fraction of the screen width (-1 = the usual spot). */
-    fun fabX(ctx: Context) = prefs(ctx).getFloat("fabX", -1f)
-    fun setFabX(ctx: Context, x: Float) = prefs(ctx).edit().putFloat("fabX", x).apply()
+    /** A small classic tap vibration on every tap on a button, row or menu item. Off by default. */
+    fun tapHaptics(ctx: Context) = prefs(ctx).getBoolean("tapHaptics", false)
+    fun setTapHaptics(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("tapHaptics", on).apply()
+
 
     /** Contacts order: "name_az" (default), "name_za", "email_az" or "email_za"; and whether they are grouped by company. */
     fun contactSort(ctx: Context) = prefs(ctx).getString("contactSort", "name_az") ?: "name_az"

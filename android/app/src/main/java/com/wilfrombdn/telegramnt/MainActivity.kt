@@ -398,6 +398,11 @@ class MainActivity : Activity() {
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) { touchX = ev.rawX; touchY = ev.rawY; touchT = ev.eventTime }
         val handled = super.dispatchTouchEvent(ev)
+        // "Vibrate on every tap": a quick press-and-release on something tappable gives a small classic tap
+        if (ev.actionMasked == MotionEvent.ACTION_UP && UiPrefs.tapHaptics(this)) {
+            val s = ViewConfiguration.get(this).scaledTouchSlop
+            if (Math.abs(ev.rawX - touchX) < s && Math.abs(ev.rawY - touchY) < s && ev.eventTime - touchT < 300 && clickableAt(window.decorView, ev.rawX, ev.rawY) != null) tapBuzz()
+        }
         // a quick tap anywhere outside the composer closes the emoji panel and the keyboard, like Telegram
         if (ev.actionMasked == MotionEvent.ACTION_UP && (screen == Screen.CHAT || screen == Screen.GROUP)) {
             val slop = ViewConfiguration.get(this).scaledTouchSlop

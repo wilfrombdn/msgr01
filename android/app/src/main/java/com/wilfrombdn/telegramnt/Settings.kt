@@ -215,6 +215,8 @@ internal fun MainActivity.showAppearance() {
     col.addView(settingNote("Sliding between screens and tabs, and the round button growing into a camera. Off: everything changes instantly."))
     col.addView(settingSwitch("Vibrate when a hold works", UiPrefs.haptics(this)) { on -> UiPrefs.setHaptics(this, on); if (on) buzz() })
     col.addView(settingNote("A small buzz when a press-and-hold does something: menus opening, the round button turning into a camera, dragging a chat, recording a voice message."))
+    col.addView(settingSwitch("Vibrate on every tap", UiPrefs.tapHaptics(this)) { on -> UiPrefs.setTapHaptics(this, on); if (on) tapBuzz() })
+    col.addView(settingNote("A small, classic tap vibration whenever you tap a button, row or menu item."))
 
     fun section(t: String) = col.addView(tv(t, 14f, dim, true).apply { setPadding(dp(20), dp(20), dp(20), dp(8)) })
     fun chips(vararg items: Pair<String, Boolean>, onPick: (Int) -> Unit) = col.addView(LinearLayout(this).apply {

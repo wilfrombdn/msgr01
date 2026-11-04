@@ -288,7 +288,7 @@ internal fun MainActivity.errorText(e: Exception) = when (e) {
 internal fun MainActivity.pickList(title: String, sub: String?, items: Array<String>, onPick: (Int) -> Unit) {
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     items.forEachIndexed { i, label ->
-        col.addView(tv(label, 15.5f, white).apply { setPadding(dp(24), dp(13), dp(24), dp(13)); background = pressable(); setOnClickListener { listDialog?.dismiss(); onPick(i) } })
+        col.addView(tv(label, 15.5f, white).apply { setPadding(dp(24), dp(13), dp(24), dp(13)); background = pressable(); setOnClickListener { tapBuzz(); listDialog?.dismiss(); onPick(i) } })
     }
     val wrap = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -319,7 +319,7 @@ internal fun MainActivity.dropdown(anchor: View, side: Int, vararg items: Pair<S
     for ((label, action) in items) box.addView(tv(label, 16f, white).apply {
         minWidth = dp(200)
         setPadding(dp(22), dp(14), dp(30), dp(14)); background = pressable()
-        setOnClickListener { pw.dismiss(); action() }
+        setOnClickListener { tapBuzz(); pw.dismiss(); action() }
     })
     pw.elevation = dp(12).toFloat()
     pw.setBackgroundDrawable(GradientDrawable().apply { setColor(menuBg); setStroke(dp(1), divider); cornerRadius = dp(16).toFloat() })
@@ -372,7 +372,7 @@ internal fun MainActivity.popup(title: String, message: String?, content: View?,
             gravity = Gravity.CENTER; maxLines = 1
             setPadding(dp(14), dp(12), dp(14), dp(12))
             background = GradientDrawable().apply { setColor(fill); cornerRadius = dp(26).toFloat() }
-            setOnClickListener { d.dismiss(); onButton(i) }
+            setOnClickListener { tapBuzz(); d.dismiss(); onButton(i) }
         }, if (stacked) LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) } else LinearLayout.LayoutParams(0, -2, 1f).apply { if (i > 0) leftMargin = dp(10) })
     }
     col.addView(row, LinearLayout.LayoutParams(-1, -2))
@@ -429,7 +429,35 @@ internal fun MainActivity.imeVisible(): Boolean {
     return v.rootView.height - r.bottom > dp(120)
 }
 
-/** A small buzz for a press-and-hold that worked, only when Appearance → "Vibrate when a hold works" is on. */
-internal fun MainActivity.buzz(v: View? = null) {
-    if (UiPrefs.haptics(this)) (v ?: window.decorView).performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+/**
+ * Buzzes the phone's motor straight away. (The first version asked a view for "haptic feedback", which Android drops when the
+ * phone's own touch-vibration setting is off or the view is busy; this goes to the vibrator itself so it always happens.)
+ */
+private fun MainActivity.vibrateNow(strong: Boolean) {
+    runCatching {
+        val vib = getSystemService(android.os.Vibrator::class.java) ?: return
+        if (!vib.hasVibrator()) return
+        vib.vibrate(
+            if (android.os.Build.VERSION.SDK_INT >= 29) android.os.VibrationEffect.createPredefined(if (strong) android.os.VibrationEffect.EFFECT_HEAVY_CLICK else android.os.VibrationEffect.EFFECT_CLICK)
+            else android.os.VibrationEffect.createOneShot(if (strong) 30L else 12L, if (strong) 230 else 110)
+        )
+    }
+}
+
+/** A firm buzz for a press-and-hold that worked, only when Appearance → "Vibrate when a hold works" is on. */
+@Suppress("UNUSED_PARAMETER")
+internal fun MainActivity.buzz(v: View? = null) { if (UiPrefs.haptics(this)) vibrateNow(true) }
+
+/** The small classic tap vibration, only when Appearance → "Vibrate on every tap" is on. */
+internal fun MainActivity.tapBuzz() { if (UiPrefs.tapHaptics(this)) vibrateNow(false) }
+
+/** The deepest tappable view under the finger (null if the touch is on bare background, a text field, or a big list area). */
+internal fun clickableAt(root: View, x: Float, y: Float): View? {
+    if (root.visibility != View.VISIBLE) return null
+    val loc = IntArray(2); root.getLocationOnScreen(loc)
+    if (x < loc[0] || x >= loc[0] + root.width || y < loc[1] || y >= loc[1] + root.height) return null
+    if (root is ViewGroup) for (i in root.childCount - 1 downTo 0) clickableAt(root.getChildAt(i), x, y)?.let { return it }
+    if (root is android.widget.EditText) return null              // the keyboard has its own
+    if (root is ViewGroup && root.childCount > 8) return null     // the empty area of a chat is "clickable" (it closes the keyboard) but is not a button
+    return if (root.isClickable) root else null
 }

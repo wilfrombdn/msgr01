@@ -44,7 +44,7 @@ internal fun MainActivity.longPressMenu(mine: String?, onReact: ((String) -> Uni
             reactRow.addView(tv(e).apply {
                 textSize = 22f; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(6))
                 background = if (e == mine) android.graphics.drawable.ColorDrawable(raised) else pressable()
-                setOnClickListener { d.dismiss(); onReact(if (e == mine) "" else e) }   // tap your own to remove it
+                setOnClickListener { tapBuzz(); d.dismiss(); onReact(if (e == mine) "" else e) }   // tap your own to remove it
             }, LinearLayout.LayoutParams(0, -2, 1f))
         }
         reactRow.addView(tv("＋", 20f, dim).apply {
@@ -57,7 +57,7 @@ internal fun MainActivity.longPressMenu(mine: String?, onReact: ((String) -> Uni
     actions.forEach { (label, act) ->
         col.addView(tv(label, 16f, if (label.startsWith("Delete")) red else white).apply {
             background = pressable(); isClickable = true; setPadding(dp(18), dp(14), dp(28), dp(14)); minWidth = dp(210)
-            setOnClickListener { d.dismiss(); act() }
+            setOnClickListener { tapBuzz(); d.dismiss(); act() }
         })
     }
     val screenW = resources.displayMetrics.widthPixels
