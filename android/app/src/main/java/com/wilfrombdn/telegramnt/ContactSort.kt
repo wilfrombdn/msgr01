@@ -7,7 +7,7 @@ import android.widget.LinearLayout
 // The sort button next to the magnifying glass on the Phone window's Contacts tab:
 // pick the order (names or emails, A to Z or Z to A) and tick "Group by company".
 
-private val SORTS = listOf("name_az" to T("Name, A to Z"), "name_za" to T("Name, Z to A"), "email_az" to T("Email, A to Z"), "email_za" to T("Email, Z to A"))
+private val SORTS = listOf("name_az" to "Name, A to Z", "name_za" to "Name, Z to A", "email_az" to "Email, A to Z", "email_za" to "Email, Z to A")
 
 internal fun MainActivity.showSortMenu() {
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -28,8 +28,8 @@ internal fun MainActivity.showSortMenu() {
         }
         col.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { topMargin = dp(4); bottomMargin = dp(4) })
         val on = UiPrefs.groupByCompany(this)
-        col.addView(row(T("Group by company"), if (on) "☑" else "☐", if (on) blue else dim) { UiPrefs.setGroupByCompany(this, !on); showChats(); render() })
+        col.addView(row("Group by company", if (on) "☑" else "☐", if (on) blue else dim) { UiPrefs.setGroupByCompany(this, !on); showChats(); render() })
     }
     render()
-    popup(T("Sort contacts"), null, col, T("Done") to white, dialogOut = { dialog = it })
+    popup("Sort contacts", null, col, "Done" to white, dialogOut = { dialog = it })
 }

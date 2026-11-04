@@ -31,7 +31,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
     }
     fun toggleMode() {
         videoMode = !videoMode; showIcon()
-        if (videoMode) toast(T("Video message: hold to record. Tap to switch back to voice."))
+        if (videoMode) toast("Video message: hold to record. Tap to switch back to voice.")
     }
     showIcon()
     box.addTextChangedListener(object : TextWatcher {
@@ -41,7 +41,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
     })
     // while recording, the rest of the row is swapped for: red dot, timer, "slide to cancel"
     val timer = tv("0:00", 16f, white)
-    val slide = tv(T("‹  Slide to cancel"), 15f, dim)
+    val slide = tv("‹  Slide to cancel", 15f, dim)
     val dot = View(this).apply { background = circle(red) }
     val strip = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(12), 0, dp(12))
@@ -64,8 +64,8 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
         held = true
         btn.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         longPressMenu(null, null, listOf(
-            T("Send without sound") to { special(true, 0) },
-            T("Schedule message") to { pickSendTime { at -> special(false, at) } },
+            "Send without sound" to { special(true, 0) },
+            "Schedule message" to { pickSendTime { at -> special(false, at) } },
         ))
     }
     var startX = 0f
@@ -89,7 +89,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
         if (!active) return
         active = false; locked = false
         lockPop.dismiss(); lockPill.translationY = 0f
-        slide.setOnClickListener(null); slide.text = T("‹  Slide to cancel"); slide.setTextColor(dim)
+        slide.setOnClickListener(null); slide.text = "‹  Slide to cancel"; slide.setTextColor(dim)
         btn.setImageResource(R.drawable.ic_mic)
         h.removeCallbacks(tick)
         row.removeView(strip)
@@ -98,7 +98,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
         Voice.onLimit = null
         if (!sendIt) { Voice.cancel(); return }
         val got = Voice.finish()
-        if (got == null) { toast(T("Hold the mic to record, let go to send")); return }
+        if (got == null) { toast("Hold the mic to record, let go to send"); return }
         stick = true
         val (audio, th) = got
         Messenger.io.execute { runCatching { sendVoice(audio, th) } }
@@ -108,7 +108,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
         lockPop.dismiss()
         runCatching { getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createOneShot(25, 120)) }
         slide.translationX = 0f; slide.alpha = 1f
-        slide.text = T("Cancel"); slide.setTextColor(red)
+        slide.text = "Cancel"; slide.setTextColor(red)
         slide.setOnClickListener { end(false) }
         btn.setImageResource(R.drawable.ic_send); btn.scaleX = 1f; btn.scaleY = 1f
     }
@@ -141,7 +141,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
                     requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC_FOR_VOICE)
                     return@setOnTouchListener true
                 }
-                if (!Voice.start(this)) { toast(T("Couldn't use the microphone")); return@setOnTouchListener true }
+                if (!Voice.start(this)) { toast("Couldn't use the microphone"); return@setOnTouchListener true }
                 active = true; startX = e.rawX; startY = e.rawY
                 btn.parent?.requestDisallowInterceptTouchEvent(true)
                 runCatching { getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createOneShot(25, 120)) }
@@ -195,7 +195,7 @@ internal fun MainActivity.voiceView(m: Msg, ink: Int, onLong: () -> Unit): View 
         play.setImageResource(if (on) R.drawable.ic_pause else R.drawable.ic_play)
         wave.progress = Voice.progress(m.id)
         label.text = when {
-            !here -> if (cleared) T("Removed to save space") else if (m.mine) Voice.clock(secs) else T("Downloading…")
+            !here -> if (cleared) "Removed to save space" else if (m.mine) Voice.clock(secs) else "Downloading…"
             Voice.playingId == m.id -> Voice.clock(Voice.position(m.id))
             else -> Voice.clock(secs)
         }
@@ -203,7 +203,7 @@ internal fun MainActivity.voiceView(m: Msg, ink: Int, onLong: () -> Unit): View 
     fun tap(at: Float?) {
         when {
             here -> Voice.toggle(m.id, ::load, at)
-            cleared -> toast(T("This was removed from your phone to save space"))
+            cleared -> toast("This was removed from your phone to save space")
             else -> retryFetch(m)
         }
         refresh()

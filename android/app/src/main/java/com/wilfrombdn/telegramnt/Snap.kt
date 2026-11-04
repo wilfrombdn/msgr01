@@ -117,8 +117,8 @@ internal fun MainActivity.showSnapSend(uri: android.net.Uri, photo: Boolean, cap
     screen = Screen.SNAP_SEND; snapUri = uri
     val picked = LinkedHashSet<String>()   // "t:user" Tellem friend, "g:id" group, "s:number" text
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    val send = mainButton(T("Pick who to send to")) {}
-    fun refreshButton() { send.text = if (picked.isEmpty()) T("Pick who to send to") else T("Send to ${picked.size}"); send.alpha = if (picked.isEmpty()) 0.5f else 1f }
+    val send = mainButton("Pick who to send to") {}
+    fun refreshButton() { send.text = if (picked.isEmpty()) "Pick who to send to" else "Send to ${picked.size}"; send.alpha = if (picked.isEmpty()) 0.5f else 1f }
     refreshButton()
     fun heading(s: String) = col.addView(tv(s, 13.5f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
     fun row(into: LinearLayout, key: String, name: String, sub: String?, photoBytes: ByteArray?) {
@@ -142,22 +142,22 @@ internal fun MainActivity.showSnapSend(uri: android.net.Uri, photo: Boolean, cap
     val friends = core.contacts.toList().filter { it.canChat && it.status != Contact.SAVED }.sortedBy { it.name.lowercase() }
     val groups = core.groups.toList().sortedBy { it.name.lowercase() }
     if (friends.isNotEmpty() || groups.isNotEmpty()) {
-        heading(APP_NAME.uppercase() + T(" · private"))
+        heading(APP_NAME.uppercase() + " · private")
         friends.forEach { row(col, "t:${it.user}", it.name, "@${it.user}", it.avatar) }
         groups.forEach { row(col, "g:${it.id}", it.name, "group", null) }
     }
-    heading(T("TEXT · normal text, not encrypted") + if (photo) "" else T(" (photos only)"))
+    heading("TEXT · normal text, not encrypted" + if (photo) "" else " (photos only)")
     val numbers = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    val typed = field(T("Type a phone number")).apply { inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher()) }
+    val typed = field("Type a phone number").apply { inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher()) }
     col.addView(LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), 0, dp(20), dp(4))
         addView(typed, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(tv(T("Add"), 16f, blue, true).apply {
+        addView(tv("Add", 16f, blue, true).apply {
             setPadding(dp(14), dp(12), 0, dp(12))
             setOnClickListener {
                 val n = typed.text.toString().filter { it.isDigit() || it == '+' }
-                if (n.count { it.isDigit() } < 3) return@setOnClickListener toast(T("Type a phone number"))
-                if (picked.add("s:$n")) { row(numbers, "s:$n", typed.text.toString(), T("number you typed"), null); refreshButton() }
+                if (n.count { it.isDigit() } < 3) return@setOnClickListener toast("Type a phone number")
+                if (picked.add("s:$n")) { row(numbers, "s:$n", typed.text.toString(), "number you typed", null); refreshButton() }
                 typed.setText("")
             }
         })
@@ -174,16 +174,16 @@ internal fun MainActivity.showSnapSend(uri: android.net.Uri, photo: Boolean, cap
     col.addView(gap(24))
 
     send.setOnClickListener {
-        if (picked.isEmpty()) return@setOnClickListener toast(T("Pick at least one person"))
+        if (picked.isEmpty()) return@setOnClickListener toast("Pick at least one person")
         val sms = picked.filter { it.startsWith("s:") }.map { it.substring(2) }
-        if (sms.isNotEmpty() && !photo) return@setOnClickListener toast(T("Videos can only go to $APP_NAME friends"))
-        if (sms.isNotEmpty() && !Texts.isDefault(this)) return@setOnClickListener toast(T("To send picture texts, make $APP_NAME your texting app first"))
-        send.isEnabled = false; send.text = T("Sending…")
+        if (sms.isNotEmpty() && !photo) return@setOnClickListener toast("Videos can only go to $APP_NAME friends")
+        if (sms.isNotEmpty() && !Texts.isDefault(this)) return@setOnClickListener toast("To send picture texts, make $APP_NAME your texting app first")
+        send.isEnabled = false; send.text = "Sending…"
         val tellem = picked.filter { it.startsWith("t:") }.map { it.substring(2) }.mapNotNull { core.contact(it) }
         val grp = picked.filter { it.startsWith("g:") }.map { it.substring(2) }.mapNotNull { core.group(it) }
         Messenger.run({
             if (photo) {
-                val bmp = loadPhoto(uri, CAMERA_SIDE) ?: throw UserError(T("Couldn't open that photo"))
+                val bmp = loadPhoto(uri, CAMERA_SIDE) ?: throw UserError("Couldn't open that photo")
                 val data = jpeg(bmp, CAMERA_SIDE, 90); val thumb = thumbOf(bmp)
                 tellem.forEach { Messenger.sendFile(it, "snap.jpg", "image/jpeg", data, thumb) }
                 grp.forEach { Messenger.sendGroupFile(it, "snap.jpg", "image/jpeg", data, thumb) }
@@ -194,18 +194,18 @@ internal fun MainActivity.showSnapSend(uri: android.net.Uri, photo: Boolean, cap
                     sms.forEach { Texts.send(this, listOf(it), "", b to "image/jpeg") }
                 }
             } else {
-                val raw = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError(T("Couldn't read that video"))
-                if (raw.size > Core.MAX_FILE) throw UserError(T("That video is too big"))
+                val raw = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError("Couldn't read that video")
+                if (raw.size > Core.MAX_FILE) throw UserError("That video is too big")
                 val data = Mp4Clean.strip(raw)
                 tellem.forEach { Messenger.sendFile(it, "snap.mp4", "video/mp4", data, null); if (caption.isNotEmpty()) Messenger.send(it, caption) }
                 grp.forEach { Messenger.sendGroupFile(it, "snap.mp4", "video/mp4", data, null) }
             }
         }, {
             runCatching { contentResolver.delete(uri, null, null) }
-            toast(T("Sent")); leaveSnap()
+            toast("Sent"); leaveSnap()
         }) { e -> send.isEnabled = true; refreshButton(); toast(errorText(e)) }
     }
-    setContentView(page(topBar(T("Send snap"), null, icon(R.drawable.ic_back) { cancelSnap() }), LinearLayout(this).apply {
+    setContentView(page(topBar("Send snap", null, icon(R.drawable.ic_back) { cancelSnap() }), LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         addView(ScrollView(this@showSnapSend).apply { addView(col) }, LinearLayout.LayoutParams(-1, 0, 1f))
         addView(send, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(16), dp(8), dp(16), dp(16)) })

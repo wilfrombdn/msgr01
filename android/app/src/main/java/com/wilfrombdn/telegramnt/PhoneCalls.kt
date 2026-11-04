@@ -54,7 +54,7 @@ object PhoneCalls {
     /** Who to show: a saved contact's name, else the number the network gave, else "Unknown". */
     fun nameOf(ctx: Context, c: Call): String {
         val n = number(c)
-        if (n.isEmpty()) return c.details?.callerDisplayName?.takeIf { it.isNotBlank() } ?: T("Unknown")
+        if (n.isEmpty()) return c.details?.callerDisplayName?.takeIf { it.isNotBlank() } ?: "Unknown"
         return runCatching { Texts.name(ctx, n) }.getOrDefault(n)
     }
 
@@ -101,9 +101,9 @@ object PhoneCalls {
             val who = android.app.Person.Builder().setName(name).build()
             b.setStyle(Notification.CallStyle.forIncomingCall(who, decline, answer))
         } else {
-            b.setContentTitle(name).setContentText(if (ringing) T("Incoming call") else T("Phone call"))
-            if (ringing) { b.addAction(Notification.Action.Builder(null, T("Decline"), decline).build()); b.addAction(Notification.Action.Builder(null, T("Answer"), answer).build()) }
-            else b.addAction(Notification.Action.Builder(null, T("Hang up"), hang).build())
+            b.setContentTitle(name).setContentText(if (ringing) "Incoming call" else "Phone call")
+            if (ringing) { b.addAction(Notification.Action.Builder(null, "Decline", decline).build()); b.addAction(Notification.Action.Builder(null, "Answer", answer).build()) }
+            else b.addAction(Notification.Action.Builder(null, "Hang up", hang).build())
         }
         if (ringing) b.setFullScreenIntent(screen, true)
         runCatching { nm.notify(NOTE_ID, b.build()) }
@@ -113,7 +113,7 @@ object PhoneCalls {
         channels(ctx)
         val open = PendingIntent.getActivity(ctx, 5, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
         ctx.getSystemService(NotificationManager::class.java).notify(who.hashCode(), Notification.Builder(ctx, MISSED)
-            .setSmallIcon(R.drawable.ic_notify).setContentTitle(T("Missed call")).setContentText(who).setCategory(Notification.CATEGORY_MISSED_CALL)
+            .setSmallIcon(R.drawable.ic_notify).setContentTitle("Missed call").setContentText(who).setCategory(Notification.CATEGORY_MISSED_CALL)
             .setContentIntent(open).setAutoCancel(true).build())
     }
 }
@@ -210,7 +210,7 @@ class PhoneCallActivity : Activity() {
     private fun render() {
         try { renderNow() } catch (e: Exception) {   // never crash mid-call: show what went wrong and keep a way to hang up
             root.removeAllViews()
-            root.addView(TextView(this).apply { text = T("Call screen problem: ${e.javaClass.simpleName} ${e.message}"); setTextColor(Color.WHITE); setPadding(dp(24), dp(80), dp(24), dp(24)) })
+            root.addView(TextView(this).apply { text = "Call screen problem: ${e.javaClass.simpleName} ${e.message}"; setTextColor(Color.WHITE); setPadding(dp(24), dp(80), dp(24), dp(24)) })
             root.addView(circle("✆", 72, 0xFFE53935.toInt()) { PhoneCalls.primary()?.disconnect(); finish() })
         }
     }
@@ -226,9 +226,9 @@ class PhoneCallActivity : Activity() {
         val ringing = st == Call.STATE_RINGING
         val secs = if (c.details.connectTimeMillis > 0) (System.currentTimeMillis() - c.details.connectTimeMillis) / 1000 else 0
         val status = when (st) {
-            Call.STATE_RINGING -> T("Incoming phone call")
-            Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_PULLING_CALL -> T("Calling…")
-            Call.STATE_HOLDING -> T("On hold")
+            Call.STATE_RINGING -> "Incoming phone call"
+            Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_PULLING_CALL -> "Calling…"
+            Call.STATE_HOLDING -> "On hold"
             else -> "%d:%02d".format(secs / 60, secs % 60)
         }
         val audio = PhoneCalls.service?.callAudioState
@@ -247,15 +247,15 @@ class PhoneCallActivity : Activity() {
         })
         if (name != num && num.isNotEmpty()) root.addView(TextView(this).apply { text = num; setTextColor(0x99FFFFFF.toInt()); textSize = 15f; gravity = Gravity.CENTER })
         root.addView(TextView(this).apply { text = status; setTextColor(0xCCFFFFFF.toInt()); textSize = 17f; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) })
-        root.addView(TextView(this).apply { text = T("Normal phone call · not encrypted"); setTextColor(0x66FFFFFF.toInt()); textSize = 12.5f; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) })
+        root.addView(TextView(this).apply { text = "Normal phone call · not encrypted"; setTextColor(0x66FFFFFF.toInt()); textSize = 12.5f; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) })
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
 
         if (ringing) {
             root.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER
-                addView(labelledRound(T("Decline"), "✕", 0xFFE53935.toInt()) { c.reject(false, null) })
+                addView(labelledRound("Decline", "✕", 0xFFE53935.toInt()) { c.reject(false, null) })
                 addView(View(context), LinearLayout.LayoutParams(dp(80), 1))
-                addView(labelledRound(T("Answer"), "✆", 0xFF2EAD5B.toInt()) { c.answer(android.telecom.VideoProfile.STATE_AUDIO_ONLY) })
+                addView(labelledRound("Answer", "✆", 0xFF2EAD5B.toInt()) { c.answer(android.telecom.VideoProfile.STATE_AUDIO_ONLY) })
             }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(56) })
             return
         }
@@ -264,16 +264,16 @@ class PhoneCallActivity : Activity() {
         } else {
             root.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER
-                listOf(labelled(T("Mute"), "🎙", muted) { PhoneCalls.service?.setMuted(!muted); render() },
-                    labelled(T("Keypad"), "⌗", false) { keypad = true; render() },
-                    labelled(T("Speaker"), "🔊", speaker) { PhoneCalls.service?.setAudioRoute(if (speaker) CallAudioState.ROUTE_EARPIECE else CallAudioState.ROUTE_SPEAKER); render() },
-                    labelled(T("Hold"), "⏸", onHold) { if (onHold) c.unhold() else c.hold() }
+                listOf(labelled("Mute", "🎙", muted) { PhoneCalls.service?.setMuted(!muted); render() },
+                    labelled("Keypad", "⌗", false) { keypad = true; render() },
+                    labelled("Speaker", "🔊", speaker) { PhoneCalls.service?.setAudioRoute(if (speaker) CallAudioState.ROUTE_EARPIECE else CallAudioState.ROUTE_SPEAKER); render() },
+                    labelled("Hold", "⏸", onHold) { if (onHold) c.unhold() else c.hold() }
                 ).forEach { addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
             }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(28) })
         }
         root.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            if (keypad) addView(TextView(context).apply { text = T("Hide keypad"); setTextColor(Color.WHITE); textSize = 15f; setPadding(dp(20), dp(10), dp(30), dp(10)); setOnClickListener { keypad = false; render() } })
+            if (keypad) addView(TextView(context).apply { text = "Hide keypad"; setTextColor(Color.WHITE); textSize = 15f; setPadding(dp(20), dp(10), dp(30), dp(10)); setOnClickListener { keypad = false; render() } })
             addView(circle("✆", 72, 0xFFE53935.toInt()) { c.disconnect() }.apply { rotation = 135f })
         }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(48) })
     }
@@ -288,7 +288,7 @@ class PhoneCallActivity : Activity() {
         root.removeAllViews()
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         root.addView(TextView(this).apply { text = name; setTextColor(Color.WHITE); textSize = 26f; gravity = Gravity.CENTER })
-        root.addView(TextView(this).apply { text = T("Call ended"); setTextColor(0xCCFFFFFF.toInt()); textSize = 16f; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) })
+        root.addView(TextView(this).apply { text = "Call ended"; setTextColor(0xCCFFFFFF.toInt()); textSize = 16f; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) })
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         root.postDelayed({ if (PhoneCalls.primary()?.state != Call.STATE_RINGING) finish() }, 1200)
     }
@@ -324,10 +324,10 @@ class DialerActivity : Activity() {
                 background = GradientDrawable().apply { setColor(0x14FFFFFF); setStroke(dp(1), 0x40FFFFFF); cornerRadius = dp(22).toFloat() }
                 setOnClickListener { go() }
             }, LinearLayout.LayoutParams(-2, -2).apply { setMargins(dp(6), 0, dp(6), 0) })
-            chip(T("＋  Create contact")) {
+            chip("＋  Create contact") {
                 startActivity(Intent(this@DialerActivity, MainActivity::class.java).putExtra("addContact", PhoneFormat.pretty(digits.toString())))
             }
-            chip(T("💬  Send message")) {
+            chip("💬  Send message") {
                 startActivity(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", PhoneFormat.dialable(digits.toString()), null)).setPackage(packageName))
             }
         }

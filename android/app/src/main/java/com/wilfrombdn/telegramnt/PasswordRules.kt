@@ -13,11 +13,11 @@ object PasswordRules {
     /** A plain-words reason the password isn't good enough, or null when it is. */
     fun check(user: String, password: String): String? {
         val chars = password.codePointCount(0, password.length)
-        if (chars < MIN_LENGTH) return T("Password needs at least $MIN_LENGTH characters")
+        if (chars < MIN_LENGTH) return "Password needs at least $MIN_LENGTH characters"
         val lower = password.lowercase()
-        if (user.length >= 4 && lower.contains(user.lowercase())) return T("Your password can't contain your username")
-        if (password.toSet().size < 6) return T("That password repeats too much. Mix it up.")
-        if (password.all { it.isDigit() }) return T("A password can't be only numbers")
+        if (user.length >= 4 && lower.contains(user.lowercase())) return "Your password can't contain your username"
+        if (password.toSet().size < 6) return "That password repeats too much. Mix it up."
+        if (password.all { it.isDigit() }) return "A password can't be only numbers"
         // Four views of the same password, so tricks don't get it past the list: as typed, with letter swaps undone
         // (p@ssw0rd -> password), and each of those again without trailing digits/symbols ("Password123456" -> password).
         val typed = lower.filter { it.isLetterOrDigit() }
@@ -26,11 +26,11 @@ object PasswordRules {
         val head = normalize(lower.trimEnd { !it.isLetter() })
         if (listOf(typed, swapped, headOfTyped, head).any { it.isNotEmpty() && it in COMMON } ||
             BASES.any { b -> head == b || head == b + b || head == b + b + b })
-            return T("That password is too common. Pick something only you would think of.")
+            return "That password is too common. Pick something only you would think of."
         val plain = swapped
-        if (isRun(plain) || isRun(typed) || isRepeatedBlock(plain)) return T("That password is a simple pattern. Pick something less predictable.")
+        if (isRun(plain) || isRun(typed) || isRepeatedBlock(plain)) return "That password is a simple pattern. Pick something less predictable."
         if (chars < PASSPHRASE_LENGTH && classes(password) < 3)
-            return T("Mix upper and lower case, numbers or symbols, or make it $PASSPHRASE_LENGTH+ characters (a few random words works well)")
+            return "Mix upper and lower case, numbers or symbols, or make it $PASSPHRASE_LENGTH+ characters (a few random words works well)"
         return null
     }
 

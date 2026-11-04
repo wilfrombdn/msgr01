@@ -86,8 +86,8 @@ object Updater {
                 if (f.length() > before) fails = 0   // it got further: the line is just shaky, keep going
                 if (++fails > RETRIES) throw e
                 val wait = RETRY_WAIT[minOf(fails, RETRY_WAIT.size) - 1]
-                for (left in wait downTo 1) { waiting(T("Connection dropped — trying again in ${left}s…")); Thread.sleep(1000) }
-                waiting(T("Reconnecting…"))
+                for (left in wait downTo 1) { waiting("Connection dropped — trying again in ${left}s…"); Thread.sleep(1000) }
+                waiting("Reconnecting…")
             }
         }
     }
@@ -130,7 +130,7 @@ class UpdateReceiver : BroadcastReceiver() {
                     confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let { runCatching { ctx.startActivity(it) } }
                 }
                 PackageInstaller.STATUS_SUCCESS -> Updater.onStatus?.invoke(null)
-                else -> Updater.onStatus?.invoke(i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: T("Update didn't install"))
+                else -> Updater.onStatus?.invoke(i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Update didn't install")
             }
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 Updater.clear(ctx)
@@ -142,7 +142,7 @@ class UpdateReceiver : BroadcastReceiver() {
                 val tap = PendingIntent.getActivity(ctx, 8, open, PendingIntent.FLAG_IMMUTABLE)
                 val name = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault("")
                 ctx.getSystemService(NotificationManager::class.java).notify(77, Notification.Builder(ctx, SyncService.CH_MSG)
-                    .setSmallIcon(R.drawable.ic_notify).setContentTitle(T("$APP_NAME updated to $name")).setContentText(T("Tap to open"))
+                    .setSmallIcon(R.drawable.ic_notify).setContentTitle("$APP_NAME updated to $name").setContentText("Tap to open")
                     .setContentIntent(tap).setAutoCancel(true).setTimeoutAfter(10 * 60_000).build())
             }
         }

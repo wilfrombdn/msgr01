@@ -19,14 +19,6 @@ import java.io.FileOutputStream
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
 class ScreenshotTest {
-    // TELLEM_LANG=ru (or uk) renders every screen in that language into build/shots-ru (or -uk); otherwise English, into build/shots
-    private val lang = System.getenv("TELLEM_LANG").orEmpty()
-    private val shots = "build/shots" + if (lang.isNotEmpty()) "-$lang" else ""
-    init {
-        I18n.loader = { code -> File("src/main/assets/i18n/$code.json").takeIf { it.exists() }?.readText() }
-        I18n.setLanguage(lang.ifEmpty { "en" })
-    }
-
     private fun fakeCore(signedIn: Boolean): Core {
         val core = Core("https://chat.example")
         if (!signedIn) return core
@@ -96,7 +88,7 @@ class ScreenshotTest {
             android.view.View.MeasureSpec.makeMeasureSpec(2340, android.view.View.MeasureSpec.EXACTLY))
         v.layout(0, 0, 1080, 2340)
         v.draw(Canvas(bmp))
-        val dir = File(shots).apply { mkdirs() }
+        val dir = File("build/shots").apply { mkdirs() }
         FileOutputStream(File(dir, "$name.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         File(dir, "$name.tree.txt").writeText(StringBuilder().also { dumpTree(v, 0, it) }.toString())
     }
@@ -215,7 +207,7 @@ class ScreenshotTest {
     /** 4.4: icon (with the round mask), folders, the long-press menu, and the react-bar ranking. */
     @Test fun v44() {
         val ctx = org.robolectric.RuntimeEnvironment.getApplication()
-        val dir = File(shots).apply { mkdirs() }
+        val dir = File("build/shots").apply { mkdirs() }
         val ic = Bitmap.createBitmap(432, 432, Bitmap.Config.ARGB_8888)
         Canvas(ic).apply {
             val path = android.graphics.Path().apply { addCircle(216f, 216f, 216f, android.graphics.Path.Direction.CW) }
@@ -273,7 +265,7 @@ class ScreenshotTest {
             v.layout(0, 0, v.measuredWidth, v.measuredHeight)
             val bmp = Bitmap.createBitmap(v.measuredWidth, v.measuredHeight, Bitmap.Config.ARGB_8888)
             Canvas(bmp).drawColor(android.graphics.Color.GRAY); v.draw(Canvas(bmp))
-            FileOutputStream(File(shots, "41-popup.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            FileOutputStream(File("build/shots", "41-popup.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
     }
 

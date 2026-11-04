@@ -26,7 +26,7 @@ class SyncService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, CH_CONN)
             .setSmallIcon(R.drawable.ic_notify)
-            .setContentTitle(T("$APP_NAME connected"))
+            .setContentTitle("$APP_NAME connected")
             .setContentIntent(open)
             .setOngoing(true)
             .build()
@@ -65,7 +65,7 @@ class SyncService : Service() {
             val open = PendingIntent.getActivity(ctx, g.id.hashCode(), Intent(ctx, MainActivity::class.java).putExtra("group", g.id),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val n = Notification.Builder(ctx, CH_MSG).setSmallIcon(R.drawable.ic_notify)
-                .setContentTitle(if (Messenger.notifyNames) g.name else APP_NAME).setContentText(if (Messenger.notifyNames) T("You were mentioned") else T("New message"))
+                .setContentTitle(if (Messenger.notifyNames) g.name else APP_NAME).setContentText(if (Messenger.notifyNames) "You were mentioned" else "New message")
                 .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open).setAutoCancel(true).build()
             ctx.getSystemService(NotificationManager::class.java).notify(g.id.hashCode(), n)
         }
@@ -83,9 +83,9 @@ class SyncService : Service() {
             )
             val last = synchronized(Messenger.core) { c.msgs.lastOrNull() }
             val summary = when {
-                c.status == Contact.ASKING && last?.mine != false -> T("Wants to be your friend")
-                last?.call?.optString("s") == "missed" -> T("Missed call")
-                else -> T("New message")
+                c.status == Contact.ASKING && last?.mine != false -> "Wants to be your friend"
+                last?.call?.optString("s") == "missed" -> "Missed call"
+                else -> "New message"
             }
             val b = Notification.Builder(ctx, CH_MSG)
                 .setSmallIcon(R.drawable.ic_notify)
@@ -95,7 +95,7 @@ class SyncService : Service() {
                 .setContentIntent(open)
                 .setAutoCancel(true)
             if (!Messenger.notifyNames) {
-                b.setContentTitle(APP_NAME).setContentText(T("New message"))
+                b.setContentTitle(APP_NAME).setContentText("New message")
             } else {
                 b.setContentTitle(c.name)
                 // with app lock on, the chats stay behind it: no text in notifications either
@@ -114,10 +114,10 @@ class SyncService : Service() {
         private fun chatStyle(name: String, msgs: List<Msg>): Notification.MessagingStyle =
             if (Build.VERSION.SDK_INT >= 28) {
                 val them = android.app.Person.Builder().setName(name).build()
-                Notification.MessagingStyle(android.app.Person.Builder().setName(T("You")).build())
+                Notification.MessagingStyle(android.app.Person.Builder().setName("You").build())
                     .apply { msgs.forEach { addMessage(preview(it), it.ts, them) } }
             } else {
-                Notification.MessagingStyle(T("You")).apply { msgs.forEach { addMessage(preview(it), it.ts, name) } }
+                Notification.MessagingStyle("You").apply { msgs.forEach { addMessage(preview(it), it.ts, name) } }
             }
 
         /** What the lock screen shows when the phone hides private notification content. */

@@ -81,7 +81,7 @@ class RoundActivity : ComponentActivity() {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
                 addView(preview, LinearLayout.LayoutParams(size, size))
                 addView(timer, LinearLayout.LayoutParams(-2, -2).apply { topMargin = d(18) })
-                addView(TextView(context).apply { text = T("Tap the red button to send"); setTextColor(0x99FFFFFF.toInt()); textSize = 14f; setPadding(0, d(6), 0, 0) })
+                addView(TextView(context).apply { text = "Tap the red button to send"; setTextColor(0x99FFFFFF.toInt()); textSize = 14f; setPadding(0, d(6), 0, 0) })
             }, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
             addView(send, FrameLayout.LayoutParams(d(74), d(74), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = d(40) })
             addView(cancel, FrameLayout.LayoutParams(d(52), d(52), Gravity.BOTTOM or Gravity.START).apply { leftMargin = d(36); bottomMargin = d(51) })

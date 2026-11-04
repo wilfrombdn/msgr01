@@ -57,7 +57,7 @@ class QrActivity : ComponentActivity() {
                 orientation = android.widget.LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
                 setBackgroundColor(0x99000000.toInt()); setPadding(0, (20 * d).toInt(), 0, (36 * d).toInt())
                 addView(TextView(context).apply {
-                    text = T("Scan a friend's $APP_NAME QR code to add them"); setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER
+                    text = "Scan a friend's $APP_NAME QR code to add them"; setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER
                     setPadding((24 * d).toInt(), 0, (24 * d).toInt(), 0)
                 })
             }, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))

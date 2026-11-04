@@ -11,7 +11,6 @@ import com.google.crypto.tink.RegistryConfiguration
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
 import org.json.JSONObject
 import java.io.File
-import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
@@ -182,27 +181,11 @@ object Messenger {
         mirrorTexts()
         applyRoute()
         PushService.register(app)
-        startLanguage(app)
         locked = appLock   // a fresh start always asks
         (app as? android.app.Application)?.let { watchForeground(it) }
         // once only: every screen and service calls init, and running it again swapped in a fresh Core,
         // which dropped a call in progress (the call screen saw "no call" and closed; Hang up did nothing)
         ready = true
-    }
-
-    private val systemLocale: Locale = Locale.getDefault()
-
-    /** Reads the translations from the app and picks the language: the person's choice, or the phone's own. */
-    fun startLanguage(ctx: Context) {
-        I18n.loader = { code -> ctx.assets.open("i18n/$code.json").bufferedReader(Charsets.UTF_8).use { it.readText() } }
-        applyLanguage(UiPrefs.language(ctx))
-    }
-
-    /** [choice] is "auto" or a language code. Dates and numbers follow it too. */
-    fun applyLanguage(choice: String) {
-        val code = if (choice == "auto") I18n.fromSystem() else choice
-        I18n.setLanguage(code)
-        Locale.setDefault(if (choice == "auto") systemLocale else Locale(code))
     }
 
     /** For screenshots/tests: no Keystore, nothing saved. */
@@ -364,7 +347,7 @@ object Messenger {
         CallAudio.start(ctx, k)
         ui.postDelayed({
             if (core.call === k && k.phase <= Core.Call.RINGING) {
-                if (!connected) k.problem = T("Couldn't connect. Check your internet and try again.")
+                if (!connected) k.problem = "Couldn't connect. Check your internet and try again."
                 io.execute { core.hangUp("noanswer") }
             }
         }, Core.RING_MS)
@@ -443,7 +426,7 @@ object Messenger {
             app.contentResolver.openOutputStream(Uri.parse(recoveryUri), "wt")?.use { it.write(core.fullBackup()) }
             null
         } catch (e: Exception) {
-            T("Couldn't update your recovery file. Pick it again in Settings.")
+            "Couldn't update your recovery file. Pick it again in Settings."
         }
     }
 
@@ -580,7 +563,7 @@ object Messenger {
             // Until it does, nothing else may go to it ([Relay.directVerified]).
             val real = ok && core.relay.verifyIdentity()
             core.relay.directVerified = real
-            directProblem = if (ok && !real) T("That isn't the real $APP_NAME server, so Direct is blocked. Switch back to Tor.") else null
+            directProblem = if (ok && !real) "That isn't the real $APP_NAME server, so Direct is blocked. Switch back to Tor." else null
             if (!real) ok = false
         } else directProblem = null
         val now = System.currentTimeMillis()
@@ -698,7 +681,7 @@ object Messenger {
     fun forward(m: Msg, from: String, c: Contact?, g: Group?) {
         val f = m.file
         if (f != null) {
-            val data = core.openFile(m) ?: throw UserError(T("That isn't on this phone"))
+            val data = core.openFile(m) ?: throw UserError("That isn't on this phone")
             val th = f.optString("th").takeIf { it.isNotEmpty() }?.let { java.util.Base64.getDecoder().decode(it) }
             if (g != null) {
                 val msg = core.queueGroupFile(g, f.optString("n"), f.optString("m"), data, th)
@@ -746,7 +729,7 @@ object Messenger {
                     if (System.currentTimeMillis() - lastCheck > 5 * 60_000) {
                         lastCheck = System.currentTimeMillis()
                         if (!core.sessionOk()) {
-                            signedOutReason = T("You signed in on another phone, so this one was signed out.")
+                            signedOutReason = "You signed in on another phone, so this one was signed out."
                             core.signOut()
                             continue
                         }
@@ -806,12 +789,12 @@ class Look {
 
     companion object {
         val BUBBLES = listOf(
-            T("Graphite") to 0xFF3A3A3C.toInt(), T("Charcoal") to 0xFF242426.toInt(), T("Black") to 0xFF000000.toInt(),
-            T("Blue") to 0xFF2B5278.toInt(), T("Green") to 0xFF2E5E3E.toInt(), T("Teal") to 0xFF1F5C5C.toInt(),
-            T("Purple") to 0xFF4A3A6B.toInt(), T("Red") to 0xFF6B2E2E.toInt(), T("Amber") to 0xFF8A5A12.toInt(),
-            T("White") to 0xFFE8E8EA.toInt(),
+            "Graphite" to 0xFF3A3A3C.toInt(), "Charcoal" to 0xFF242426.toInt(), "Black" to 0xFF000000.toInt(),
+            "Blue" to 0xFF2B5278.toInt(), "Green" to 0xFF2E5E3E.toInt(), "Teal" to 0xFF1F5C5C.toInt(),
+            "Purple" to 0xFF4A3A6B.toInt(), "Red" to 0xFF6B2E2E.toInt(), "Amber" to 0xFF8A5A12.toInt(),
+            "White" to 0xFFE8E8EA.toInt(),
         )
-        val UI_SIZES = listOf(T("Small") to 0.9f, T("Default") to 1f, T("Large") to 1.15f, T("Larger") to 1.3f)
+        val UI_SIZES = listOf("Small" to 0.9f, "Default" to 1f, "Large" to 1.15f, "Larger" to 1.3f)
         val MSG_SIZES = listOf(14f, 16f, 18f, 20f, 23f)
 
         /** Black text on light bubbles, white on dark. */

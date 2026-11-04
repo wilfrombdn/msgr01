@@ -28,10 +28,6 @@ object UiPrefs {
     fun groupByCompany(ctx: Context) = prefs(ctx).getBoolean("groupCompany", false)
     fun setGroupByCompany(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("groupCompany", on).apply()
 
-    /** The language of the app's own text: "auto" (follow the phone, the default) or a code from [I18n.SUPPORTED]. */
-    fun language(ctx: Context) = prefs(ctx).getString("lang", "auto") ?: "auto"
-    fun setLanguage(ctx: Context, code: String) = prefs(ctx).edit().putString("lang", code).apply()
-
     /** Where the text folders (Archive, Codes, Spam) show: "top", "bottom", "menu" or "tab". */
     fun folderPlace(ctx: Context) = prefs(ctx).getString("folders", "top") ?: "top"
     fun setFolderPlace(ctx: Context, place: String) = prefs(ctx).edit().putString("folders", place).apply()

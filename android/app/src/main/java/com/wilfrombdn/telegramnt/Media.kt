@@ -28,12 +28,12 @@ internal fun MainActivity.copyImage(m: Msg) {
     Messenger.run({ out = unlockedCopy(m) }, {
         val uri = androidx.core.content.FileProvider.getUriForFile(this, "com.wilfrombdn.telegramnt.files", out!!)
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newUri(contentResolver, "photo", uri))
-        toast(T("Photo copied"))
+        toast("Photo copied")
     }) { e -> toast(errorText(e)) }
 }
 
 internal fun MainActivity.unlockedCopy(m: Msg): File {
-    val bytes = Messenger.core.openFile(m) ?: throw UserError(T("Couldn't open that photo"))
+    val bytes = Messenger.core.openFile(m) ?: throw UserError("Couldn't open that photo")
     val name = m.file?.optString("n")?.takeIf { it.isNotBlank() }?.replace('/', '_') ?: "photo.jpg"
     return File(File(cacheDir, "open").apply { mkdirs() }, name).apply { writeBytes(bytes) }
 }
@@ -49,7 +49,7 @@ internal fun MainActivity.downloadImage(m: Msg) {
         return
     }
     Messenger.run({
-        val bytes = Messenger.core.openFile(m) ?: throw UserError(T("Couldn't open that photo"))
+        val bytes = Messenger.core.openFile(m) ?: throw UserError("Couldn't open that photo")
         val values = android.content.ContentValues().apply {
             put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
             put(android.provider.MediaStore.Images.Media.MIME_TYPE, f.optString("m", "image/jpeg"))
@@ -57,19 +57,19 @@ internal fun MainActivity.downloadImage(m: Msg) {
             put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
         }
         val r = contentResolver
-        val uri = r.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: throw UserError(T("Couldn't save the photo"))
-        r.openOutputStream(uri)?.use { it.write(bytes) } ?: throw UserError(T("Couldn't save the photo"))
+        val uri = r.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: throw UserError("Couldn't save the photo")
+        r.openOutputStream(uri)?.use { it.write(bytes) } ?: throw UserError("Couldn't save the photo")
         values.clear(); values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
         r.update(uri, values, null, null)
-    }, { toast(T("Saved to Pictures/$APP_NAME")) }) { e -> toast(errorText(e)) }
+    }, { toast("Saved to Pictures/$APP_NAME") }) { e -> toast(errorText(e)) }
 }
 
 internal fun MainActivity.saveImageTo(uri: android.net.Uri) {
     val m = pendingSave ?: return; pendingSave = null
     Messenger.run({
-        val bytes = Messenger.core.openFile(m) ?: throw UserError(T("Couldn't open that photo"))
+        val bytes = Messenger.core.openFile(m) ?: throw UserError("Couldn't open that photo")
         contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-    }, { toast(T("Photo saved")) }) { e -> toast(errorText(e)) }
+    }, { toast("Photo saved") }) { e -> toast(errorText(e)) }
 }
 
 internal fun MainActivity.jpeg(b: android.graphics.Bitmap, maxSide: Int, quality: Int): ByteArray {
@@ -117,12 +117,12 @@ internal fun MainActivity.attachmentView(m: Msg, ink: Int, onLong: () -> Unit = 
                 setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(Color.parseColor("#88000000"), 4)
             }, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(dp(6), dp(6), 0, 0) })
             val cleared = f.optBoolean("cleared")
-            if (!here) addView(tv(if (cleared) T("Removed to save space") else if (m.mine) "" else if (ask) T("⬇  ${if (isGif(m)) "GIF" else "Photo"} · ${sizeText(f.optInt("s"))}\nTap to download") else T("Downloading…"), 13f, Color.WHITE).apply {
+            if (!here) addView(tv(if (cleared) "Removed to save space" else if (m.mine) "" else if (ask) "⬇  ${if (isGif(m)) "GIF" else "Photo"} · ${sizeText(f.optInt("s"))}\nTap to download" else "Downloading…", 13f, Color.WHITE).apply {
                 gravity = Gravity.CENTER
                 setPadding(dp(8), dp(4), dp(8), dp(4))
                 background = round(Color.parseColor("#99000000"), 10)
             }, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
-            setOnClickListener { if (here) showImage(m) else if (cleared) toast(T("This was removed from your phone to save space")) else retryFetch(m) }
+            setOnClickListener { if (here) showImage(m) else if (cleared) toast("This was removed from your phone to save space") else retryFetch(m) }
             setOnLongClickListener { onLong(); true }
             layoutParams = LinearLayout.LayoutParams(w, h).apply { bottomMargin = dp(4) }
         }
@@ -135,9 +135,9 @@ internal fun MainActivity.attachmentView(m: Msg, ink: Int, onLong: () -> Unit = 
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), 0, 0, 0)
             addView(tv(f.optString("n"), 15f, ink, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.MIDDLE })
-            addView(tv(sizeText(f.optInt("s")) + if (here) "" else if (f.optBoolean("cleared")) T(" · removed to save space") else if (m.mine) "" else if (askToDownload(m)) T(" · tap to download") else T(" · downloading…"), 13f, (ink and 0x00FFFFFF) or (0x99 shl 24)))
+            addView(tv(sizeText(f.optInt("s")) + if (here) "" else if (f.optBoolean("cleared")) " · removed to save space" else if (m.mine) "" else if (askToDownload(m)) " · tap to download" else " · downloading…", 13f, (ink and 0x00FFFFFF) or (0x99 shl 24)))
         })
-        setOnClickListener { if (here) openOutside(m) else if (f.optBoolean("cleared")) toast(T("This was removed from your phone to save space")) else retryFetch(m) }
+        setOnClickListener { if (here) openOutside(m) else if (f.optBoolean("cleared")) toast("This was removed from your phone to save space") else retryFetch(m) }
         setOnLongClickListener { onLong(); true }
     }
 }
@@ -165,10 +165,10 @@ internal fun MainActivity.onceView(m: Msg, ink: Int, onLong: () -> Unit): View {
     val f = m.file!!
     val here = f.has("local")
     val (title, sub) = when {
-        m.mine -> T("View once photo") to if (m.state == Msg.SENDING) T("Sending…") else T("Sent. Only they can open it, once")
-        f.optBoolean("opened") -> T("View once photo") to T("Opened")
-        !here -> T("View once photo") to if (askToDownload(m)) T("Tap to download") else T("Downloading…")
-        else -> T("View once photo") to T("Tap to view. It disappears after")
+        m.mine -> "View once photo" to if (m.state == Msg.SENDING) "Sending…" else "Sent. Only they can open it, once"
+        f.optBoolean("opened") -> "View once photo" to "Opened"
+        !here -> "View once photo" to if (askToDownload(m)) "Tap to download" else "Downloading…"
+        else -> "View once photo" to "Tap to view. It disappears after"
     }
     return LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), dp(6), dp(4))
@@ -193,16 +193,16 @@ internal fun MainActivity.onceView(m: Msg, ink: Int, onLong: () -> Unit): View {
 internal fun MainActivity.showOnce(m: Msg) {
     var bmp: android.graphics.Bitmap? = null
     Messenger.run({
-        val bytes = Messenger.core.openViewOnce(m) ?: throw UserError(T("This photo can't be opened again"))
+        val bytes = Messenger.core.openViewOnce(m) ?: throw UserError("This photo can't be opened again")
         Messenger.save()
         bmp = decodeSmall(bytes, 2400)
     }, {
-        val b = bmp ?: return@run toast(T("Couldn't open that photo"))
+        val b = bmp ?: return@run toast("Couldn't open that photo")
         screen = Screen.VIEWER
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(ImageView(context).apply { setImageBitmap(b); scaleType = ImageView.ScaleType.FIT_CENTER })
-            addView(tv(T("View once: it's gone when you close it"), 13f, Color.WHITE).apply {
+            addView(tv("View once: it's gone when you close it", 13f, Color.WHITE).apply {
                 setPadding(dp(12), dp(6), dp(12), dp(6)); background = round(Color.parseColor("#99000000"), 12)
             }, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(36) })
             addView(icon(R.drawable.ic_back, Color.WHITE) { leaveViewer() }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START))
@@ -233,7 +233,7 @@ internal fun MainActivity.showImage(m: Msg) {
         if (bytes != null && isAnimated(m)) anim = decodeGif(bytes, 1600)
         bmp = bytes?.let { decodeSmall(it, 2400) }
     }, {
-        val b = bmp ?: return@run toast(T("Couldn't open that photo"))
+        val b = bmp ?: return@run toast("Couldn't open that photo")
         screen = Screen.VIEWER
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -253,12 +253,12 @@ internal fun MainActivity.openOutside(m: Msg) {
     val f = m.file ?: return
     var out: File? = null
     Messenger.run({
-        val bytes = Messenger.core.openFile(m) ?: throw UserError(T("Couldn't open that file"))
+        val bytes = Messenger.core.openFile(m) ?: throw UserError("Couldn't open that file")
         out = File(File(cacheDir, "open").apply { mkdirs() }, f.optString("n")).apply { writeBytes(bytes) }
     }, {
         val uri = androidx.core.content.FileProvider.getUriForFile(this, "com.wilfrombdn.telegramnt.files", out!!)
         val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, f.optString("m")).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        try { startActivity(Intent.createChooser(view, f.optString("n"))) } catch (e: Exception) { toast(T("No app on this phone can open that file")) }
+        try { startActivity(Intent.createChooser(view, f.optString("n"))) } catch (e: Exception) { toast("No app on this phone can open that file") }
     }) { e -> toast(errorText(e)) }
 }
 

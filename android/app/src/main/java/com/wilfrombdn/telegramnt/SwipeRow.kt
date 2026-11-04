@@ -24,7 +24,7 @@ class SwipeRow(
     private val onOpen: () -> Unit,
     private val onDelete: () -> Unit,
     private val onPin: (() -> Unit)? = null,
-    pinLabel: String = T("Pin"),
+    pinLabel: String = "Pin",
     pinEmoji: String = "📌",
     private val directRight: Boolean = false,   // swiping right far enough runs onPin at once, no second tap
     private val holdToSwipe: Boolean = false,   // the row only slides after a half-second hold; a quick swipe is left to the screen (Phone tabs)

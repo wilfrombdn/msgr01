@@ -199,7 +199,7 @@ class MainActivity : Activity() {
                 welcomeTorNote?.visibility = View.GONE; welcomeTorLine?.visibility = View.GONE; welcomeDirect?.visibility = View.GONE
                 if (st.text.isEmpty()) return   // already connected when the screen opened: nothing to show
                 celebrating = true
-                st.text = T("Connected!"); st.setTextColor(green)
+                st.text = "Connected!"; st.setTextColor(green)
                 st.postDelayed({
                     celebrating = false
                     st.text = ""; st.setTextColor(dim)
@@ -210,16 +210,15 @@ class MainActivity : Activity() {
             if (connectStart == 0L) connectStart = System.currentTimeMillis()
             dots = dots % 3 + 1
             // always three dots wide (the unused ones invisible) so the centred word doesn't wobble
-            val word = T("Connecting")   // the dots after it are placed by position, so the word's own length is used
-            st.text = android.text.SpannableString("$word...").apply {
-                setSpan(android.text.style.ForegroundColorSpan(Color.TRANSPARENT), word.length + dots, word.length + 3, 0)
+            st.text = android.text.SpannableString("Connecting...").apply {
+                setSpan(android.text.style.ForegroundColorSpan(Color.TRANSPARENT), 10 + dots, 13, 0)
             }
             st.setTextColor(dim)
             if (Tor.outdated) maybeCheckUpdate()   // a newer app (with a newer Tor) is the only fix
             if (System.currentTimeMillis() - connectStart >= 30_000) {
                 welcomeTorNote?.visibility = if (Messenger.direct) View.GONE else View.VISIBLE
-                welcomeTorLine?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) (Messenger.directProblem ?: T("Trying a direct connection…")) else Tor.status() }
-                welcomeDirect?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) T("Use Tor instead") else T("Connect directly instead") }
+                welcomeTorLine?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) (Messenger.directProblem ?: "Trying a direct connection…") else Tor.status() }
+                welcomeDirect?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) "Use Tor instead" else "Connect directly instead" }
             }
             st.postDelayed(this, 1000)
         }
@@ -229,7 +228,7 @@ class MainActivity : Activity() {
     internal var welcomeTorNote: TextView? = null
     internal var welcomeTorLine: TextView? = null
     internal var welcomeDirect: TextView? = null
-    internal val TOR_WAIT_NOTE = T("First connection can take a minute. The app is building a private route through the Tor network — hopping your connection through several relays around the world and setting up fresh encryption at each one. That's slower than a normal connection, but it's what hides where you are. It's quicker after this.")
+    internal val TOR_WAIT_NOTE = "First connection can take a minute. The app is building a private route through the Tor network — hopping your connection through several relays around the world and setting up fresh encryption at each one. That's slower than a normal connection, but it's what hides where you are. It's quicker after this."
     internal var pendingNext: (() -> Unit)? = null
 
     /** The chat list inside the open screen: while you type in search only its rows are swapped, so nothing flashes. */
@@ -353,22 +352,22 @@ class MainActivity : Activity() {
             return
         }
         if (requestCode == ADD_CONTACT_PERM) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) addContactSave?.invoke() else toast(T("Allow contacts access to save a contact"))
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) addContactSave?.invoke() else toast("Allow contacts access to save a contact")
             return
         }
         if (requestCode == LOCATION_FOR_SHARE) {
-            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) shareLocation() else toast(T("$APP_NAME needs location access to share where you are"))
+            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) shareLocation() else toast("$APP_NAME needs location access to share where you are")
             return
         }
         if (requestCode == MIC_FOR_VOICE) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toast(T("Hold the mic to record, let go to send"))
-            else toast(T("$APP_NAME needs the microphone for voice messages"))
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toast("Hold the mic to record, let go to send")
+            else toast("$APP_NAME needs the microphone for voice messages")
             return
         }
         if (requestCode != MIC_FOR_CALL) return
         val c = callAfterMic; callAfterMic = null
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) c?.let { callFriend(it) }
-        else toast(T("$APP_NAME needs the microphone for calls"))
+        else toast("$APP_NAME needs the microphone for calls")
     }
 
     internal val fixedReactions = listOf("👍", "❤️", "😂", "😮", "😢")
@@ -438,7 +437,7 @@ class MainActivity : Activity() {
                     if (u == url) return
                     url = u; card = null; h.removeCallbacksAndMessages(null)
                     if (u == null || u == dropped) { bar.visibility = View.GONE; return }
-                    show(T("Getting link preview…"), null)
+                    show("Getting link preview…", null)
                     h.postDelayed({
                         Messenger.io.execute {
                             val got = runCatching { LinkPreview.fetch(u) }.getOrNull()
@@ -458,7 +457,7 @@ class MainActivity : Activity() {
             bar.addView(View(this@MainActivity).apply { setBackgroundColor(blue) }, LinearLayout.LayoutParams(dp(3), dp(34)))
             bar.addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
-                addView(tv(site ?: T("Link"), 13.5f, blue, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                addView(tv(site ?: "Link", 13.5f, blue, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
                 addView(tv(title, 14f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
             }, LinearLayout.LayoutParams(0, -2, 1f))
             bar.addView(tv("✕", 17f, dim).apply { setPadding(dp(14), dp(6), dp(14), dp(6)); setOnClickListener { dropped = url; card = null; bar.visibility = View.GONE } })
@@ -481,9 +480,9 @@ class MainActivity : Activity() {
         val who = g.typing.filter { it.value > now }.keys.map { u -> Messenger.core.contact(u)?.name ?: "@$u" }
         return when (who.size) {
             0 -> null
-            1 -> T("${who[0]} is typing…")
-            2 -> T("${who[0]} and ${who[1]} are typing…")
-            else -> T("${who.size} people are typing…")
+            1 -> "${who[0]} is typing…"
+            2 -> "${who[0]} and ${who[1]} are typing…"
+            else -> "${who.size} people are typing…"
         }
     }
 
@@ -530,8 +529,8 @@ class MainActivity : Activity() {
         if (requestCode == TEXT_CAMERA) return textImagePicked(uri, fromCamera = true)
         if (requestCode != PICK_PHOTO) return
         var bmp: android.graphics.Bitmap? = null
-        Messenger.run({ bmp = loadPhoto(uri) }, { bmp?.let { showCrop(it) } ?: toast(T("Couldn't open that photo")) }) {
-            toast(T("Couldn't open that photo"))
+        Messenger.run({ bmp = loadPhoto(uri) }, { bmp?.let { showCrop(it) } ?: toast("Couldn't open that photo") }) {
+            toast("Couldn't open that photo")
         }
     }
 
@@ -544,7 +543,7 @@ class MainActivity : Activity() {
             val l = connLabel ?: return
             if (screen != Screen.SETTINGS || !l.isAttachedToWindow) return
             val on = Messenger.connected
-            l.text = if (on) T("✓ active") else if (Messenger.direct) (Messenger.directProblem ?: "connecting…") else Tor.status()
+            l.text = if (on) "✓ active" else if (Messenger.direct) (Messenger.directProblem ?: "connecting…") else Tor.status()
             l.setTextColor(if (on) green else amber)
             l.postDelayed(this, 1000)
         }

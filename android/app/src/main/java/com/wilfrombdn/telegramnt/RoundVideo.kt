@@ -43,7 +43,7 @@ internal fun MainActivity.roundView(m: Msg, onLong: () -> Unit): View {
         setBackgroundColor(Color.parseColor("#33000000"))
         layoutParams = LinearLayout.LayoutParams(dp(200), dp(200)).apply { bottomMargin = dp(4) }
         addView(ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; thumb?.let { setImageBitmap(it) } }, FrameLayout.LayoutParams(-1, -1))
-        addView(tv(if (!here) (if (f.optBoolean("cleared")) T("Removed") else if (m.mine) "" else if (ask) T("⬇ Tap") else T("Downloading…")) else "▶", if (here) 26f else 13f, Color.WHITE).apply {
+        addView(tv(if (!here) (if (f.optBoolean("cleared")) "Removed" else if (m.mine) "" else if (ask) "⬇ Tap" else "Downloading…") else "▶", if (here) 26f else 13f, Color.WHITE).apply {
             gravity = Gravity.CENTER; background = circle(Color.parseColor("#88000000")); setPadding(dp(12), dp(6), dp(12), dp(6))
         }, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
         setOnClickListener { if (here) playRound(m) else if (!f.optBoolean("cleared")) retryFetch(m) }
@@ -53,7 +53,7 @@ internal fun MainActivity.roundView(m: Msg, onLong: () -> Unit): View {
 
 /** Plays a round video from memory in a big circle over the chat (so chat refreshes don't cut it off). */
 internal fun MainActivity.playRound(m: Msg) {
-    val bytes = Messenger.core.openFile(m) ?: return toast(T("Couldn't open that video"))
+    val bytes = Messenger.core.openFile(m) ?: return toast("Couldn't open that video")
     Voice.stopPlaying()
     val size = minOf(resources.displayMetrics.widthPixels - dp(40), dp(340))
     val d = android.app.Dialog(this)
@@ -71,7 +71,7 @@ internal fun MainActivity.playRound(m: Msg) {
                 }
                 mp.setOnCompletionListener { d.dismiss() }
                 mp.prepare(); mp.start()
-            } catch (e: Exception) { d.dismiss(); toast(T("Couldn't play that video")) }
+            } catch (e: Exception) { d.dismiss(); toast("Couldn't play that video") }
         }
         override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) {}
         override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture) = true

@@ -102,7 +102,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         try {
             m.device = relay.signup(user, keys.auth, Crypto.publicBytes(m.enc), m.sigPub, m.inboxToken, lockedBackup(m, emptyList()), Crypto.KDF_ARGON2)
         } catch (e: Relay.RelayError) {
-            throw UserError(if (e.code == 409) T("That username is taken") else e.reason.ifEmpty { T("Server error") })
+            throw UserError(if (e.code == 409) "That username is taken" else e.reason.ifEmpty { "Server error" })
         }
         synchronized(this) { me = m; contacts.clear(); acks.clear() }
         runCatching { publishKeys(m, replace = true) }
@@ -118,7 +118,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     fun login(user: String, password: String, keepStore: SignalStore? = null) {
         checkUsername(user)
         // old accounts still use PBKDF2; the server says which, then it's moved to Argon2id after this login
-        val kdf = try { relay.kdf(user) } catch (e: Relay.RelayError) { throw UserError(T("Server error")) }
+        val kdf = try { relay.kdf(user) } catch (e: Relay.RelayError) { throw UserError("Server error") }
         val keys = Crypto.passwordKeys(user, password, kdf)
         val (device, locked) = try {
             relay.login(user, keys.auth).let { r ->
@@ -126,13 +126,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 r.device to r.backup
             }
         } catch (e: Relay.RelayError) {
-            throw UserError(if (e.code == 403) e.reason.replaceFirstChar { it.uppercase() } else if (e.code == 409) T("Please try again") else T("Server error"))
+            throw UserError(if (e.code == 403) e.reason.replaceFirstChar { it.uppercase() } else if (e.code == 409) "Please try again" else "Server error")
         }
-        if (locked.isEmpty()) throw UserError(T("This account keeps no cloud backup, so it can only be used on the phone that made it."))
-        val plain = Crypto.unlockBackup(keys.backup, user, locked) ?: throw UserError(T("Couldn't open your backup"))
+        if (locked.isEmpty()) throw UserError("This account keeps no cloud backup, so it can only be used on the phone that made it.")
+        val plain = Crypto.unlockBackup(keys.backup, user, locked) ?: throw UserError("Couldn't open your backup")
         val o = JSONObject(String(plain))
-        val enc = Crypto.parsePrivate(unb64(o.getString("enc")), Crypto.ENC_TEMPLATE) ?: throw UserError(T("Backup damaged"))
-        val sig = Crypto.parsePrivate(unb64(o.getString("sig")), Crypto.SIG_TEMPLATE) ?: throw UserError(T("Backup damaged"))
+        val enc = Crypto.parsePrivate(unb64(o.getString("enc")), Crypto.ENC_TEMPLATE) ?: throw UserError("Backup damaged")
+        val sig = Crypto.parsePrivate(unb64(o.getString("sig")), Crypto.SIG_TEMPLATE) ?: throw UserError("Backup damaged")
         val m = Me(user, o.optString("name", user), device, enc, sig, o.getString("inbox"), keys.backup,
             o.optString("avatar").takeIf { it.isNotEmpty() }?.let { unb64(it) })
         if (keepStore != null) {
@@ -148,7 +148,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             contacts.clear()
             acks.clear()
             for (i in 0 until list.length()) contacts.add(Contact.from(list.getJSONObject(i)))
-            for (c in contacts) if (c.status == Contact.FRIENDS) c.msgs.add(note(T("Chat history stays on your old phone")))
+            for (c in contacts) if (c.status == Contact.FRIENDS) c.msgs.add(note("Chat history stays on your old phone"))
             groups.clear()
             o.optJSONArray("groups")?.let { for (i in 0 until it.length()) groups.add(Group.from(it.getJSONObject(i)).also { g -> g.cursor = 0 }) }
         }
@@ -178,7 +178,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     fun deleteAccount(password: String) {
         val m = me ?: return
-        val kdf = try { relay.kdf(m.user) } catch (e: Relay.RelayError) { throw UserError(T("Server error")) }
+        val kdf = try { relay.kdf(m.user) } catch (e: Relay.RelayError) { throw UserError("Server error") }
         relay.deleteAccount(m.user, Crypto.passwordKeys(m.user, password, kdf).auth)
         signOut()
     }
@@ -253,21 +253,21 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
      * the directory's answer must match it, or nothing is sent (that would mean the server, or someone in between, is handing out wrong keys).
      */
     fun addFriend(raw: String, expectKeys: String? = null): Contact {
-        val m = me ?: throw UserError(T("Not signed in"))
+        val m = me ?: throw UserError("Not signed in")
         val user = raw.trim().removePrefix("@").lowercase()
         checkUsername(user)
-        if (user == m.user) throw UserError(T("That's you!"))
+        if (user == m.user) throw UserError("That's you!")
         contact(user)?.let { return it }
-        val p = relay.lookup(user) ?: throw UserError(T("No one has the username @$user"))
-        if (p.ident.isEmpty()) throw UserError(T("@$user needs to update $APP_NAME first"))
+        val p = relay.lookup(user) ?: throw UserError("No one has the username @$user")
+        if (p.ident.isEmpty()) throw UserError("@$user needs to update $APP_NAME first")
         if (expectKeys != null && expectKeys != Crypto.keyFingerprint(unb64(p.ident), unb64(p.sig), unb64(p.enc)))
-            throw UserError(T("That code doesn't match @$user's keys on the server. Someone may be pretending to be them, so nothing was sent."))
+            throw UserError("That code doesn't match @$user's keys on the server. Someone may be pretending to be them, so nothing was sent.")
         val c = Contact(user, "@$user", Contact.ASKED, Crypto.randomHex(), null, p.enc, p.sig, theirInbox = p.inbox, theirIdent = p.ident)
         if (expectKeys != null) c.verified = true   // their own code vouched for these keys, so the safety codes will match
         relay.fetch(listOf(c.myToken), emptyList(), 0) // my mailbox exists before they can answer
         sealSignal(m, c, p.inbox, JSONObject().put("t", "request").put("u", m.user).put("n", m.name).put("a", c.myAddr))
-        c.msgs.add(note(T("Friend request sent. Anything you write now arrives as a message request.")))
-        if (expectKeys != null) c.msgs.add(note(T("Their QR code matched their keys, so this really is them.")))
+        c.msgs.add(note("Friend request sent. Anything you write now arrives as a message request."))
+        if (expectKeys != null) c.msgs.add(note("Their QR code matched their keys, so this really is them."))
         synchronized(this) { if (contact(user) == null) contacts.add(c) }
         contact(user)?.let { takeEarly(it) }
         changed()
@@ -282,8 +282,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             .put("a", c.myAddr).put("f", friend))
         synchronized(this) {
             c.status = if (friend) Contact.FRIENDS else Contact.CHATTING
-            c.msgs.add(note(if (friend) T("You are now friends. Check the safety code to be sure it's really them.")
-            else T("Message request accepted. You can add @${c.user} as a friend any time.")))
+            c.msgs.add(note(if (friend) "You are now friends. Check the safety code to be sure it's really them."
+            else "Message request accepted. You can add @${c.user} as a friend any time."))
         }
         changed()
         flush(c)
@@ -339,13 +339,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     // ---------- groups ----------
 
     fun createGroup(name: String, public: Boolean, invite: List<String> = emptyList()): Group {
-        val m = me ?: throw UserError(T("Not signed in"))
-        val g = Group(Crypto.randomHex(8), name.trim().take(80).ifEmpty { T("Group") }, Crypto.randomHex(), public, owner = m.user)
+        val m = me ?: throw UserError("Not signed in")
+        val g = Group(Crypto.randomHex(8), name.trim().take(80).ifEmpty { "Group" }, Crypto.randomHex(), public, owner = m.user)
         g.members.add(m.user)
         g.leaders.add(m.user)
         postMyDist(m, g)
         synchronized(this) { groups.add(g) }
-        g.msgs.add(note(if (public) T("Group created. Share the invite link to let people join.") else T("Group created. Add friends from the group menu.")))
+        g.msgs.add(note(if (public) "Group created. Share the invite link to let people join." else "Group created. Add friends from the group menu."))
         changed()
         for (u in invite) runCatching { inviteToGroup(g, u) }
         return g
@@ -355,8 +355,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     fun inviteToGroup(g: Group, rawUser: String) {
         val m = me ?: return
         val user = rawUser.trim().removePrefix("@").lowercase()
-        val c = contact(user) ?: throw UserError(T("@$user isn't in your friends"))
-        if (!c.canChat) throw UserError(T("@$user hasn't accepted you yet"))
+        val c = contact(user) ?: throw UserError("@$user isn't in your friends")
+        if (!c.canChat) throw UserError("@$user hasn't accepted you yet")
         sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "ginvite").put("secret", g.secret).put("n", g.name).put("public", g.public).put("o", g.owner))
         synchronized(this) { g.members.add(user) }
         changed()
@@ -369,14 +369,14 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     fun joinGroupLink(link: String): Group {
         val frag = link.trim().substringAfter('#', "")
-        val o = try { JSONObject(String(Base64.getUrlDecoder().decode(frag))) } catch (e: Exception) { throw UserError(T("That isn't a valid group link")) }
+        val o = try { JSONObject(String(Base64.getUrlDecoder().decode(frag))) } catch (e: Exception) { throw UserError("That isn't a valid group link") }
         val secret = o.optString("s")
-        if (secret.length != 64 || !secret.all { it in "0123456789abcdef" }) throw UserError(T("That isn't a valid group link"))
-        return joinGroup(secret, o.optString("n").take(80).ifBlank { T("Group") }, public = true, owner = o.optString("o"))
+        if (secret.length != 64 || !secret.all { it in "0123456789abcdef" }) throw UserError("That isn't a valid group link")
+        return joinGroup(secret, o.optString("n").take(80).ifBlank { "Group" }, public = true, owner = o.optString("o"))
     }
 
     private fun joinGroup(secret: String, name: String, public: Boolean, owner: String = ""): Group {
-        val m = me ?: throw UserError(T("Not signed in"))
+        val m = me ?: throw UserError("Not signed in")
         synchronized(this) { groups.firstOrNull { it.secret == secret } }?.let { return it }
         val g = Group(Crypto.randomHex(8), name, secret, public, owner = owner)
         if (owner.isNotEmpty()) g.leaders.add(owner)   // seed the root of trust from the invite
@@ -385,7 +385,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         // my sender key goes out later, before my first post (distSent stays false)
         runCatching { postMyDist(m, g) }
         synchronized(this) { groups.add(g) }
-        g.msgs.add(note(T("You joined \"$name\".")))
+        g.msgs.add(note("You joined \"$name\"."))
         changed()
         return g
     }
@@ -410,8 +410,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
      * new mailbox the removed member can't read. Everyone must be on 4.2+ or they're effectively removed.
      */
     fun rekeyGroup(g: Group, remove: Set<String>) = synchronized(g.rekeyDue) {   // one re-key at a time per group
-        val m = me ?: throw UserError(T("Not signed in"))
-        if (g.owner.isEmpty() || m.user != g.owner) throw UserError(T("Only the group owner can remove members"))
+        val m = me ?: throw UserError("Not signed in")
+        if (g.owner.isEmpty() || m.user != g.owner) throw UserError("Only the group owner can remove members")
         val removeN = remove.map { it.removePrefix("@").lowercase() }.toSet()
         val kept = synchronized(this) { g.members.filter { it != m.user && it !in removeN } }
         val newSecret = Crypto.randomHex()
@@ -471,7 +471,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             g.leaders.clear(); g.leaders.addAll(leaders); if (g.owner.isNotEmpty()) g.leaders.add(g.owner)
             g.cursor = 0; g.distSent = false
             g.pending.clear(); g.pendingCtl.clear()
-            g.msgs.add(note(if (removed.isNotEmpty()) T("Group security was updated and a member was removed.") else T("Group security was updated.")))
+            g.msgs.add(note(if (removed.isNotEmpty()) "Group security was updated and a member was removed." else "Group security was updated."))
         }
         runCatching { postMyDist(m, g) }   // publish my sender key in the new mailbox
         changed()
@@ -493,9 +493,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     // ---------- polls (groups) ----------
 
     fun sendPoll(g: Group, question: String, options: List<String>): Msg {
-        val m = me ?: throw UserError(T("Not signed in"))
-        val poll = Msg.pollOf(JSONObject().put("q", question).put("o", JSONArray(options))) ?: throw UserError(T("A poll needs a question and at least 2 options"))
-        if (!g.canPost(m.user)) throw UserError(T("Only admins can post in this group"))
+        val m = me ?: throw UserError("Not signed in")
+        val poll = Msg.pollOf(JSONObject().put("q", question).put("o", JSONArray(options))) ?: throw UserError("A poll needs a question and at least 2 options")
+        if (!g.canPost(m.user)) throw UserError("Only admins can post in this group")
         val msg = Msg(Crypto.randomHex(16), true, "", System.currentTimeMillis(), Msg.SENDING).also { it.poll = poll; it.sender = m.user }
         synchronized(this) { g.msgs.add(msg) }
         onChange()
@@ -542,7 +542,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     /** A leader changes the group's name / read-only / leader list; broadcast as an authenticated set. */
     fun setGroup(g: Group, name: String, readOnly: Boolean, leaders: Set<String>) {
         val m = me ?: return
-        if (!g.isLeader(m.user)) throw UserError(T("Only an admin can change this group"))
+        if (!g.isLeader(m.user)) throw UserError("Only an admin can change this group")
         synchronized(this) {
             g.name = name.trim().take(80).ifEmpty { g.name }
             g.readOnly = readOnly
@@ -606,8 +606,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     /** Queues a group attachment: locked with its own key, same as a 1:1 attachment. */
     fun queueGroupFile(g: Group, name: String, mime: String, data: ByteArray, thumb: ByteArray?): Msg {
-        val m = me ?: throw UserError(T("Not signed in"))
-        if (data.size > MAX_FILE) throw UserError(T("Files can be up to ${MAX_FILE / 1024 / 1024} MB"))
+        val m = me ?: throw UserError("Not signed in")
+        if (data.size > MAX_FILE) throw UserError("Files can be up to ${MAX_FILE / 1024 / 1024} MB")
         val key = Crypto.randomHex(32)
         val local = Crypto.randomHex(16)
         saveBlob(local, Crypto.gcmSeal(key.unhex(), FILE_LABEL, padFile(data)))
@@ -705,7 +705,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             // The outer "leave" trusts the forgeable "u", so in owner-anchored groups it must NOT change
             // membership (a member could forge a leave for anyone). Those groups rely on the authenticated
             // gctl "leave" instead. Legacy groups (no owner) keep the old behaviour.
-            "leave" -> if (g.owner.isEmpty()) { synchronized(this) { if (g.members.remove(u)) g.msgs.add(note(T("@$u left the group"))) }; onChange() }
+            "leave" -> if (g.owner.isEmpty()) { synchronized(this) { if (g.members.remove(u)) g.msgs.add(note("@$u left the group")) }; onChange() }
             "gctl" -> {
                 val ct = unb64(inner.optString("c"))
                 val plain = try {
@@ -795,7 +795,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             "leave" -> {   // authenticated departure: drop them, and if I'm the owner, re-key so they lose access
                 if (u == g.owner) return
                 // a grey line in the chat so everyone sees who left (once, even if the leave arrives twice)
-                synchronized(this) { if (g.members.remove(u)) g.msgs.add(note(T("@$u left the group"))) }
+                synchronized(this) { if (g.members.remove(u)) g.msgs.add(note("@$u left the group")) }
                 // queue the re-key durably; drainRekeyDue (in pollGroup) retries if the network call fails now
                 if (me?.user == g.owner && g.owner.isNotEmpty()) { synchronized(g.rekeyDue) { g.rekeyDue.add(u) }; drainRekeyDue(g) }
                 onChange()
@@ -806,7 +806,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 val keys = p.optJSONObject("keys") ?: return
                 val mine = keys.optString(m.user)
                 if (mine.isEmpty()) {   // no piece for me => I was removed
-                    synchronized(this) { g.msgs.add(note(T("You were removed from this group."))) }
+                    synchronized(this) { g.msgs.add(note("You were removed from this group.")) }
                     synchronized(this) { groups.remove(g) }
                     onChange(); return
                 }
@@ -918,8 +918,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     /** Why the call button is greyed out for [c], or null if you can call them. */
     fun callBlocked(c: Contact): String? = when {
-        c.status != Contact.FRIENDS -> T("Only friends can call")
-        c.net != netMode -> T("Your network differs — switch to ${if (c.net == NET_DIRECT) "Direct" else "Tor"} to call")
+        c.status != Contact.FRIENDS -> "Only friends can call"
+        c.net != netMode -> "Your network differs — switch to ${if (c.net == NET_DIRECT) "Direct" else "Tor"} to call"
         else -> null
     }
 
@@ -931,7 +931,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     /** Makes the outgoing call (no network), so the call screen can show "Calling…" straight away. */
     fun prepareCall(c: Contact): Call {
         callBlocked(c)?.let { throw UserError(it) }
-        if (call != null) throw UserError(T("You're already in a call"))
+        if (call != null) throw UserError("You're already in a call")
         val k = Call(Crypto.randomHex(16), c.user, true, Crypto.randomHex(32), Crypto.randomHex(32))
         seenCalls.add(k.id)
         call = k; onCall(k)
@@ -1075,8 +1075,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val m = me ?: return
         synchronized(this) {
             c.ttl = seconds
-            c.msgs.add(note(if (seconds == 0) T("Disappearing messages turned off.")
-            else T("Disappearing messages: on, ${timerLabel(seconds)}. New messages delete on both phones.")))
+            c.msgs.add(note(if (seconds == 0) "Disappearing messages turned off."
+            else "Disappearing messages: on, ${timerLabel(seconds)}. New messages delete on both phones."))
         }
         changed()
         if (c.canChat) runCatching { sealSignal(m, c, c.theirAddr!!, JSONObject().put("t", "ttl").put("s", seconds)) }
@@ -1094,17 +1094,17 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     }
 
     private fun timerLabel(s: Int) = when {
-        s >= 86400 -> TP(s / 86400, "day", "days")
-        s >= 3600 -> TP(s / 3600, "hour", "hours")
-        s >= 60 -> TP(s / 60, "minute", "minutes")
-        else -> TP(s, "second", "seconds")
+        s >= 86400 -> "${s / 86400} day" + if (s / 86400 > 1) "s" else ""
+        s >= 3600 -> "${s / 3600} hour" + if (s / 3600 > 1) "s" else ""
+        s >= 60 -> "${s / 60} minute" + if (s / 60 > 1) "s" else ""
+        else -> "$s seconds"
     }
 
     // ---------- profile photo ----------
 
     /** Sets (or with null, removes) my photo and sends it, sealed, to every friend. */
     fun setAvatar(jpeg: ByteArray?) {
-        require(jpeg == null || jpeg.size <= MAX_AVATAR) { T("photo too big") }
+        require(jpeg == null || jpeg.size <= MAX_AVATAR) { "photo too big" }
         me?.avatar = jpeg
         changed()
         for (c in synchronized(this) { contacts.filter { it.status == Contact.FRIENDS } }) runCatching { sendAvatar(c, ask = false) }
@@ -1137,7 +1137,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
      * ever stores the locked copy, and the key travels inside the sealed message.
      */
     fun queueFile(c: Contact, name: String, mime: String, data: ByteArray, thumb: ByteArray?, once: Boolean = false): Msg {
-        if (data.size > MAX_FILE) throw UserError(T("Files can be up to ${MAX_FILE / 1024 / 1024} MB"))
+        if (data.size > MAX_FILE) throw UserError("Files can be up to ${MAX_FILE / 1024 / 1024} MB")
         val key = Crypto.randomHex(32)
         val local = Crypto.randomHex(16)
         saveBlob(local, Crypto.gcmSeal(key.unhex(), FILE_LABEL, padFile(data)))
@@ -1231,7 +1231,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     fun pinGroupMessage(g: Group, msg: Msg?) {
         val m = me ?: return
-        if (!canPin(g)) throw UserError(T("Only an admin can pin messages"))
+        if (!canPin(g)) throw UserError("Only an admin can pin messages")
         synchronized(this) { g.pinned = msg?.id }
         onChange()
         runCatching { gctl(g, m, JSONObject().put("t", "pinm").put("id", msg?.id ?: "")) }
@@ -1245,11 +1245,11 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
     /** "Saved Messages": a chat with myself, kept only on this phone. Made the first time it's opened. */
     fun savedChat(): Contact {
-        val m = me ?: throw UserError(T("Not signed in"))
+        val m = me ?: throw UserError("Not signed in")
         synchronized(this) {
             contacts.firstOrNull { it.status == Contact.SAVED }?.let { return it }
-            val c = Contact(m.user, T("Saved Messages"), Contact.SAVED, Crypto.randomHex(32), null, "", "")
-            c.msgs.add(note(T("Save messages, photos and files here. They stay on this phone only.")))
+            val c = Contact(m.user, "Saved Messages", Contact.SAVED, Crypto.randomHex(32), null, "", "")
+            c.msgs.add(note("Save messages, photos and files here. They stay on this phone only."))
             contacts.add(c)
             changed()
             return c
@@ -1340,7 +1340,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     }
 
     private fun startSession(m: Me, c: Contact) {
-        val b = relay.bundle(c.user) ?: throw UserError(T("@${c.user} needs to update $APP_NAME first"))
+        val b = relay.bundle(c.user) ?: throw UserError("@${c.user} needs to update $APP_NAME first")
         val ident = b.getString("ident")
         // the identity must match what the directory listed when we added them
         if (c.theirIdent != null && c.theirIdent != ident) throw IOException("@${c.user}'s key changed")
@@ -1507,8 +1507,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     c.status = if (friend) Contact.FRIENDS else Contact.CHATTING
                     c.waitingForAdd = !friend
                     if (before != c.status) c.msgs.add(note(
-                        if (friend) T("@${c.user} added you. Check the safety code to be sure it's really them.")
-                        else T("@${c.user} accepted your messages but hasn't added you as a friend yet.")))
+                        if (friend) "@${c.user} added you. Check the safety code to be sure it's really them."
+                        else "@${c.user} accepted your messages but hasn't added you as a friend yet."))
                 }
                 changed()
                 flush(c)
@@ -1529,13 +1529,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 val secret = inner.optString("secret")
                 // only friends can invite, and only a limited number may wait; each secret is listed once
                 if (c.status != Contact.FRIENDS || secret.length != 64 || !secret.all { it in "0123456789abcdef" }) return
-                val inv = Invite(c.user, secret, inner.optString("n").take(80).ifBlank { T("Group") }, inner.optBoolean("public"), inner.optString("o").take(40))
+                val inv = Invite(c.user, secret, inner.optString("n").take(80).ifBlank { "Group" }, inner.optBoolean("public"), inner.optString("o").take(40))
                 val fresh = synchronized(this) { groups.none { it.secret == secret } && invites.none { it.secret == secret } && invites.size < MAX_INVITES }
                 if (!fresh) return
                 if (testAutoJoin) { synchronized(this) { invites.add(inv) }; acceptInvite(inv); return }
                 synchronized(this) {
                     invites.add(inv)
-                    c.msgs.add(note(T("@${c.user} invited you to the group \"${inv.name}\". Join or decline it at the top of your chat list.")))
+                    c.msgs.add(note("@${c.user} invited you to the group \"${inv.name}\". Join or decline it at the top of your chat list."))
                     if (openChat != c.user) c.unread++
                 }
                 onChange()
@@ -1595,8 +1595,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 if (sec < 0 || sec > 30 * 86400 || !c.canChat) return
                 synchronized(this) {
                     c.ttl = sec
-                    c.msgs.add(note(if (sec == 0) T("@${c.user} turned off disappearing messages.")
-                    else T("@${c.user} set disappearing messages: ${timerLabel(sec)}.")))
+                    c.msgs.add(note(if (sec == 0) "@${c.user} turned off disappearing messages."
+                    else "@${c.user} set disappearing messages: ${timerLabel(sec)}."))
                 }
                 onChange()
             }
@@ -1692,7 +1692,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
     /** The whole local state, encrypted with the password-derived key. Survives an uninstall when
      *  saved to a file the user keeps. Header is cleartext so a restore screen can name the account. */
     fun fullBackup(): ByteArray {
-        val m = me ?: throw UserError(T("Not signed in"))
+        val m = me ?: throw UserError("Not signed in")
         val cipher = Crypto.gcmSeal(m.backupKey, "msgr01-device|${m.user}", toJson().toString().toByteArray())
         // "MSGR02": the username is no longer written on the outside (MSGR01 files had it in plain text)
         return "MSGR02\n".toByteArray() + cipher
@@ -1785,7 +1785,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         if (signal == null) for (c in contacts) {
             // upgrading from 2.x: new encryption, so new safety codes
             c.verified = false
-            c.msgs.add(note(T("$APP_NAME now uses Signal's encryption. Your safety code with ${c.name} changed; check it again.")))
+            c.msgs.add(note("$APP_NAME now uses Signal's encryption. Your safety code with ${c.name} changed; check it again."))
         }
         backupDirty = o.optBoolean("backupDirty")
         readReceipts = o.optBoolean("readReceipts", true)
@@ -1835,7 +1835,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val USERNAME = Regex("^[a-z0-9_]{5,32}$")
 
         fun checkUsername(u: String) {
-            if (!USERNAME.matches(u)) throw UserError(T("Usernames are 5-32 characters: a-z, 0-9 and _"))
+            if (!USERNAME.matches(u)) throw UserError("Usernames are 5-32 characters: a-z, 0-9 and _")
         }
 
         const val AVATAR_PAD = 8192 // every avatar is sent at this exact size, so size reveals nothing

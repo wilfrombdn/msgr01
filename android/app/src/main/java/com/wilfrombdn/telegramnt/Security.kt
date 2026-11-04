@@ -16,14 +16,14 @@ internal fun MainActivity.showLock() {
     if (!km.isDeviceSecure) {
         // the phone's screen lock was removed: don't trap anyone behind a lock that can't open
         Messenger.appLock = false; Messenger.unlock(); Messenger.settingsChanged()
-        toast(T("App lock is off: this phone has no screen lock any more"))
+        toast("App lock is off: this phone has no screen lock any more")
         return unlocked()
     }
     setContentView(LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; background = texturedBg(listBg); fitsSystemWindows = true
         addView(ImageView(context).apply { setImageResource(R.drawable.ic_bubble_logo) }, LinearLayout.LayoutParams(dp(72), dp(72)))
-        addView(tv(T("$APP_NAME is locked"), 20f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(18), 0, dp(28)) })
-        addView(cta(T("Unlock")) { askToUnlock() }, ctaParams())
+        addView(tv("$APP_NAME is locked", 20f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(18), 0, dp(28)) })
+        addView(cta("Unlock") { askToUnlock() }, ctaParams())
     })
     // ask straight away the first time; after a cancel, wait for a tap on Unlock
     if (firstShow && !lockAsked) window.decorView.post { askToUnlock() }
@@ -31,7 +31,7 @@ internal fun MainActivity.showLock() {
 
 internal fun MainActivity.askToUnlock() {
     lockAsked = true
-    confirmIdentity(T("Unlock $APP_NAME")) { unlocked() }
+    confirmIdentity("Unlock $APP_NAME") { unlocked() }
 }
 
 internal fun MainActivity.unlocked() {
@@ -53,7 +53,7 @@ internal fun MainActivity.confirmIdentity(title: String, ok: () -> Unit) {
             prompt.authenticate(android.os.CancellationSignal(), mainExecutor, object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(r: android.hardware.biometrics.BiometricPrompt.AuthenticationResult) { ok() }
             })
-        }.onFailure { toast(T("Couldn't show the unlock prompt")) }
+        }.onFailure { toast("Couldn't show the unlock prompt") }
     } else {
         pendingIdentity = ok
         @Suppress("DEPRECATION")
@@ -62,21 +62,21 @@ internal fun MainActivity.confirmIdentity(title: String, ok: () -> Unit) {
     }
 }
 
-internal fun MainActivity.destructLabel(h: Int) = when (h) { 1 -> T("1 hour"); 24 -> T("1 day"); 168 -> T("1 week"); 720 -> T("1 month"); 8760 -> T("1 year"); else -> TP(h, "hour", "hours") }
+internal fun MainActivity.destructLabel(h: Int) = when (h) { 1 -> "1 hour"; 24 -> "1 day"; 168 -> "1 week"; 720 -> "1 month"; 8760 -> "1 year"; else -> "$h hours" }
 
 /** Settings > Privacy > Self-destruct: off, or wipe everything after 1 hour / day / week / month / year unopened. */
 internal fun MainActivity.selfDestructMenu() {
     val opts = listOf(1, 24, 168, 720, 8760)
-    pickList(T("Self-destruct"), T("If $APP_NAME isn't opened for this long, everything in it on this phone is wiped for good:"),
-        (opts.map { T("After ") + destructLabel(it) } + T("Off")).toTypedArray()) { i ->
+    pickList("Self-destruct", "If $APP_NAME isn't opened for this long, everything in it on this phone is wiped for good:",
+        (opts.map { "After " + destructLabel(it) } + "Off").toTypedArray()) { i ->
         if (i == opts.size) { Destruct.setHours(this, 0); showSettings(); return@pickList }
         val h = opts[i]
-        popup(T("Turn on self-destruct?"),
-            T("If you don't open $APP_NAME for ${destructLabel(h)}, every chat, photo, key and setting in it on this phone is erased. ") +
-            T("There is no undo and no warning first. (Photos you saved to the phone's gallery, and normal texts, are outside $APP_NAME and stay.)\n\n") +
-            T("Opening $APP_NAME starts the countdown again. Your account itself stays: with cloud backup on you could log in again and get your friends back, but not your chats."),
-            null, T("Cancel") to dim, T("Turn on") to red) { b ->
-            if (b == 1) confirmIdentity(T("Turn on self-destruct")) { Destruct.setHours(this, h); showSettings() }
+        popup("Turn on self-destruct?",
+            "If you don't open $APP_NAME for ${destructLabel(h)}, every chat, photo, key and setting in it on this phone is erased. " +
+            "There is no undo and no warning first. (Photos you saved to the phone's gallery, and normal texts, are outside $APP_NAME and stay.)\n\n" +
+            "Opening $APP_NAME starts the countdown again. Your account itself stays: with cloud backup on you could log in again and get your friends back, but not your chats.",
+            null, "Cancel" to dim, "Turn on" to red) { b ->
+            if (b == 1) confirmIdentity("Turn on self-destruct") { Destruct.setHours(this, h); showSettings() }
         }
     }
 }
@@ -85,11 +85,11 @@ internal fun MainActivity.selfDestructMenu() {
 internal fun MainActivity.appLockMenu() {
     if (!Messenger.appLock) {
         if (!getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure)
-            return popup(T("Set a screen lock first"), T("App lock uses your phone's own fingerprint, face or PIN. Set one up in your phone's settings, then come back."), null, "OK" to white)
-        return confirmIdentity(T("Turn on app lock")) { Messenger.appLock = true; Messenger.lockAfterMin = 1; Messenger.settingsChanged(); showSettings() }
+            return popup("Set a screen lock first", "App lock uses your phone's own fingerprint, face or PIN. Set one up in your phone's settings, then come back.", null, "OK" to white)
+        return confirmIdentity("Turn on app lock") { Messenger.appLock = true; Messenger.lockAfterMin = 1; Messenger.settingsChanged(); showSettings() }
     }
-    val opts = listOf(1 to T("After 1 minute away"), 5 to T("After 5 minutes away"), 60 to T("After 1 hour away"))
-    pickList(T("App lock"), T("$APP_NAME asks for your fingerprint, face or PIN when you come back after:"), (opts.map { it.second } + T("Turn off app lock")).toTypedArray()) { i ->
+    val opts = listOf(1 to "After 1 minute away", 5 to "After 5 minutes away", 60 to "After 1 hour away")
+    pickList("App lock", "$APP_NAME asks for your fingerprint, face or PIN when you come back after:", (opts.map { it.second } + "Turn off app lock").toTypedArray()) { i ->
         if (i < opts.size) Messenger.lockAfterMin = opts[i].first else Messenger.appLock = false
         Messenger.settingsChanged(); showSettings()
     }

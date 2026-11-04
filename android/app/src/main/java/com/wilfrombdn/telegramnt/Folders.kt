@@ -22,7 +22,7 @@ internal fun MainActivity.folderRow(f: Folder, unread: Int, count: Int): View {
     row.addView(icon(R.drawable.ic_folder, white, 26, 14).apply { background = circle(panel2) })
     val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
     mid.addView(tv(f.name, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-    mid.addView(tv(if (count == 0) T("Hold a chat and drag it here") else TP(count, "chat", "chats"), 14f, dim).apply { setPadding(0, dp(2), 0, 0) })
+    mid.addView(tv(if (count == 0) "Hold a chat and drag it here" else "$count chat" + if (count != 1) "s" else "", 14f, dim).apply { setPadding(0, dp(2), 0, 0) })
     row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
     if (unread > 0 && !f.open) row.addView(tv("$unread", 12.5f, white, true).apply {
         gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1)); background = round(blue, 11)
@@ -41,23 +41,23 @@ internal fun MainActivity.folderRow(f: Folder, unread: Int, count: Int): View {
 
 internal fun MainActivity.folderMenu(f: Folder) {
     longPressMenu(null, null, listOf(
-        T("Rename folder") to {
-            val box = field(T("Folder name"), f.name)
-            popup(T("Rename folder"), null, box, T("Cancel") to dim, T("Save") to white) { i ->
+        "Rename folder" to {
+            val box = field("Folder name", f.name)
+            popup("Rename folder", null, box, "Cancel" to dim, "Save" to white) { i ->
                 if (i == 1) box.text.toString().trim().take(40).takeIf { it.isNotEmpty() }?.let { f.name = it; Messenger.settingsChanged(); showChats() }
             }
         },
-        T("Delete folder") to {
-            popup(T("Delete \"${f.name}\"?"), T("Only the folder goes. The chats inside are NOT deleted — they move back to your main list."), null,
-                T("Cancel") to dim, T("Delete") to red) { i -> if (i == 1) { Messenger.folders.remove(f); Messenger.settingsChanged(); showChats() } }
+        "Delete folder" to {
+            popup("Delete \"${f.name}\"?", "Only the folder goes. The chats inside are NOT deleted — they move back to your main list.", null,
+                "Cancel" to dim, "Delete" to red) { i -> if (i == 1) { Messenger.folders.remove(f); Messenger.settingsChanged(); showChats() } }
         },
     ))
 }
 
 internal fun MainActivity.newFolder() {
-    val box = field(T("Folder name"))
-    popup(T("New folder"), T("Group chats together, like Family or Work. Then hold a chat and drag it onto the folder."), box,
-        T("Cancel") to dim, T("Create") to white) { i ->
+    val box = field("Folder name")
+    popup("New folder", "Group chats together, like Family or Work. Then hold a chat and drag it onto the folder.", box,
+        "Cancel" to dim, "Create" to white) { i ->
         val n = box.text.toString().trim().take(40)
         if (i == 1 && n.isNotEmpty()) {
             Messenger.folders.add(Folder(java.util.UUID.randomUUID().toString(), n))
@@ -143,15 +143,15 @@ internal fun MainActivity.folderCounts() = Triple(Texts.threads.count { it.archi
 /** The Archive, Codes and Spam & blocked rows (each hidden while empty). */
 internal fun MainActivity.folderRows(list: LinearLayout) {
     val (a, c, s) = folderCounts()
-    sectionRow("📦", T("Archive"), a) { showTextSection("archive") }?.let { list.addView(it) }
-    sectionRow("🔑", T("Codes"), c) { showTextSection("codes") }?.let { list.addView(it) }
-    sectionRow("🚫", T("Spam & blocked"), s) { showTextSection("spam") }?.let { list.addView(it) }
+    sectionRow("📦", "Archive", a) { showTextSection("archive") }?.let { list.addView(it) }
+    sectionRow("🔑", "Codes", c) { showTextSection("codes") }?.let { list.addView(it) }
+    sectionRow("🚫", "Spam & blocked", s) { showTextSection("spam") }?.let { list.addView(it) }
 }
 
 /** The "Folders" tab of the Phone screen. */
 internal fun MainActivity.addFolderTab(list: LinearLayout) {
     folderRows(list)
     val (a, c, s) = folderCounts()
-    if (a + c + s == 0) list.addView(tv(T("Nothing here yet.\n\nArchived texts, login codes and spam collect in this tab."), 15.5f, dim)
+    if (a + c + s == 0) list.addView(tv("Nothing here yet.\n\nArchived texts, login codes and spam collect in this tab.", 15.5f, dim)
         .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
 }

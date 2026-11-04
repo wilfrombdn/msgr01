@@ -20,7 +20,6 @@ import android.widget.EditText
  * highlights @mentions.
  */
 object Format {
-    /** The second word is an internal name the code switches on (see [render]); the toolbar shows T(name). */
     val MARKS = listOf("**" to "Bold", "__" to "Italic", "~~" to "Strike", "||" to "Spoiler", "`" to "Mono")
     val MENTION = Regex("@([a-z0-9_]{5,32})")
 

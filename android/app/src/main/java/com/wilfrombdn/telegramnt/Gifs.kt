@@ -28,12 +28,12 @@ internal fun MainActivity.keyboardContent(uri: android.net.Uri, mime: String, do
     stick = true
     Messenger.run({
         val data = try { contentResolver.openInputStream(uri)?.use { it.readBytes() } } finally { done() }
-            ?: throw UserError(T("Couldn't read that from the keyboard"))
-        if (data.size > Core.MAX_FILE) throw UserError(T("That's too big to send"))
+            ?: throw UserError("Couldn't read that from the keyboard")
+        if (data.size > Core.MAX_FILE) throw UserError("That's too big to send")
         val animated = mime == "image/gif" || mime == "image/webp"
         val bmp = decodeSmall(data, 1600)
         val (name, type, bytes) = if (animated) Triple(if (mime == "image/gif") "animation.gif" else "sticker.webp", mime, data)
-            else Triple("photo.jpg", "image/jpeg", jpeg(bmp ?: throw UserError(T("Couldn't open that picture")), 1600, 85))
+            else Triple("photo.jpg", "image/jpeg", jpeg(bmp ?: throw UserError("Couldn't open that picture"), 1600, 85))
         val thumb = bmp?.let { thumbOf(it) }
         when (target) {
             is Contact -> Messenger.sendFile(target, name, type, bytes, thumb)
@@ -80,7 +80,7 @@ internal fun MainActivity.showGifTab(grid: LinearLayout, scroll: ScrollView, tar
     grid.removeAllViews()
     val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     val search = EditText(this).apply {
-        hint = T("Search GIFs"); setHintTextColor(dim); setTextColor(white); textSize = 15f
+        hint = "Search GIFs"; setHintTextColor(dim); setTextColor(white); textSize = 15f
         background = GradientDrawable().apply { setColor(panel2); cornerRadius = dp(4).toFloat() }
         setPadding(dp(12), dp(8), dp(12), dp(8)); isSingleLine = true
         imeOptions = EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_EXTRACT_UI
@@ -104,7 +104,7 @@ internal fun MainActivity.showGifTab(grid: LinearLayout, scroll: ScrollView, tar
         })
     }, LinearLayout.LayoutParams(-1, -2))
     grid.addView(results, LinearLayout.LayoutParams(-1, -2))
-    grid.addView(tv(T("Powered by GIPHY"), 11f, faint).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(4)) }, LinearLayout.LayoutParams(-1, -2))
+    grid.addView(tv("Powered by GIPHY", 11f, faint).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(4)) }, LinearLayout.LayoutParams(-1, -2))
 
     var gen = 0
     fun cell(row: LinearLayout, fill: (ImageView) -> Unit) = row.addView(ImageView(this).apply {
@@ -136,7 +136,7 @@ internal fun MainActivity.showGifTab(grid: LinearLayout, scroll: ScrollView, tar
                 results.addView(label("TRENDING"))
             }
         }
-        val loading = tv(T("Loading GIFs…"), 13.5f, dim).apply { gravity = Gravity.CENTER; setPadding(0, dp(16), 0, dp(16)) }
+        val loading = tv("Loading GIFs…", 13.5f, dim).apply { gravity = Gravity.CENTER; setPadding(0, dp(16), 0, dp(16)) }
         results.addView(loading, LinearLayout.LayoutParams(-1, -2))
         var found: List<Pair<Relay.Gif, android.graphics.drawable.Drawable?>> = emptyList()
         Messenger.run({
@@ -144,7 +144,7 @@ internal fun MainActivity.showGifTab(grid: LinearLayout, scroll: ScrollView, tar
         }, {
             if (my != gen) return@run   // a newer search replaced this one
             results.removeView(loading)
-            if (found.isEmpty() && offset == 0) results.addView(tv(if (q.isEmpty()) T("No GIFs right now") else T("No GIFs for \"$q\""), 14f, dim).apply {
+            if (found.isEmpty() && offset == 0) results.addView(tv(if (q.isEmpty()) "No GIFs right now" else "No GIFs for \"$q\"", 14f, dim).apply {
                 gravity = Gravity.CENTER; setPadding(0, dp(16), 0, dp(16))
             }, LinearLayout.LayoutParams(-1, -2))
             rows(results, found.size) { row, i -> cell(row) { iv ->
@@ -152,13 +152,13 @@ internal fun MainActivity.showGifTab(grid: LinearLayout, scroll: ScrollView, tar
                 d?.let { iv.setImageDrawable(it); if (Build.VERSION.SDK_INT >= 28 && it is android.graphics.drawable.AnimatedImageDrawable) it.start() }
                 iv.setOnClickListener { emojiPopup?.dismiss(); emojiPopup = null; sendGiphy(g, target) }
             } }
-            if (found.size >= 24) results.addView(tv(T("More"), 14f, white, true).apply {
+            if (found.size >= 24) results.addView(tv("More", 14f, white, true).apply {
                 gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(12)); background = pressable(); isClickable = true
                 setOnClickListener { results.removeView(this); load(q, offset + found.size) }
             }, LinearLayout.LayoutParams(-1, -2))
         }) { e ->
             if (my != gen) return@run
-            loading.text = if (e is Relay.RelayError) errorText(e) else T("Couldn't load GIFs. Check your connection.")
+            loading.text = if (e is Relay.RelayError) errorText(e) else "Couldn't load GIFs. Check your connection."
         }
     }
     val debounce = Runnable { load(search.text.toString().trim(), 0) }
@@ -175,7 +175,7 @@ internal fun MainActivity.showGifTab(grid: LinearLayout, scroll: ScrollView, tar
 /** Fetches the full GIF through our server and sends it. */
 internal fun MainActivity.sendGiphy(g: Relay.Gif, target: Any) {
     stick = true
-    toast(T("Sending GIF…"))
+    toast("Sending GIF…")
     Messenger.run({
         val bytes = Messenger.core.relay.gif(g.id)
         val thumb = decodeSmall(bytes, 400)?.let { thumbOf(it) }
@@ -190,7 +190,7 @@ internal fun MainActivity.sendGiphy(g: Relay.Gif, target: Any) {
 internal fun MainActivity.resendGif(m: Msg, target: Any) {
     stick = true
     Messenger.run({
-        val bytes = Messenger.core.openFile(m) ?: throw UserError(T("Couldn't open that GIF"))
+        val bytes = Messenger.core.openFile(m) ?: throw UserError("Couldn't open that GIF")
         val thumb = decodeSmall(bytes, 400)?.let { thumbOf(it) }
         val name = m.file?.optString("n")?.ifBlank { null } ?: "animation.gif"
         when (target) {

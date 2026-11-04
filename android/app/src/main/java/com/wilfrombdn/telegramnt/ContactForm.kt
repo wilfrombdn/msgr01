@@ -15,7 +15,7 @@ import android.provider.ContactsContract.CommonDataKinds.Phone as P
 // Adding and editing a contact on the phone: one screen for both (a big initials circle, name, numbers with labels, emails),
 // and the contact pop-up that offers Edit contact, Call and Text.
 
-private val PHONE_LABELS = listOf(P.TYPE_MOBILE to T("Mobile"), P.TYPE_HOME to T("Home"), P.TYPE_WORK to T("Work"), P.TYPE_OTHER to T("Other"))
+private val PHONE_LABELS = listOf(P.TYPE_MOBILE to "Mobile", P.TYPE_HOME to "Home", P.TYPE_WORK to "Work", P.TYPE_OTHER to "Other")
 
 /** New contact, made right here and saved to the phone's contacts. [number] pre-fills the first number. */
 internal fun MainActivity.showAddContact(number: String?, back: () -> Unit) = showContactForm(null, number, back)
@@ -23,7 +23,7 @@ internal fun MainActivity.showAddContact(number: String?, back: () -> Unit) = sh
 /** Edit a contact in the same screen as "New contact", filled in. Save changes it on the phone; the X leaves it as it was. */
 internal fun MainActivity.showEditContact(p: Phone.Person, back: () -> Unit) {
     var d: Phone.Detail? = null
-    Messenger.run({ d = Phone.detail(this, p.id) }, { d?.let { showContactForm(it, null, back) } ?: toast(T("Couldn't open that contact")) }) { toast(T("Couldn't open that contact")) }
+    Messenger.run({ d = Phone.detail(this, p.id) }, { d?.let { showContactForm(it, null, back) } ?: toast("Couldn't open that contact") }) { toast("Couldn't open that contact") }
 }
 
 private class PhoneEntry(val field: EditText, var type: Int)
@@ -36,20 +36,20 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
     fun box(hint: String, value: String = "") = field(hint, value)   // the app's rounded text box
     var newPhoto: ByteArray? = null   // a photo picked here; null = leave the contact's photo as it is
     val given = detail?.let { if (it.given.isBlank() && it.family.isBlank()) it.display else it.given }.orEmpty()
-    val first = box(T("First name"), given).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
-    val last = box(T("Last name"), detail?.family.orEmpty()).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
-    val company = box(T("Company"), detail?.company.orEmpty()).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
+    val first = box("First name", given).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
+    val last = box("Last name", detail?.family.orEmpty()).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
+    val company = box("Company", detail?.company.orEmpty()).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
 
     // phone numbers, each with a label you tap to change, and a remove button; emails the same without labels
     val phones = ArrayList<PhoneEntry>()
     val phoneBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    fun newPhone(value: String, type: Int) = PhoneEntry(box(T("Phone number"), value).apply {
+    fun newPhone(value: String, type: Int) = PhoneEntry(box("Phone number", value).apply {
         inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher())
     }, type).also { phones += it }
     if (detail != null && detail.phones.isNotEmpty()) detail.phones.forEach { newPhone(it.number, it.type) } else newPhone(number.orEmpty(), P.TYPE_MOBILE)
     val emails = ArrayList<EditText>()
     val emailBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    fun newEmail(value: String) = box(T("Email"), value).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }.also { emails += it }
+    fun newEmail(value: String) = box("Email", value).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }.also { emails += it }
     if (detail != null && detail.emails.isNotEmpty()) detail.emails.forEach { newEmail(it.address) } else newEmail("")
 
     fun labelOf(type: Int) = PHONE_LABELS.firstOrNull { it.first == type }?.second ?: P.getTypeLabel(resources, type, "").toString()
@@ -104,7 +104,7 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
         val name = "${first.text} ${last.text}".trim()
         avatarHolder.removeAllViews()
         avatarHolder.addView(avatar(name.ifEmpty { "?" }, 96, newPhoto ?: detail?.photo))
-        avatarHolder.addView(tv(T("Tap to add a photo"), 13.5f, blue, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) }, LinearLayout.LayoutParams(-2, -2))
+        avatarHolder.addView(tv("Tap to add a photo", 13.5f, blue, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) }, LinearLayout.LayoutParams(-2, -2))
     }
     avatarHolder.setOnClickListener {
         contactPhotoDone = { jpeg -> newPhoto = jpeg; refreshAvatar() }
@@ -122,10 +122,10 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
     first.addTextChangedListener(watch); last.addTextChangedListener(watch)
 
     fun save() {
-        if (first.text.isBlank() && last.text.isBlank()) return toast(T("Add a name"))
+        if (first.text.isBlank() && last.text.isBlank()) return toast("Add a name")
         val nums = phones.map { it.field.text.toString().trim() to it.type }.filter { it.first.isNotEmpty() }
         val mails = emails.map { it.text.toString().trim() }.filter { it.isNotEmpty() }
-        if (nums.isEmpty() && mails.isEmpty()) return toast(T("Add a phone number or email"))
+        if (nums.isEmpty() && mails.isEmpty()) return toast("Add a phone number or email")
         if (!Phone.canWriteContacts(this)) {
             addContactSave = { save() }
             return requestPermissions(arrayOf(Manifest.permission.WRITE_CONTACTS), ADD_CONTACT_PERM)
@@ -136,11 +136,11 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
             ok = if (detail != null) Phone.updateContact(this, detail, f, l, co, nums, mails, newPhoto) else Phone.addContact(this, f, l, co, nums, mails, newPhoto)
         }, {
             if (ok) {
-                toast(T("Contact saved"))
+                toast("Contact saved")
                 Texts.forgetNames(); phoneLoaded = 0; phoneCalls = null; contactThumbs.clear()
                 Messenger.run({ Texts.threads.forEach { t -> t.addresses.forEach { Texts.name(this, it) } } }, { addContactBack() })
-            } else toast(T("Couldn't save the contact"))
-        }) { toast(T("Couldn't save the contact")) }
+            } else toast("Couldn't save the contact")
+        }) { toast("Couldn't save the contact") }
     }
 
     fun nameRow() = LinearLayout(this).apply {
@@ -160,14 +160,14 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
     col.addView(nameRow())
     col.addView(companyRow(), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
     col.addView(phoneBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-    col.addView(small(T("+  Add phone"), blue) { newPhone("", P.TYPE_MOBILE); redraw() }.apply { setPadding(dp(54), dp(8), dp(10), dp(8)) })
+    col.addView(small("+  Add phone", blue) { newPhone("", P.TYPE_MOBILE); redraw() }.apply { setPadding(dp(54), dp(8), dp(10), dp(8)) })
     col.addView(emailBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-    col.addView(small(T("+  Add email"), blue) { newEmail(""); redraw() }.apply { setPadding(dp(54), dp(8), dp(10), dp(8)) })
-    val saveBtn = tv(T("SAVE"), 15f, white, true).apply {
+    col.addView(small("+  Add email", blue) { newEmail(""); redraw() }.apply { setPadding(dp(54), dp(8), dp(10), dp(8)) })
+    val saveBtn = tv("SAVE", 15f, white, true).apply {
         setPadding(dp(18), dp(10), dp(18), dp(10)); background = round(panel2, 20); setOnClickListener { save() }
     }
     val root = page(
-        topBar(if (editing) T("Edit contact") else T("New contact"), null, icon(R.drawable.ic_close) { back() },
+        topBar(if (editing) "Edit contact" else "New contact", null, icon(R.drawable.ic_close) { back() },
             LinearLayout(this).apply { setPadding(0, 0, dp(10), 0); addView(saveBtn) }),
         ScrollView(this).apply { addView(col) })
     contactFormView = root
@@ -184,13 +184,13 @@ internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     var dialog: android.app.Dialog? = null
     fun copy(what: String, value: String) {
-        getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText(what, value)); toast(T("Copied"))
+        getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText(what, value)); toast("Copied")
     }
     if (p.id == 0L || edit) col.addView(LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(0, dp(8), 0, dp(10)); background = pressable(); isClickable = true
         addView(icon(R.drawable.ic_edit, white, 22, 0))
-        addView(tv(if (p.id != 0L) T("Edit contact") else T("Add to contacts"), 16f, white, true).apply { setPadding(dp(14), 0, 0, 0) })
+        addView(tv(if (p.id != 0L) "Edit contact" else "Add to contacts", 16f, white, true).apply { setPadding(dp(14), 0, 0, 0) })
         setOnClickListener {
             dialog?.dismiss()
             if (p.id != 0L) showEditContact(p) { showChats() } else showAddContact(p.numbers.firstOrNull()?.first) { showChats() }
@@ -202,7 +202,7 @@ internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
         addView(icon(R.drawable.ic_company, dim, 22, 0))
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0)
-            addView(tv(p.company, 16f, white)); addView(tv(T("Company"), 13f, dim))
+            addView(tv(p.company, 16f, white)); addView(tv("Company", 13f, dim))
         })
     })
     for ((n, label) in p.numbers) col.addView(LinearLayout(this).apply {
@@ -228,15 +228,15 @@ internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0)
             addView(tv(m, 16f, blue).apply { paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG })   // a link
-            addView(tv(T("Email"), 13f, dim))
+            addView(tv("Email", 13f, dim))
         })
         setOnClickListener {   // asks which email app to use, then starts a new message to them
             val i = android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:" + android.net.Uri.encode(m)))
-            runCatching { startActivity(android.content.Intent.createChooser(i, T("Email $m with"))) }.onFailure { toast(T("No email app found")) }
+            runCatching { startActivity(android.content.Intent.createChooser(i, "Email $m with")) }.onFailure { toast("No email app found") }
         }
         setOnLongClickListener { copy("email", m); true }
     })
-    popup(p.name, T("Hold a number or email to copy it. Calls and texts go through your carrier, not private."), col, T("Close") to dim, dialogOut = { dialog = it })
+    popup(p.name, "Hold a number or email to copy it. Calls and texts go through your carrier, not private.", col, "Close" to dim, dialogOut = { dialog = it })
 }
 
 /** Tapping a phone call in the Calls list: the contact's numbers with Call and Text (no editing here), or the bare number with "Add to contacts". */
@@ -250,9 +250,9 @@ internal fun MainActivity.contactPhotoPicked(uri: android.net.Uri) {
     var bmp: android.graphics.Bitmap? = null
     Messenger.run({ bmp = loadPhoto(uri) }, {
         val b = bmp
-        if (b == null) toast(T("Couldn't open that photo"))
+        if (b == null) toast("Couldn't open that photo")
         else showCrop(b, done = { jpeg -> restoreContactForm(); contactPhotoDone?.invoke(jpeg) }, cancel = { restoreContactForm() })
-    }) { toast(T("Couldn't open that photo")) }
+    }) { toast("Couldn't open that photo") }
 }
 
 internal fun MainActivity.restoreContactForm() {
