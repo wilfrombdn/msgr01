@@ -378,9 +378,9 @@ internal fun MainActivity.windowSwitch(tellemUnread: Int, phoneUnread: Int): Vie
         setPadding(dp(16), 0, dp(16), 0)
         background = if (on) round(white, 23) else null
         addView(tv(label, 15f, if (on) ink else dim, true))
-        if (!on && unread > 0) addView(tv(if (unread > 99) "99+" else "$unread", 11.5f, android.graphics.Color.WHITE, true).apply {
+        if (!on && unread > 0) addView(tv(if (unread > 99) "99+" else "$unread", 11.5f, if (label == "Phone") Look.textOn(look.sms) else android.graphics.Color.WHITE, true).apply {
             gravity = Gravity.CENTER; minWidth = dp(20); setPadding(dp(5), dp(1), dp(5), dp(1))
-            background = round(if (label == "Phone") smsGreen else blue, 10)
+            background = round(if (label == "Phone") look.sms else blue, 10)
         }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(6) })
     }, LinearLayout.LayoutParams(-2, -1))
     seg(APP_NAME, tellemUnread, !textsTab)

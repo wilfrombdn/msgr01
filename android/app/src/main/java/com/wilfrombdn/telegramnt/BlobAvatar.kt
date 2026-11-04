@@ -47,6 +47,7 @@ internal class BlobAvatar(private val seed: String) : Drawable() {
 
     /** A clearly visible grey disc: a mid-grey base that never matches the dark background, a bright soft light, a shadow, and a thin rim. */
     private fun drawGlow(c: Canvas) {
+        c.save(); c.clipPath(Path().apply { addCircle(24f, 24f, 21.2f, Path.Direction.CW) })   // fill stays inside, leaving a small gap to the rim
         val base = (88 + next() * 40).toInt()
         val x0 = next() * 20f; val y0 = next() * 20f
         paint.shader = LinearGradient(x0, y0, 48f - x0, 48f - y0, Color.rgb(base + 55, base + 55, base + 57), Color.rgb(base - 20, base - 20, base - 18), Shader.TileMode.CLAMP)
@@ -55,7 +56,8 @@ internal class BlobAvatar(private val seed: String) : Drawable() {
         c.drawRect(0f, 0f, 48f, 48f, paint)
         paint.shader = RadialGradient(6f + next() * 36f, 6f + next() * 36f, 22f, 0x44000000, Color.TRANSPARENT, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, 48f, 48f, paint)
-        paint.shader = null; paint.style = Paint.Style.STROKE; paint.strokeWidth = 1.2f; paint.color = 0x40FFFFFF
+        c.restore()
+        paint.shader = null; paint.style = Paint.Style.STROKE; paint.strokeWidth = 1.2f; paint.color = 0x55FFFFFF
         c.drawCircle(24f, 24f, 23.4f, paint)
         paint.style = Paint.Style.FILL
     }

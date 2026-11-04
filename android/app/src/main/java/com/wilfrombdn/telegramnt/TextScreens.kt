@@ -446,7 +446,7 @@ internal fun MainActivity.fillTextThread() {
 
 internal fun MainActivity.textBubble(t: Texts.Text, group: Boolean): View {
     val wrap = LinearLayout(this).apply { gravity = if (t.mine) Gravity.END else Gravity.START; setPadding(0, dp(4), 0, dp(4)) }
-    val fill = if (t.mine) smsGreen else look.inn
+    val fill = if (t.mine) look.sms else look.inn
     val ink = Look.textOn(fill)
     val b = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL

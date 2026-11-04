@@ -97,7 +97,7 @@ internal fun MainActivity.showSettings() {
             }
         })
     }
-    col.addView(settingNote("Normal texts go through your phone carrier, not Tor, and aren't encrypted: the carrier can read them. They're kept in the phone's own text storage, so self-destruct doesn't erase them. In $APP_NAME they always have green bubbles and an SMS tag."))
+    col.addView(settingNote("Normal texts go through your phone carrier, not Tor, and aren't encrypted: the carrier can read them. They're kept in the phone's own text storage, so self-destruct doesn't erase them. In $APP_NAME they have an SMS tag, and your own text bubbles are green unless you pick another colour in Appearance."))
     // ---- Background: messages and ringing while the app is closed ----
     header("When the app is closed")
     col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged(); showSettings() })
@@ -209,6 +209,7 @@ internal fun MainActivity.showAppearance() {
     val demo = Contact("preview", "Sam", Contact.FRIENDS, "00", null, "", "")
     preview.addView(bubble(demo, Msg("a", false, "Hey! Did you pick a colour yet?", now - 120_000, Msg.RECEIVED)))
     preview.addView(bubble(demo, Msg("b", true, "Trying a few now", now, Msg.SENT)))
+    preview.addView(textBubble(Texts.Text(0L, false, true, null, "Normal texts use this colour", now, Texts.OK), false))
     col.addView(preview)
     col.addView(settingSwitch("Animations", UiPrefs.animations(this)) { on -> UiPrefs.setAnimations(this, on) })
     col.addView(settingNote("Sliding between screens and tabs, and the round button growing into a camera. Off: everything changes instantly."))
@@ -229,11 +230,11 @@ internal fun MainActivity.showAppearance() {
             }, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(4), 0, dp(4), 0) })
         }
     })
-    fun swatches(current: Int, onPick: (Int) -> Unit) = col.addView(android.widget.HorizontalScrollView(this).apply {
+    fun swatches(current: Int, list: List<Pair<String, Int>> = Look.BUBBLES, onPick: (Int) -> Unit) = col.addView(android.widget.HorizontalScrollView(this).apply {
         isHorizontalScrollBarEnabled = false
         addView(LinearLayout(context).apply {
             setPadding(dp(16), 0, dp(16), 0)
-            for ((name, color) in Look.BUBBLES) addView(LinearLayout(context).apply {
+            for ((name, color) in list) addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
                 addView(View(context).apply {
@@ -261,6 +262,8 @@ internal fun MainActivity.showAppearance() {
     swatches(look.out) { look.out = it }
     section("THEIR BUBBLES")
     swatches(look.inn) { look.inn = it }
+    section("TEXT MESSAGE BUBBLES (YOURS)")
+    swatches(look.sms, Look.SMS_BUBBLES) { look.sms = it }
     section("BUBBLE CORNERS")
     chips("Rounded" to !look.square, "Square" to look.square) { look.square = it == 1 }
     section("MESSAGE TEXT SIZE")
@@ -273,7 +276,7 @@ internal fun MainActivity.showAppearance() {
     chips(*Look.UI_SIZES.map { (label, v) -> label to (v == look.ui) }.toTypedArray()) { look.ui = Look.UI_SIZES[it].second }
     col.addView(tv("Reset to default", 15f, white, true).apply {
         setPadding(dp(20), dp(24), dp(20), dp(24))
-        setOnClickListener { Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second; Messenger.settingsChanged(); showAppearance() }
+        setOnClickListener { Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second; Messenger.look.sms = Look.SMS_GREEN; Messenger.settingsChanged(); showAppearance() }
     })
     setContentView(page(topBar("Appearance", left = icon(R.drawable.ic_back) { showSettings() }), ScrollView(this).apply { addView(col) }))
 }

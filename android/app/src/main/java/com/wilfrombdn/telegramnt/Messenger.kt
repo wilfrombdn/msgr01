@@ -770,17 +770,19 @@ object Messenger {
 class Look {
     var out = BUBBLES[0].second
     var inn = BUBBLES[1].second
+    var sms = SMS_GREEN  // normal texts: your own bubble colour
     var ui = 1f          // scales all app text
     var msg = 16f        // message text size in sp
     var square = false   // square bubble corners
     var theme = "dark"   // "dark", "light" or "system" (match the phone)
 
-    fun json(): JSONObject = JSONObject().put("out", out).put("in", inn).put("ui", ui.toDouble())
+    fun json(): JSONObject = JSONObject().put("out", out).put("in", inn).put("sms", sms).put("ui", ui.toDouble())
         .put("msg", msg.toDouble()).put("square", square).put("theme", theme)
 
     fun load(o: JSONObject) {
         out = o.optInt("out", out)
         inn = o.optInt("in", inn)
+        sms = o.optInt("sms", sms)
         ui = o.optDouble("ui", 1.0).toFloat().coerceIn(0.8f, 1.5f)
         msg = o.optDouble("msg", 16.0).toFloat().coerceIn(12f, 28f)
         square = o.optBoolean("square")
@@ -794,6 +796,8 @@ class Look {
             "Purple" to 0xFF4A3A6B.toInt(), "Red" to 0xFF6B2E2E.toInt(), "Amber" to 0xFF8A5A12.toInt(),
             "White" to 0xFFE8E8EA.toInt(),
         )
+        val SMS_GREEN = 0xFF2E7D4F.toInt()
+        val SMS_BUBBLES = listOf("Classic green" to SMS_GREEN) + BUBBLES
         val UI_SIZES = listOf("Small" to 0.9f, "Default" to 1f, "Large" to 1.15f, "Larger" to 1.3f)
         val MSG_SIZES = listOf(14f, 16f, 18f, 20f, 23f)
 
