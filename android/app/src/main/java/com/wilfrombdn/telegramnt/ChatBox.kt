@@ -2,7 +2,6 @@ package com.wilfrombdn.telegramnt
 
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.widget.EditText
@@ -36,7 +35,7 @@ class ChatBox(ctx: Context, private val onContent: (Uri, String, () -> Unit) -> 
         val ic = super.onCreateInputConnection(out) ?: return null
         EditorInfoCompat.setContentMimeTypes(out, MIMES)
         return InputConnectionCompat.createWrapper(ic, out) { info, flags, _ ->
-            val grant = Build.VERSION.SDK_INT >= 25 && (flags and InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION) != 0
+            val grant = (flags and InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION) != 0
             if (grant) try { info.requestPermission() } catch (e: Exception) { return@createWrapper false }
             val mime = MIMES.firstOrNull { info.description.hasMimeType(it) }
                 ?: run { if (grant) info.releasePermission(); return@createWrapper false }

@@ -114,9 +114,7 @@ class MmsDownloadedReceiver : BroadcastReceiver() {
         val f = File(Texts.mmsDir(ctx), "ack-${System.nanoTime()}.pdu").apply { writeBytes(Mms.notifyResp(tid)) }
         val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
         for (pkg in listOf("com.android.phone", "com.android.mms.service")) runCatching { ctx.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-        @Suppress("DEPRECATION")
-        val sm = if (android.os.Build.VERSION.SDK_INT >= 31) ctx.getSystemService(android.telephony.SmsManager::class.java) else android.telephony.SmsManager.getDefault()
-        (if (sub >= 0) sm.createForSubscriptionId(sub) else sm).sendMultimediaMessage(ctx, uri, null, null, null)
+        Texts.smsManager(ctx, sub).sendMultimediaMessage(ctx, uri, null, null, null)
         // the file is tiny; old ones are cleared with the cache
     }
 }

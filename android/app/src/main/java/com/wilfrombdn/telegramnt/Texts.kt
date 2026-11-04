@@ -306,9 +306,11 @@ object Texts {
 
     // ---------- sending ----------
 
-    private fun smsManager(ctx: Context, sub: Int = -1): SmsManager {
-        @Suppress("DEPRECATION")
-        val base = if (Build.VERSION.SDK_INT >= 31) ctx.getSystemService(SmsManager::class.java) else SmsManager.getDefault()
+    /** The SMS manager for this phone, or for one SIM when [sub] is given. Android 12 changed how it is looked up. */
+    @Suppress("DEPRECATION")
+    fun smsManager(ctx: Context, sub: Int = -1): SmsManager {
+        if (Build.VERSION.SDK_INT < 31) return if (sub >= 0) SmsManager.getSmsManagerForSubscriptionId(sub) else SmsManager.getDefault()
+        val base = ctx.getSystemService(SmsManager::class.java)
         return if (sub >= 0) base.createForSubscriptionId(sub) else base
     }
 
@@ -480,7 +482,7 @@ object Texts {
             @Suppress("DEPRECATION")
             val style = if (Build.VERSION.SDK_INT >= 28) Notification.MessagingStyle(android.app.Person.Builder().setName("You").build())
             else Notification.MessagingStyle("You")
-            if (people.size > 1) style.conversationTitle = title.also { style.isGroupConversation = true }
+            if (people.size > 1) { style.conversationTitle = title; if (Build.VERSION.SDK_INT >= 28) style.isGroupConversation = true }
             for (t in unread) {
                 val who = t.from?.let { name(ctx, it) } ?: title
                 val line = t.body.ifEmpty { if (t.attachments.isNotEmpty()) "📷 Picture" else "Picture message" }

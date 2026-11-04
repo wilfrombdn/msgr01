@@ -63,7 +63,7 @@ object Phone {
     fun addContact(ctx: Context, first: String, last: String, number: String, email: String): Boolean = runCatching {
         val c = android.provider.ContactsContract.Data.CONTENT_URI
         val raw = android.provider.ContactsContract.RawContacts.CONTENT_URI
-        val acct = if (android.os.Build.VERSION.SDK_INT >= 29) android.provider.ContactsContract.Settings.getDefaultAccount(ctx.contentResolver) else null
+        val acct = if (android.os.Build.VERSION.SDK_INT >= 33) android.provider.ContactsContract.Settings.getDefaultAccount(ctx.contentResolver) else null
         val ops = ArrayList<android.content.ContentProviderOperation>()
         ops += android.content.ContentProviderOperation.newInsert(raw)
             .withValue(android.provider.ContactsContract.RawContacts.ACCOUNT_TYPE, acct?.type)

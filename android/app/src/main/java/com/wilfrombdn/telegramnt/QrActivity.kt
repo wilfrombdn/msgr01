@@ -40,7 +40,7 @@ class QrActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        val preview = PreviewView(this).apply { id = 1 }
+        val preview = PreviewView(this).apply { id = R.id.qr_preview }
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(preview, FrameLayout.LayoutParams(-1, -1))
@@ -67,7 +67,7 @@ class QrActivity : ComponentActivity() {
     }
 
     private fun start() {
-        val preview = findViewById<PreviewView>(1)
+        val preview = findViewById<PreviewView>(R.id.qr_preview)
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = future.get()

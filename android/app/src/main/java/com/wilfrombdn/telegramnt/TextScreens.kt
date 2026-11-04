@@ -24,8 +24,11 @@ import androidx.core.view.children
 
 /** Ask Android to make Tellem the texting app (Android shows its own "set as default" question). */
 internal fun MainActivity.askCallRole() {
-    val rm = if (Build.VERSION.SDK_INT >= 29) getSystemService(android.app.role.RoleManager::class.java) else null
-    val i = rm?.takeIf { it.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER) }?.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER)
+    val roleIntent = if (Build.VERSION.SDK_INT >= 29)
+        getSystemService(android.app.role.RoleManager::class.java)?.takeIf { it.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER) }
+            ?.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER)
+    else null
+    val i = roleIntent
         ?: @Suppress("DEPRECATION") Intent(android.telecom.TelecomManager.ACTION_CHANGE_DEFAULT_DIALER).putExtra(android.telecom.TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, packageName)
     @Suppress("DEPRECATION") startActivityForResult(i, CALL_ROLE)
 }
