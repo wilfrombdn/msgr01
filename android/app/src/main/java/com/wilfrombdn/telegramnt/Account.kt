@@ -67,7 +67,7 @@ internal fun MainActivity.showWelcome() {
     col.addView(welcomeTorLine)
     welcomeDirect = tv("", 15f, white, true).apply {
         gravity = Gravity.CENTER; setPadding(dp(8), dp(14), dp(8), dp(8)); visibility = View.GONE
-        setOnClickListener { Messenger.useDirect(!Messenger.direct) }
+        setOnClickListener { if (Messenger.direct) Messenger.useDirect(false) else confirmDirect { Messenger.useDirect(true) } }
     }
     col.addView(welcomeDirect)
     setContentView(ScrollView(this).apply {

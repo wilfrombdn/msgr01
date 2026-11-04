@@ -8,3 +8,11 @@ updates:
       interval: weekly
     allow:
       - dependency-name: "io.matthewnelson.kmp-tor:*"
+      - dependency-name: "org.signal:*"
+      - dependency-name: "org.bouncycastle:*"
+      - dependency-name: "com.google.crypto.tink:*"
+  # the build's own steps are pinned to exact commits; this keeps those pins current
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

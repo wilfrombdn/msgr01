@@ -1,0 +1,45 @@
+[Unit]
+Description=Tellem: publish the Direct address to the download site
+After=tellem-tunnel.service network-online.target
+Wants=network-online.target
+PartOf=tellem-tunnel.service
+
+[Service]
+# The ONLY user that holds the GitHub deploy key (write access to wilfrombdn.github.io). The relay and the tunnel can't read it.
+User=tellem-pub
+Group=tellem-pub
+UMask=0077
+# the script is owned by root, so the user it runs as can't rewrite it
+ExecStart=/usr/local/sbin/tellem-publish
+Restart=always
+RestartSec=30
+StandardOutput=null
+StandardError=null
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/tellem-pub
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

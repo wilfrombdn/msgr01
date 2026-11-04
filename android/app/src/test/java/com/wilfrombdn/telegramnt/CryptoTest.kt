@@ -112,4 +112,30 @@ class CryptoTest {
             assertTrue("$x -> $y", Math.abs(y - x) <= maxOf(8, Math.abs(x) / 16))
         }
     }
+
+    @Test fun argon2KeysAreStableSeparateAndDifferFromPbkdf2() {
+        val a = Crypto.passwordKeys("some_user", "a long enough password", Crypto.KDF_ARGON2)
+        val again = Crypto.passwordKeys("some_user", "a long enough password", Crypto.KDF_ARGON2)
+        assertArrayEquals(a.auth, again.auth); assertArrayEquals(a.backup, again.backup)
+        assertFalse("auth and backup keys are independent", a.auth.contentEquals(a.backup))
+        assertFalse(a.auth.contentEquals(Crypto.passwordKeys("other_user", "a long enough password", Crypto.KDF_ARGON2).auth))
+        assertFalse(a.auth.contentEquals(Crypto.passwordKeys("some_user", "a long enough passworD", Crypto.KDF_ARGON2).auth))
+        assertFalse(a.backup.contentEquals(Crypto.passwordKeys("some_user", "a long enough password", Crypto.KDF_PBKDF2).backup))
+        assertEquals(32, a.auth.size); assertEquals(32, a.backup.size)
+    }
+
+    @Test fun serverIdentityProofsAreChecked() {
+        val kp = com.google.crypto.tink.subtle.Ed25519Sign.KeyPair.newKeyPair()
+        val signer = com.google.crypto.tink.subtle.Ed25519Sign(kp.privateKey)
+        val challenge = ByteArray(32) { it.toByte() }
+        val sig = signer.sign("tellem-server-v1|".toByteArray() + challenge)
+        assertTrue(Crypto.verifyServerId(kp.publicKey, sig, challenge, kp.publicKey))
+        val other = com.google.crypto.tink.subtle.Ed25519Sign.KeyPair.newKeyPair()
+        assertFalse("a different server key is refused even with a valid signature of its own",
+            Crypto.verifyServerId(other.publicKey, com.google.crypto.tink.subtle.Ed25519Sign(other.privateKey).sign("tellem-server-v1|".toByteArray() + challenge), challenge, kp.publicKey))
+        assertFalse("wrong challenge", Crypto.verifyServerId(kp.publicKey, sig, ByteArray(32), kp.publicKey))
+        assertFalse("a different message", Crypto.verifyServerId(kp.publicKey, signer.sign("hello".toByteArray()), challenge, kp.publicKey))
+        assertFalse("nothing built in", Crypto.verifyServerId(kp.publicKey, sig, challenge, ByteArray(0)))
+        assertEquals("the key built into the app is a real 32-byte key", 32, java.util.Base64.getDecoder().decode(Messenger.SERVER_ID).size)
+    }
 }

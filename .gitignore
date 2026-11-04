@@ -10,3 +10,4 @@ dist/
 SECURITY-AUDIT-*.md
 server/giphy.key
 server/fcm.json
+server/server-id.key

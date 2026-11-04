@@ -1,0 +1,12 @@
+#!/bin/sh
+# Installed at /usr/local/sbin/tellem-backup-dump (owned by root, so nothing the relay can write can change it).
+# The nightly backup key may run only this, as the relay's user. It prints the two account tables as SQL and, as comments,
+# the server's identity key (so a rebuilt server keeps the same Direct-mode identity). Messages, files, mailboxes and wake-up
+# tokens are never included. The PC encrypts the result to a public key before it touches disk.
+set -eu
+DIR=/opt/tellem/server
+sqlite3 -readonly "$DIR/telegramnt.db" '.dump accounts otpk'
+if [ -f "$DIR/server-id.key" ]; then
+    echo "-- tellem-server-id-key (restore: save the lines below, without the leading '-- ', as server-id.key, mode 600)"
+    sed 's/^/-- /' "$DIR/server-id.key"
+fi

@@ -120,7 +120,7 @@ internal fun MainActivity.fillChat() {
         Contact.ASKING -> if (c.msgs.any { !it.mine && it.state == Msg.RECEIVED }) "message request" else "wants to be your friend"
         Contact.CHATTING -> if (c.waitingForAdd) "@${c.user} · hasn't added you yet" else "@${c.user} · not your friend"
         Contact.SAVED -> "only on this phone"
-        else -> if (c.user in Messenger.core.blocked) "@${c.user} · blocked" else if (c.verified) "@${c.user} · verified ✓" else "@${c.user}"
+        else -> if (c.user in Messenger.core.blocked) "@${c.user} · blocked" else if (c.verified) "@${c.user} · verified ✓" else "@${c.user} · not verified"
     }
     chatTop?.removeAllViews()
     val blocked = Messenger.core.callBlocked(c)
@@ -236,8 +236,7 @@ internal fun MainActivity.quoteView(r: org.json.JSONObject, all: List<Msg>, ink:
         addView(View(context).apply { setBackgroundColor(accent) }, LinearLayout.LayoutParams(dp(3), -1))
         // a little picture when replying to a photo
         orig?.file?.optString("th")?.takeIf { it.isNotEmpty() && orig.file?.optString("m")?.startsWith("image/") == true }?.let { th ->
-            val t = java.util.Base64.getDecoder().decode(th)
-            android.graphics.BitmapFactory.decodeByteArray(t, 0, t.size)?.let { bmp ->
+            safeBitmap(java.util.Base64.getDecoder().decode(th), 256)?.let { bmp ->
                 addView(ImageView(context).apply { setImageBitmap(bmp); scaleType = ImageView.ScaleType.CENTER_CROP },
                     LinearLayout.LayoutParams(dp(36), dp(36)).apply { leftMargin = dp(6); topMargin = dp(4); bottomMargin = dp(4) })
             }

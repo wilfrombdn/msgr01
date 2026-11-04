@@ -1,0 +1,45 @@
+[Unit]
+Description=Tellem Cloudflare tunnel (Direct mode only)
+After=tellem.service network-online.target
+Wants=network-online.target
+BindsTo=tellem.service
+StartLimitIntervalSec=0
+
+[Service]
+User=tellem-tunnel
+Group=tellem-tunnel
+# The tunnel address is written to a log that the publisher (another user) may read; nothing else is kept.
+RuntimeDirectory=tellem-tunnel
+RuntimeDirectoryMode=0755
+UMask=0022
+Environment=HOME=/run/tellem-tunnel
+ExecStart=/bin/sh -c 'exec /usr/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8081 >/run/tellem-tunnel/tunnel.log 2>&1'
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

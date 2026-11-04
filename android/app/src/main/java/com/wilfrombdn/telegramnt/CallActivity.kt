@@ -142,7 +142,7 @@ class CallActivity : Activity() {
     }
 
     private fun avatar(name: String, photo: ByteArray?): View {
-        val bmp = photo?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
+        val bmp = photo?.let { safeBitmap(it, 512) }
         if (bmp != null) return ImageView(this).apply {
             setImageBitmap(circle(bmp)); scaleType = ImageView.ScaleType.FIT_CENTER
         }

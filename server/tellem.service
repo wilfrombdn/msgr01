@@ -1,17 +1,49 @@
 [Unit]
-Description=Tellem server (relay + Cloudflare tunnel for Direct)
+Description=Tellem relay (the server)
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
 User=tellem
-RuntimeDirectory=tellem
-ExecStart=/opt/tellem/server/droplet-server.sh
+Group=tellem
+UMask=0077
+WorkingDirectory=/opt/tellem/server
+# 8080 = the .onion (Tor tags each connection with its circuit: --onion-proxy-protocol), 8081 = the Cloudflare tunnel (Direct).
+ExecStart=/usr/bin/python3 /opt/tellem/server/relay.py --host 127.0.0.1 --port 8080 --proxy-port 8081 \
+    --db /opt/tellem/server/telegramnt.db --signups-per-hour 20 --onion-proxy-protocol \
+    --db-max-mb 512 --min-free-mb 500 --files-gb 2
 Restart=always
-RestartSec=30
+RestartSec=5
 StandardOutput=null
 StandardError=null
+
+# The relay parses input from the internet, so it gets as little of the machine as it can: it can write only its own folder,
+# can't see other users' files (the GitHub key lives with a different user), can't gain privileges, and only talks over the network.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/tellem/server
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

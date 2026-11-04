@@ -19,11 +19,14 @@ android {
         applicationId = "com.wilfrombdn.telegramnt"
         minSdk = 26
         targetSdk = 34
-        versionCode = 82
-        versionName = "8.7"
+        versionCode = 83
+        versionName = "9.0"
     }
     signingConfigs {
         create("release") {
+            // v2 AND v3: v3 lets the signing key be rotated later (a leaked or lost key is otherwise unrecoverable for installed phones)
+            enableV2Signing = true
+            enableV3Signing = true
             if (keyProps.isNotEmpty()) {
                 storeFile = rootProject.file("keystore/release.jks")
                 storePassword = keyProps.getProperty("password")
@@ -67,6 +70,7 @@ android {
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("com.google.crypto.tink:tink-android:1.24.0")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1") // Argon2id for passwords (only its Argon2 classes survive shrinking)
     implementation("androidx.core:core:1.15.0")
     implementation("androidx.drawerlayout:drawerlayout:1.2.0") // Telegram-style slide-out side menu
     implementation("androidx.activity:activity:1.9.3") // ComponentActivity (LifecycleOwner) for the camera

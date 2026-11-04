@@ -34,7 +34,7 @@ internal fun MainActivity.roundView(m: Msg, onLong: () -> Unit): View {
     val f = m.file!!
     val here = f.has("local")
     val ask = askToDownload(m)
-    val thumb = if (ask) null else f.optString("th").takeIf { it.isNotEmpty() }?.let { val t = java.util.Base64.getDecoder().decode(it); android.graphics.BitmapFactory.decodeByteArray(t, 0, t.size) }
+    val thumb = if (ask) null else f.optString("th").takeIf { it.isNotEmpty() }?.let { safeBitmap(java.util.Base64.getDecoder().decode(it), 512) }
     return FrameLayout(this).apply {
         outlineProvider = object : android.view.ViewOutlineProvider() {
             override fun getOutline(v: View, o: android.graphics.Outline) = o.setOval(0, 0, v.width, v.height)

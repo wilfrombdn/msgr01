@@ -32,6 +32,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import sqlite3
 import threading
@@ -44,6 +45,14 @@ MAX_BACKUP = 96 * 1024          # biggest password-locked backup
 MAX_KEY = 512                   # biggest public key
 MAX_PER_BOX = 1000              # messages waiting in one mailbox
 MAX_PER_GROUP = 5000           # messages kept in one group mailbox
+MAX_GROUP_BYTES = 16 * 1024 * 1024   # sealed bytes kept in one group mailbox (oldest go first)
+GBOX_GRACE = 6 * 3600           # a group mailbox nobody has ever fetched is dropped after this (spam never gets polled)
+DB_MAX_MB = 512                 # refuse new mail when the database file is this big
+MIN_FREE_MB = 300               # refuse new mail/files when the disk has less than this free
+FREE_TRIES = 10                 # wrong passwords an account may collect before it starts locking
+LOCK_MAX = 30 * 60              # longest a login lock lasts
+FAILS_FORGET = 24 * 3600        # wrong guesses are forgotten after this long without a new one
+PIPE_PER_SOURCE = 4             # call rooms one client (circuit) may hold at once
 MAX_TOKENS_PER_FETCH = 500
 MAX_WAIT = 30                   # seconds a fetch may wait for new mail
 MSG_TTL = 30 * 24 * 3600        # undelivered messages are dropped after this
@@ -57,6 +66,7 @@ PIPE_IDLE = 60                  # a call with no audio either way for this long 
 PIPE_MAX_SECONDS = 4 * 3600     # longest call
 PIPE_MAX_ACTIVE = 40            # call rooms open at once
 ROOM = re.compile(r"^[0-9a-f]{64}$")
+LOOPBACK = ("127.0.0.1", "::1")
 GIF_MAX = 8 * 1024 * 1024       # a single GIF we'll pass on
 GIPHY_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "giphy.key")
 NEW_BOXES_PER_MIN = 20          # new mailboxes per minute from one address
@@ -106,6 +116,11 @@ def blind(who):
     return hmac.new(_FORGET_KEY, who.encode(), hashlib.sha256).digest()[:12]
 
 
+def dev_hash(device):
+    """Device tokens are 256-bit random bearer tokens; only their hash is kept, so a stolen database can't sign in as anyone."""
+    return hashlib.sha256(device.encode()).digest()
+
+
 class Counter:
     """Per-client counts for the current time window. Memory only, never written out."""
 
@@ -147,6 +162,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS gmsgs(seq INTEGER PRIMARY KEY AUTOINCREMENT, addr TEXT, ts REAL, blob BLOB);
             CREATE INDEX IF NOT EXISTS gmsgs_addr ON gmsgs(addr, seq);
             CREATE TABLE IF NOT EXISTS push(addr TEXT PRIMARY KEY, token TEXT);
+            CREATE TABLE IF NOT EXISTS gboxes(addr TEXT PRIMARY KEY, created REAL, fetched REAL);
         """)
         # per-file retention hint (group files ask for a shorter life than 1:1); added live, so migrate in place
         try:
@@ -155,9 +171,22 @@ class Store:
             pass  # column already exists
         # Signal keys: identity, registration id, signed prekey and Kyber (post-quantum) prekey
         cols = [r[1] for r in self.db.execute("PRAGMA table_info(accounts)")]
-        for col, kind in (("ident", "BLOB"), ("reg", "INTEGER"), ("spk", "TEXT"), ("kpk", "TEXT")):
+        # dh = sha256 of the device token (the token itself is never stored), kdf = which password hashing the account uses
+        # (1 = PBKDF2, 2 = Argon2id), lastfail = when the last wrong password came
+        for col, kind in (("ident", "BLOB"), ("reg", "INTEGER"), ("spk", "TEXT"), ("kpk", "TEXT"),
+                          ("dh", "BLOB"), ("kdf", "INTEGER DEFAULT 1"), ("lastfail", "REAL DEFAULT 0")):
             if col not in cols:
                 self.db.execute("ALTER TABLE accounts ADD COLUMN %s %s" % (col, kind))
+        # one-time migration: keep only the hash of every device token, then blank the plaintext
+        for user, device in self.db.execute("SELECT user, device FROM accounts WHERE dh IS NULL").fetchall():
+            self.db.execute("UPDATE accounts SET dh=?, device='' WHERE user=?", (dev_hash(device or ""), user))
+        # group mailboxes that existed before the gboxes table: treat them as in use
+        now = time.time()
+        self.db.execute("INSERT OR IGNORE INTO gboxes SELECT addr, ?, ? FROM (SELECT DISTINCT addr FROM gmsgs)", (now, now))
+        self.db_path = path
+        self.db_max = DB_MAX_MB * 1024 * 1024
+        self.min_free = MIN_FREE_MB * 1024 * 1024
+        self._space = (0.0, True)
         self.new_boxes_limit = NEW_BOXES_PER_MIN
         self.bundle_limit = 30
         self.lock = threading.RLock()
@@ -168,6 +197,25 @@ class Store:
     def q(self, sql, *args):
         with self.lock:
             return self.db.execute(sql, args).fetchall()
+
+    def space_ok(self, extra=0):
+        """False when the database is at its cap or the disk is nearly full: new mail is refused instead of
+        letting a flood fill the disk and stop the whole server. Checked at most every few seconds."""
+        now = time.time()
+        at, ok = self._space
+        if now - at > 3:
+            try:
+                size = sum(os.path.getsize(self.db_path + s) for s in ("", "-wal") if os.path.exists(self.db_path + s))
+                ok = size < self.db_max and shutil.disk_usage(os.path.dirname(os.path.abspath(self.db_path))).free > self.min_free
+            except OSError:
+                ok = False
+            self._space = (now, ok)
+        if not ok:
+            return False
+        try:
+            return shutil.disk_usage(self.files_dir).free > self.min_free + extra
+        except OSError:
+            return False
 
     # ---- mailboxes ----
 
@@ -192,6 +240,8 @@ class Store:
             n = self.db.execute("SELECT COUNT(*) FROM msgs WHERE addr=?", (address,)).fetchone()[0]
             if n >= MAX_PER_BOX:
                 return "mailbox full"
+            if not self.space_ok(len(blob)):
+                return "server full"
             self.db.execute("INSERT INTO msgs VALUES(?,?,?,?)", (secrets.token_hex(16), address, hour(), blob))
             self.cond.notify_all()
             # the phone isn't connected: wake it with an empty ping (no content, nothing about the sender)
@@ -237,18 +287,40 @@ class Store:
 
     # ---- group mailboxes (fan-out; no per-reader delete, TTL cleans up) ----
 
-    def gput(self, address, blob):
+    def gput(self, address, blob, who=None, new_boxes=None):
+        """Adds to a group mailbox. A mailbox seen for the first time counts against the new-mailbox limit,
+        holds at most MAX_GROUP_BYTES, and is dropped after GBOX_GRACE if nobody ever fetches it."""
         with self.cond:
+            known = self.db.execute("SELECT 1 FROM gboxes WHERE addr=?", (address,)).fetchone()
+            if not known:
+                if new_boxes is not None and not new_boxes.add(who, 1, self.new_boxes_limit):
+                    return "slow down"
+                if not self.space_ok(len(blob)):
+                    return "server full"
+                self.db.execute("INSERT OR IGNORE INTO gboxes VALUES(?,?,NULL)", (address, time.time()))
+            elif not self.space_ok(len(blob)):
+                return "server full"
             n = self.db.execute("SELECT COUNT(*) FROM gmsgs WHERE addr=?", (address,)).fetchone()[0]
             if n >= MAX_PER_GROUP:
                 self.db.execute("DELETE FROM gmsgs WHERE seq IN (SELECT seq FROM gmsgs WHERE addr=? ORDER BY seq LIMIT ?)",
                                 (address, n - MAX_PER_GROUP + 1))
+            # keep the newest MAX_GROUP_BYTES: drop oldest messages until the new one fits
+            used = self.db.execute("SELECT COALESCE(SUM(LENGTH(blob)), 0) FROM gmsgs WHERE addr=?", (address,)).fetchone()[0]
+            if used + len(blob) > MAX_GROUP_BYTES:
+                rows = self.db.execute("SELECT seq, LENGTH(blob) FROM gmsgs WHERE addr=? ORDER BY seq", (address,)).fetchall()
+                for seq, size in rows:
+                    if used + len(blob) <= MAX_GROUP_BYTES:
+                        break
+                    self.db.execute("DELETE FROM gmsgs WHERE seq=?", (seq,))
+                    used -= size
             self.db.execute("INSERT INTO gmsgs(addr, ts, blob) VALUES(?,?,?)", (address, hour(), blob))
             self.cond.notify_all()
+            return None
 
     def gtake(self, address, since, wait):
         deadline = time.time() + wait
         with self.cond:
+            self.db.execute("UPDATE gboxes SET fetched=? WHERE addr=?", (time.time(), address))   # someone really reads this one
             while True:
                 rows = self.db.execute("SELECT seq, blob FROM gmsgs WHERE addr=? AND seq>? ORDER BY seq LIMIT 200",
                                        (address, since)).fetchall()
@@ -272,6 +344,20 @@ class Store:
             self.drop_file(fid)
         with self.lock:
             self.db.execute("DELETE FROM gmsgs WHERE ts < ?", (now - GROUP_MSG_TTL,))
+            # group mailboxes nobody ever fetched (spam, or a typo) go quickly; unused real ones after BOX_TTL
+            self.db.execute("DELETE FROM gmsgs WHERE addr IN (SELECT addr FROM gboxes WHERE fetched IS NULL AND created < ?)",
+                            (now - GBOX_GRACE,))
+            self.db.execute("DELETE FROM gboxes WHERE fetched IS NULL AND created < ?", (now - GBOX_GRACE,))
+            self.db.execute("DELETE FROM gboxes WHERE COALESCE(fetched, created) < ?", (now - BOX_TTL,))
+            self.db.execute("DELETE FROM gmsgs WHERE addr NOT IN (SELECT addr FROM gboxes)")
+        # half-finished uploads (the phone dropped off) never become files
+        try:
+            for name in os.listdir(self.files_dir):
+                p = os.path.join(self.files_dir, name)
+                if name.endswith(".part") and now - os.path.getmtime(p) > 3600:
+                    os.remove(p)
+        except OSError:
+            pass
 
     # ---- attachments: sealed blobs the phones encrypted; the key never comes here ----
 
@@ -280,6 +366,20 @@ class Store:
 
     def files_used(self):
         return self.q("SELECT COALESCE(SUM(size), 0) FROM files")[0][0]
+
+    def reserve(self, n):
+        """Room for an upload of n bytes (under the files cap and the disk floor), held until [release]."""
+        with self.lock:
+            if self.files_used() + self._pending + n > self.files_cap or not self.space_ok(n):
+                return False
+            self._pending += n
+            return True
+
+    def release(self, n):
+        with self.lock:
+            self._pending -= n
+
+    _pending = 0
 
     def drop_file(self, fid):
         with self.lock:
@@ -294,24 +394,31 @@ class Store:
     def check(self, user, auth):
         """Password check with lockout. Returns the row or an error string."""
         with self.lock:
-            r = self.db.execute("SELECT salt, auth, locked, fails, device, backup FROM accounts WHERE user=?",
+            r = self.db.execute("SELECT salt, auth, locked, fails, kdf, backup, lastfail FROM accounts WHERE user=?",
                                 (user,)).fetchone()
             if not r:
                 return "wrong username or password"
-            salt, good, locked, fails, device, backup = r
-            if locked > time.time():
-                return "too many tries, wait %d minutes" % (int(locked - time.time()) // 60 + 1)
+            salt, good, locked, fails, kdf, backup, lastfail = r
+            now = time.time()
+            if locked > now:
+                return "too many tries, wait %d minutes" % (int(locked - now) // 60 + 1)
             if not hmac.compare_digest(hashlib.sha256(salt + auth).digest(), good):
+                # Anyone can type a public username, so a lock must not last long (it would be a way to shut a
+                # person out): a few free tries, then short growing waits capped at LOCK_MAX. Old guesses are forgotten.
+                if now - (lastfail or 0) > FAILS_FORGET:
+                    fails = 0
                 fails += 1
-                lock = time.time() + 60 * 2 ** min(fails - 5, 10) if fails >= 5 else 0
-                self.db.execute("UPDATE accounts SET fails=?, locked=? WHERE user=?", (fails, lock, user))
+                lock = now + min(LOCK_MAX, 60 * 2 ** min(fails - FREE_TRIES, 5)) if fails > FREE_TRIES else 0
+                self.db.execute("UPDATE accounts SET fails=?, locked=?, lastfail=? WHERE user=?", (fails, lock, now, user))
                 return "wrong username or password"
             self.db.execute("UPDATE accounts SET fails=0, locked=0 WHERE user=?", (user,))
-            return {"device": device, "backup": backup}
+            return {"kdf": kdf or 1, "backup": backup}
 
     def device_ok(self, user, device):
-        r = self.q("SELECT device FROM accounts WHERE user=?", user)
-        return bool(r) and isinstance(device, str) and hmac.compare_digest(r[0][0], device)
+        if not isinstance(user, str) or not isinstance(device, str) or len(device) > 128:
+            return False
+        r = self.q("SELECT dh FROM accounts WHERE user=?", user)
+        return bool(r) and r[0][0] is not None and hmac.compare_digest(r[0][0], dev_hash(device))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -327,12 +434,29 @@ class Handler(BaseHTTPRequestHandler):
     def log_error(self, *args):
         pass
 
+    def setup(self):
+        super().setup()
+        self._peer = self.client_address[0]
+        if self.server.proxy_protocol:
+            # Tor ("HiddenServiceExportCircuitID haproxy") starts each connection with a PROXY line whose source is an
+            # ID of the Tor circuit, not an internet address. It lets the limits tell onion clients apart.
+            # Only local programs can reach this port, so a header here is trusted; none = everyone shares 127.0.0.1.
+            try:
+                if self.rfile.peek(6)[:6] == b"PROXY ":
+                    parts = self.rfile.readline(256).decode("ascii", "replace").split()
+                    if len(parts) >= 6 and parts[1] in ("TCP4", "TCP6"):
+                        self._peer = parts[2][:64]
+            except (OSError, ValueError):
+                pass
+
     def client_id(self):
         return blind(self._address())
 
     def _address(self):
         # Only the listener that sits behind Cloudflare may say who the client is. Anything else (the
         # .onion comes in from 127.0.0.1 with no proxy) could put any address in these headers.
+        if self.server.proxy_protocol:
+            return self._peer
         if self.server.behind_proxy:
             cf = self.headers.get("CF-Connecting-IP", "")
             if cf:
@@ -340,7 +464,7 @@ class Handler(BaseHTTPRequestHandler):
             fwd = self.headers.get("X-Forwarded-For", "")
             if fwd:
                 return fwd.split(",")[-1].strip()
-        return self.client_address[0]
+        return self._peer
 
     def reply(self, code, obj):
         body = json.dumps(obj).encode()
@@ -363,6 +487,9 @@ class Handler(BaseHTTPRequestHandler):
         gif = self.path in ("/gifs", "/gif", "/pipe")   # GIFs and calls have their own budget, apart from messages
         if not (srv.shared.gif_rate if gif else srv.shared.rate).add(who, 1, GIF_RATE_PER_MIN if gif else srv.shared.rate_per_min):
             return self.reply(429, {"error": "slow down"})
+        if self.headers.get("Transfer-Encoding"):   # we only speak Content-Length; never guess where a body ends
+            self.close_connection = True
+            return self.reply(400, {"error": "bad request"})
         if self.path == "/upload":
             return self.upload(who)
         if self.path == "/pipe":
@@ -380,13 +507,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except ValueError:
             return self.reply(400, {"error": "bad request"})
-        route = getattr(self, "api_" + self.path.strip("/"), None)
+        route = getattr(self, "api_" + self.path.strip("/"), None) if re.match(r"^/[a-z]{2,12}$", self.path) else None
         if route is None:
             return self.reply(404, {"error": "not found"})
         try:
             route(req, who)
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, AttributeError):
             self.reply(400, {"error": "bad request"})
+        except Exception:   # e.g. a database error: answer cleanly, tell nothing, keep the connection tidy
+            self.close_connection = True
+            self.reply(500, {"error": "server error"})
 
     # ---- mailboxes ----
 
@@ -433,35 +563,38 @@ class Handler(BaseHTTPRequestHandler):
         if not srv.shared.uploads.add(who, n, UPLOAD_PER_HOUR):
             self.close_connection = True
             return self.reply(429, {"error": "too many files, try later"})
-        if store.files_used() + n > store.files_cap:
+        if not store.reserve(n):   # counts uploads still in flight, so parallel uploads can't slip past the cap
             self.close_connection = True
             return self.reply(507, {"error": "server full"})
-        fid = secrets.token_hex(16)
-        tmp = store.file_path(fid + ".part")
         try:
-            with open(tmp, "wb") as f:
-                left = n
-                while left:
-                    chunk = self.rfile.read(min(left, 256 * 1024))
-                    if not chunk:
-                        raise OSError("short body")
-                    f.write(chunk)
-                    left -= len(chunk)
-            os.replace(tmp, store.file_path(fid))
-        except OSError:
+            fid = secrets.token_hex(16)
+            tmp = store.file_path(fid + ".part")
             try:
-                os.remove(tmp)
+                with open(tmp, "wb") as f:
+                    left = n
+                    while left:
+                        chunk = self.rfile.read(min(left, 256 * 1024))
+                        if not chunk:
+                            raise OSError("short body")
+                        f.write(chunk)
+                        left -= len(chunk)
+                os.replace(tmp, store.file_path(fid))
             except OSError:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                self.close_connection = True
+                return self.reply(400, {"error": "upload failed"})
+            ttl = None  # default: MSG_TTL (handled in sweep). Clients may ask for a shorter life via X-TTL.
+            try:
+                hint = int(self.headers.get("X-TTL", ""))
+                ttl = max(3600, min(hint, MSG_TTL))  # clamp: never longer than MSG_TTL, never under an hour
+            except ValueError:
                 pass
-            self.close_connection = True
-            return self.reply(400, {"error": "upload failed"})
-        ttl = None  # default: MSG_TTL (handled in sweep). Clients may ask for a shorter life via X-TTL.
-        try:
-            hint = int(self.headers.get("X-TTL", ""))
-            ttl = max(3600, min(hint, MSG_TTL))  # clamp: never longer than MSG_TTL, never under an hour
-        except ValueError:
-            pass
-        store.q("INSERT INTO files(id, size, ts, ttl) VALUES(?,?,?,?)", fid, n, hour(), ttl)
+            store.q("INSERT INTO files(id, size, ts, ttl) VALUES(?,?,?,?)", fid, n, hour(), ttl)
+        finally:
+            store.release(n)
         self.reply(200, {"id": fid})
 
     def api_download(self, req, who):
@@ -488,6 +621,27 @@ class Handler(BaseHTTPRequestHandler):
     # ---- voice calls: pair the two phones by a random room id and pass their (already encrypted) audio ----
 
     def pipe(self):
+        """One client (Tor circuit) may hold only a few call rooms, so nobody can park all of them. Then [_pipe]."""
+        srv = self.server
+        who = self._address()
+        capped = who not in LOOPBACK   # no circuit ID (everyone looks like 127.0.0.1): a per-client cap would break calls
+        if capped:
+            with srv.shared.pipe_lock:
+                if srv.shared.pipe_by.get(who, 0) >= PIPE_PER_SOURCE:
+                    return self.reply(503, {"error": "busy"})
+                srv.shared.pipe_by[who] = srv.shared.pipe_by.get(who, 0) + 1
+        try:
+            return self._pipe()
+        finally:
+            if capped:
+                with srv.shared.pipe_lock:
+                    left = srv.shared.pipe_by.get(who, 1) - 1
+                    if left > 0:
+                        srv.shared.pipe_by[who] = left
+                    else:
+                        srv.shared.pipe_by.pop(who, None)
+
+    def _pipe(self):
         """The two phones in a call each POST /pipe with the same X-Room (random, from the call's encrypted
         setup). Whoever arrives first waits; once both are here each gets one 0x01 byte, then bytes flow
         straight through both ways until either hangs up. The audio is encrypted end to end by the phones,
@@ -637,7 +791,9 @@ class Handler(BaseHTTPRequestHandler):
         blob = b64(req["blob"], MAX_BLOB)
         if not is_hex32(to) or blob is None:
             return self.reply(400, {"error": "bad request"})
-        self.server.shared.store.gput(to, blob)
+        err = self.server.shared.store.gput(to, blob, who, self.server.shared.new_boxes)
+        if err:
+            return self.reply(429 if err == "slow down" else 507, {"error": err})
         self.reply(200, {"ok": True})
 
     def api_gfetch(self, req, who):
@@ -657,23 +813,60 @@ class Handler(BaseHTTPRequestHandler):
         raw_backup = req["backup"]
         backup = b"" if raw_backup == "" else b64(raw_backup, MAX_BACKUP)  # "" = user keeps no cloud backup
         inbox_token = req["inboxToken"]
+        kdf = req.get("kdf", 1)   # which password hashing the phone used: 1 = PBKDF2 (old apps), 2 = Argon2id
         if (not isinstance(user, str) or not USERNAME.match(user) or len(auth) != 32
-                or None in (enc, sig, backup) or not is_hex32(inbox_token)):
+                or None in (enc, sig, backup) or not is_hex32(inbox_token) or kdf not in (1, 2)):
             return self.reply(400, {"error": "bad request"})
         if not self.server.shared.signups.add(who, 1, self.server.shared.signups_per_hour):
             return self.reply(429, {"error": "too many new accounts, try later"})
         store = self.server.shared.store
+        if not store.space_ok():
+            return self.reply(507, {"error": "server full"})
         salt = secrets.token_bytes(16)
         device = secrets.token_hex(32)
         inbox = hashlib.sha256(bytes.fromhex(inbox_token)).hexdigest()
         with store.lock:
             if store.db.execute("SELECT 1 FROM accounts WHERE user=?", (user,)).fetchone():
                 return self.reply(409, {"error": "username taken"})
-            store.db.execute("INSERT INTO accounts(user, salt, auth, enc, sig, inbox, backup, device) "
-                             "VALUES(?,?,?,?,?,?,?,?)",
-                             (user, salt, hashlib.sha256(salt + auth).digest(), enc, sig, inbox, backup, device))
+            store.db.execute("INSERT INTO accounts(user, salt, auth, enc, sig, inbox, backup, device, dh, kdf) "
+                             "VALUES(?,?,?,?,?,?,?,'',?,?)",
+                             (user, salt, hashlib.sha256(salt + auth).digest(), enc, sig, inbox, backup, dev_hash(device), kdf))
             store.db.execute("INSERT OR REPLACE INTO boxes VALUES(?,?)", (inbox, day()))
         self.reply(200, {"device": device})
+
+    def api_kdf(self, req, who):
+        """Which password hashing an account uses, so the phone derives the right keys before logging in.
+        (Usernames are already public through /lookup, so this reveals nothing new.) Unknown names get the newest."""
+        user = req["user"]
+        if not isinstance(user, str) or not USERNAME.match(user):
+            return self.reply(400, {"error": "bad request"})
+        r = self.server.shared.store.q("SELECT kdf FROM accounts WHERE user=?", user)
+        self.reply(200, {"kdf": (r[0][0] or 1) if r else 2})
+
+    def api_upgrade(self, req, who):
+        """A phone that just logged in to an old (PBKDF2) account moves it to Argon2id: new login hash and a backup
+        locked with the new key. Needs the device token the login just returned."""
+        user, auth = req["user"], bytes.fromhex(req["auth"])
+        backup = b64(req["backup"], MAX_BACKUP)
+        store = self.server.shared.store
+        if len(auth) != 32 or backup is None or not store.device_ok(user, req["device"]):
+            return self.reply(401, {"error": "signed in on another phone"})
+        salt = secrets.token_bytes(16)
+        store.q("UPDATE accounts SET salt=?, auth=?, backup=?, kdf=2, fails=0, locked=0 WHERE user=? AND kdf=1",
+                salt, hashlib.sha256(salt + auth).digest(), backup, user)
+        self.reply(200, {"ok": True})
+
+    def api_id(self, req, who):
+        """Proves this really is the Tellem server: signs the caller's random challenge with the server's own key.
+        Direct mode needs it (the address changes and isn't authenticated by anything else); the .onion proves itself."""
+        n = req["n"]
+        if not is_hex32(n):
+            return self.reply(400, {"error": "bad request"})
+        ident = self.server.shared.identity
+        if ident is None:
+            return self.reply(501, {"error": "no server identity"})
+        self.reply(200, {"pub": base64.b64encode(ident.public).decode(),
+                         "sig": base64.b64encode(ident.sign(b"tellem-server-v1|" + bytes.fromhex(n))).decode()})
 
     def api_login(self, req, who):
         user, auth = req["user"], bytes.fromhex(req["auth"])
@@ -688,8 +881,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "no cloud backup for this account"})
         # Signing in signs out the previous phone (both can't pick up the same mail).
         device = secrets.token_hex(32)
-        self.server.shared.store.q("UPDATE accounts SET device=? WHERE user=?", device, user)
-        self.reply(200, {"device": device, "backup": base64.b64encode(r["backup"]).decode()})
+        self.server.shared.store.q("UPDATE accounts SET dh=?, device='' WHERE user=?", dev_hash(device), user)
+        self.reply(200, {"device": device, "backup": base64.b64encode(r["backup"]).decode(), "kdf": r["kdf"]})
 
     def api_session(self, req, who):
         if self.server.shared.store.device_ok(req["user"], req["device"]):
@@ -804,14 +997,57 @@ GIF_ID = re.compile(r"^[A-Za-z0-9]{1,40}$")
 
 def giphy_get(url, cap):
     """GET from GIPHY (only its own hosts), refusing anything larger than cap bytes."""
-    host = urllib.parse.urlparse(url).hostname or ""
-    if not (host == "giphy.com" or host.endswith(".giphy.com")):
+    p = urllib.parse.urlparse(url)
+    host = p.hostname or ""
+    if p.scheme != "https" or not (host == "giphy.com" or host.endswith(".giphy.com")):
         raise ValueError("not giphy")
-    r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tellem-relay"}), timeout=15)
+    # never follow a redirect: it could lead anywhere, and the host check above only covers the first address
+    r = _NO_REDIRECT.open(urllib.request.Request(url, headers={"User-Agent": "tellem-relay"}), timeout=15)
+    if r.status != 200:
+        raise ValueError("giphy said %s" % r.status)
     body = r.read(cap + 1)
     if len(body) > cap:
         raise ValueError("too big")
     return body
+
+
+class _Refuse(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+_NO_REDIRECT = urllib.request.build_opener(_Refuse)
+
+
+class Identity:
+    """The server's own Ed25519 key (server-id.key, made on first start). Phones that know its public half can tell the
+    real server from an impostor on the Direct route. Needs the `cryptography` package; without it /id answers 501."""
+
+    def __init__(self, path):
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                self.key = serialization.load_pem_private_key(f.read(), password=None)
+        else:
+            self.key = Ed25519PrivateKey.generate()
+            pem = self.key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                         serialization.NoEncryption())
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(pem)
+        self.public = self.key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+
+    def sign(self, data):
+        return self.key.sign(data)
+
+
+def load_identity(path):
+    try:
+        return Identity(path)
+    except Exception as e:   # no cryptography package, or an unreadable key file
+        print("Server identity off: %s" % e, flush=True)
+        return None
 
 
 class GifUrls:
@@ -842,6 +1078,8 @@ class Shared:
         self.pipe_lock = threading.Lock()
         self.pipe_wait = {}
         self.pipe_active = 0
+        self.pipe_by = {}          # client -> call rooms it holds right now
+        self.identity = None       # set in main()
         self.gif_urls = GifUrls()
         self.gif_pool = concurrent.futures.ThreadPoolExecutor(8)
         key = os.environ.get("GIPHY_KEY", "")
@@ -861,9 +1099,10 @@ class Shared:
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, addr, shared, behind_proxy):
+    def __init__(self, addr, shared, behind_proxy, proxy_protocol=False):
         self.shared = shared
         self.behind_proxy = behind_proxy
+        self.proxy_protocol = proxy_protocol   # connections may begin with a PROXY line from Tor (circuit ID)
         super().__init__(addr, Handler)
 
     def process_request(self, request, client_address):
@@ -965,6 +1204,11 @@ def main():
                    help="trust CF-Connecting-IP / X-Forwarded-For on --port (only when a proxy is the sole way in)")
     p.add_argument("--proxy-port", type=int, default=0,
                    help="a second port, for the Cloudflare tunnel only: client-address headers are trusted there and nowhere else")
+    p.add_argument("--onion-proxy-protocol", action="store_true",
+                   help="--port is the Tor onion listener with HiddenServiceExportCircuitID haproxy: read Tor's PROXY line "
+                        "so rate limits apply per Tor circuit instead of to everyone at once")
+    p.add_argument("--db-max-mb", type=int, default=DB_MAX_MB, help="refuse new mail when the database file reaches this size")
+    p.add_argument("--min-free-mb", type=int, default=MIN_FREE_MB, help="refuse new mail/files when the disk has less free")
     p.add_argument("--files-gb", type=float, default=2, help="space for waiting attachments")
     p.add_argument("--signups-per-hour", type=int, default=SIGNUPS_PER_HOUR, help="new accounts per address (tests raise it)")
     p.add_argument("--test-limits", action="store_true", help="lift per-address rate limits (local tests only)")
@@ -972,6 +1216,8 @@ def main():
 
     files_dir = os.path.join(os.path.dirname(os.path.abspath(a.db)), "files")
     store = Store(a.db, files_dir, int(a.files_gb * 1024 ** 3))
+    store.db_max = a.db_max_mb * 1024 * 1024
+    store.min_free = a.min_free_mb * 1024 * 1024
 
     def sweeper():
         while True:
@@ -987,11 +1233,12 @@ def main():
         except Exception as e:
             print("Wake-up pings off: %s" % e, flush=True)
     shared = Shared(store)
+    shared.identity = load_identity(os.path.join(os.path.dirname(os.path.abspath(__file__)), "server-id.key"))
     shared.signups_per_hour = a.signups_per_hour
     if a.test_limits:
         shared.rate_per_min = 10 ** 9
         shared.signups_per_hour = 10 ** 9
-    servers = [Server((a.host, a.port), shared, a.behind_proxy)]
+    servers = [Server((a.host, a.port), shared, a.behind_proxy, a.onion_proxy_protocol)]
     if a.proxy_port:
         servers.append(Server((a.host, a.proxy_port), shared, True))
     if a.test_limits:

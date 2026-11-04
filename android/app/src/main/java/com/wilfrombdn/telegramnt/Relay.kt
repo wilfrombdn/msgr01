@@ -25,8 +25,17 @@ class Relay(server: String, private val socks: () -> Int? = { null }) {
 
     @Volatile private var live: Socket? = null
 
-    private fun route(to: String = server): Net.Route {
+    /**
+     * The Direct route has no built-in proof of who is on the other end (the tunnel address changes and anyone can run
+     * one), so until the server has signed our challenge with its own key ([verifyIdentity]) nothing but that check
+     * may go to it. The .onion proves itself and is never held back. Always true for tests and local servers.
+     */
+    @Volatile var directVerified = true
+
+    private fun route(to: String = server, forVerify: Boolean = false): Net.Route {
         val u = URL(to)
+        if (!u.host.endsWith(".onion") && !directVerified && !forVerify && to == server)
+            throw IOException("The direct server hasn't proved who it is yet")
         val tls = u.protocol == "https"
         val port = if (u.port != -1) u.port else if (tls) 443 else 80
         // a .onion can only be reached through Tor; refuse rather than leak the request to a DNS lookup
@@ -79,15 +88,39 @@ class Relay(server: String, private val socks: () -> Int? = { null }) {
         }
     }
 
-    /** Returns the device token. */
-    fun signup(user: String, auth: ByteArray, enc: ByteArray, sig: ByteArray, inboxToken: String, backup: ByteArray): String =
+    /** Returns the device token. [kdf] tells the server which password hashing the keys came from. */
+    fun signup(user: String, auth: ByteArray, enc: ByteArray, sig: ByteArray, inboxToken: String, backup: ByteArray, kdf: Int = 1): String =
         post("/signup", JSONObject().put("user", user).put("auth", auth.hex()).put("enc", b64(enc)).put("sig", b64(sig))
-            .put("inboxToken", inboxToken).put("backup", b64(backup)), 20).getString("device")
+            .put("inboxToken", inboxToken).put("backup", b64(backup)).put("kdf", kdf), 20).getString("device")
 
-    /** Returns (device token, locked backup). */
-    fun login(user: String, auth: ByteArray): Pair<String, ByteArray> {
+    class Login(val device: String, val backup: ByteArray, val kdf: Int)
+
+    /** The device token, the locked backup, and which password hashing the account uses. */
+    fun login(user: String, auth: ByteArray): Login {
         val r = post("/login", JSONObject().put("user", user).put("auth", auth.hex()), 20)
-        return r.getString("device") to Base64.getDecoder().decode(r.getString("backup"))
+        return Login(r.getString("device"), Base64.getDecoder().decode(r.getString("backup")), r.optInt("kdf", 1))
+    }
+
+    /** Which password hashing @user's account uses (1 = PBKDF2, 2 = Argon2id). */
+    fun kdf(user: String): Int = post("/kdf", JSONObject().put("user", user), 20).optInt("kdf", 1)
+
+    /** Moves an account that just logged in to Argon2id: new login key and a backup locked with the new key. */
+    fun upgrade(user: String, device: String, auth: ByteArray, backup: ByteArray) {
+        post("/upgrade", JSONObject().put("user", user).put("device", device).put("auth", auth.hex()).put("backup", b64(backup)), 30)
+    }
+
+    /**
+     * Direct route only: sends a fresh random challenge and checks the server's signature on it against the public key
+     * built into this app ([Messenger.SERVER_ID]). A server without the matching private key can't answer.
+     */
+    fun verifyIdentity(): Boolean = try {
+        val n = Crypto.randomHex()
+        val r = Net.request(route(forVerify = true), "POST", "/id", "application/json", JSONObject().put("n", n).toString().toByteArray(), readMs = 20_000)
+        val o = JSONObject(String(r.body))
+        val pub = Base64.getDecoder().decode(o.getString("pub"))
+        r.code == 200 && Crypto.verifyServerId(pub, Base64.getDecoder().decode(o.getString("sig")), n.unhex(), Base64.getDecoder().decode(Messenger.SERVER_ID))
+    } catch (e: Exception) {
+        false
     }
 
     /** False when this phone has been signed out by a login somewhere else. */
@@ -172,7 +205,7 @@ class Relay(server: String, private val socks: () -> Int? = { null }) {
     }
 
     fun ping(): Boolean = try {
-        val r = Net.request(route(), "GET", "/", "text/plain", ByteArray(0), readMs = 10_000, connectMs = 10_000)
+        val r = Net.request(route(forVerify = true), "GET", "/", "text/plain", ByteArray(0), readMs = 10_000, connectMs = 10_000)
         r.code == 200 && String(r.body).contains("telegramnt")
     } catch (e: Exception) {
         false

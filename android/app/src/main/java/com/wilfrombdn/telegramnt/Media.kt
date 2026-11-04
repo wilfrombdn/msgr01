@@ -99,7 +99,7 @@ internal fun MainActivity.attachmentView(m: Msg, ink: Int, onLong: () -> Unit = 
         val bmp = if (ask) null else pictures[m.id] ?: run {
             val full = if (here) Messenger.core.openFile(m)?.let { decodeSmall(it, 720) } else null
             val shown = full ?: f.optString("th").takeIf { it.isNotEmpty() }?.let {
-                val t = java.util.Base64.getDecoder().decode(it); android.graphics.BitmapFactory.decodeByteArray(t, 0, t.size)
+                safeBitmap(java.util.Base64.getDecoder().decode(it), 720)
             }
             if (full != null) pictures[m.id] = full
             shown
@@ -142,11 +142,22 @@ internal fun MainActivity.attachmentView(m: Msg, ink: Int, onLong: () -> Unit = 
     }
 }
 
-internal fun MainActivity.decodeSmall(bytes: ByteArray, maxSide: Int): android.graphics.Bitmap? {
+internal fun MainActivity.decodeSmall(bytes: ByteArray, maxSide: Int): android.graphics.Bitmap? = safeBitmap(bytes, maxSide)
+
+/**
+ * Decodes a picture someone else sent (a thumbnail, a profile photo, an attachment). A tiny file can claim to be tens of thousands of
+ * pixels wide and use up all memory when opened; because the message is saved, that would crash the app every time the chat opens.
+ * So absurd sizes are refused, big ones are shrunk while decoding, and nothing here ever throws.
+ */
+internal fun safeBitmap(bytes: ByteArray, maxSide: Int = 1024): android.graphics.Bitmap? = try {
     val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
     android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
-    val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = maxOf(1, maxOf(o.outWidth, o.outHeight) / maxSide) }
-    return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+    val big = maxOf(o.outWidth, o.outHeight)
+    if (o.outWidth <= 0 || o.outHeight <= 0 || o.outWidth.toLong() * o.outHeight > 100_000_000L) null   // 100 megapixels: nothing real is this big
+    else android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+        android.graphics.BitmapFactory.Options().apply { inSampleSize = maxOf(1, big / maxSide) })
+} catch (e: Throwable) {   // including OutOfMemoryError: a bad picture is just not shown
+    null
 }
 
 /** A view-once photo: no preview, ever. Theirs: tap to view (once). Mine, or already opened: just says so. */

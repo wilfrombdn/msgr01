@@ -17,6 +17,8 @@ class RelayFlowTest {
     private val server = System.getenv("RELAY") ?: "http://127.0.0.1:8099"
     private val tag = Crypto.randomHex(3)
 
+    init { Crypto.fastKdfForTests(); Core.testAutoJoin = true }   // most tests aren't about the consent step; GroupInviteTest is   // tiny Argon2 memory: dozens of sign-ins would otherwise take minutes (CryptoTest checks the real cost)
+
     private fun texts(c: Contact?) = c!!.msgs.filter { it.state != Msg.NOTE }.map { it.text }
 
     @Test fun twoPeopleBecomeFriendsAndTalk() {
@@ -27,7 +29,7 @@ class RelayFlowTest {
         val b = "bob_$tag"
         alice.signup(a, "correct horse battery", "Alice")
         bob.signup(b, "another long password", "Bob")
-        try { Core(server).signup(a, "whatever12345", "X"); fail("duplicate username") } catch (e: UserError) {
+        try { Core(server).signup(a, "whatever-12345-xy", "X"); fail("duplicate username") } catch (e: UserError) {
             assertEquals("That username is taken", e.message)
         }
         try { alice.addFriend("nobody_$tag"); fail("unknown user") } catch (e: UserError) {}
@@ -977,13 +979,16 @@ class RelayFlowTest {
         assertTrue("B should still receive A's pending request after logging back in", b2.contact(au) != null)
     }
 
-    @Test fun lockoutAfterFiveWrongPasswords() {
+    @Test fun lockoutStartsAfterTenWrongPasswordsAndIsShort() {
         assumeTrue(Relay(server).ping())
         val u = "carol_$tag"
         Core(server).signup(u, "carols long password", "Carol")
-        repeat(5) { try { Core(server).login(u, "nope nope nope $it") } catch (e: UserError) {} }
+        repeat(10) { try { Core(server).login(u, "nope nope nope $it") } catch (e: UserError) {} }
+        Core(server).login(u, "carols long password")   // ten wrong tries are free: the right password still works (and clears the count)
+        repeat(11) { try { Core(server).login(u, "nope nope nope $it") } catch (e: UserError) {} }
         try { Core(server).login(u, "carols long password"); fail("should be locked") } catch (e: UserError) {
             assertTrue(e.message!!, e.message!!.startsWith("Too many tries"))
+            assertTrue("a short lock, never hours: " + e.message, e.message!!.contains("1 minutes") || e.message!!.contains("2 minutes"))
         }
     }
 }

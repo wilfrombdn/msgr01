@@ -28,9 +28,16 @@ class PushService : FirebaseMessagingService() {
     companion object {
         /** Asks Google for this phone's ping address (off = tell the server to stop pinging). */
         fun register(ctx: Context) {
-            if (!Messenger.pushOn) { Messenger.setPushToken(""); return }
+            if (!Messenger.pushOn) {
+                // off: the server forgets this phone's ping address, and (if it ever had one) Google deletes it too. Firebase is
+                // told not to start by itself (see the manifest), so an app that never turned pings on never contacts Google.
+                Messenger.setPushToken("")
+                if (Messenger.pushChosen) runCatching { FirebaseMessaging.getInstance().apply { isAutoInitEnabled = false; deleteToken() } }
+                return
+            }
             runCatching {
-                FirebaseMessaging.getInstance().token.addOnSuccessListener { t -> if (!t.isNullOrEmpty()) Messenger.setPushToken(t) }
+                FirebaseMessaging.getInstance().apply { isAutoInitEnabled = true }
+                    .token.addOnSuccessListener { t -> if (!t.isNullOrEmpty()) Messenger.setPushToken(t) }
             }   // no Google Play services on this phone: it just keeps its own background connection
         }
     }

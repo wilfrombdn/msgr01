@@ -12,6 +12,8 @@ import com.google.crypto.tink.TinkProtoKeysetFormat
 import com.google.crypto.tink.aead.AeadConfig
 import com.google.crypto.tink.hybrid.HybridConfig
 import com.google.crypto.tink.signature.SignatureConfig
+import org.bouncycastle.crypto.generators.Argon2BytesGenerator
+import org.bouncycastle.crypto.params.Argon2Parameters
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -122,6 +124,15 @@ object Crypto {
         false
     }
 
+    /**
+     * A short fingerprint of someone's three public keys (Signal identity, signing, encryption). Their QR code carries it, so the
+     * phone that scans it can check the server's directory really handed back the keys that person holds.
+     */
+    fun keyFingerprint(ident: ByteArray, sig: ByteArray, enc: ByteArray): String {
+        fun part(b: ByteArray) = ByteBuffer.allocate(4 + b.size).putInt(b.size).put(b).array()
+        return sha256("telegramnt-qr-v1".toByteArray() + part(ident) + part(sig) + part(enc)).hex().take(32)
+    }
+
     /** Same 30 digits on both phones if nobody swapped keys in between. */
     fun safetyCode(sigPubA: ByteArray, sigPubB: ByteArray): String {
         val (x, y) = listOf(sigPubA, sigPubB).sortedWith { p, q -> compareBytes(p, q) }
@@ -148,19 +159,53 @@ object Crypto {
 
     const val KDF_ROUNDS = 600_000
 
+    /** Which password hashing an account uses: 1 = PBKDF2 (accounts made before 9.0), 2 = Argon2id. */
+    const val KDF_PBKDF2 = 1
+    const val KDF_ARGON2 = 2
+
+    /**
+     * Argon2id settings: 32 MiB, 3 passes, 1 lane. Memory is what makes guessing expensive on graphics cards
+     * (PBKDF2 needs almost none), and this is above the OWASP minimum (19 MiB, 2 passes) while still fitting a phone's heap.
+     * Tests lower the memory with [fastKdfForTests] so a few dozen sign-ins don't take minutes.
+     */
+    private const val ARGON_PASSES = 3
+    private const val ARGON_MEMORY_KIB = 32 * 1024
+    @Volatile private var argonMemoryKib = ARGON_MEMORY_KIB
+
+    internal fun fastKdfForTests() { argonMemoryKib = 256 }
+
     class PasswordKeys(val auth: ByteArray, val backup: ByteArray)
 
     /** Password -> two keys. Only [PasswordKeys.auth] is sent to the server; the
      *  backup key never leaves the phone, so the server can't open the backup. */
-    fun passwordKeys(user: String, password: String, rounds: Int = KDF_ROUNDS): PasswordKeys {
-        val spec = PBEKeySpec(password.toCharArray(), "telegramnt-v2|$user".toByteArray(), rounds, 256)
-        val master = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
-        spec.clearPassword()
+    fun passwordKeys(user: String, password: String, kdf: Int = KDF_ARGON2): PasswordKeys {
+        val master = when (kdf) {
+            KDF_PBKDF2 -> {
+                val spec = PBEKeySpec(password.toCharArray(), "telegramnt-v2|$user".toByteArray(), KDF_ROUNDS, 256)
+                try { SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded } finally { spec.clearPassword() }
+            }
+            KDF_ARGON2 -> argon2id(password, "telegramnt-v3|$user".toByteArray())
+            else -> throw IllegalArgumentException("unknown password hashing $kdf")
+        }
         fun derive(label: String) = Mac.getInstance("HmacSHA256").run {
             init(SecretKeySpec(master, "HmacSHA256"))
             doFinal(label.toByteArray())
         }
-        return PasswordKeys(derive("auth"), derive("backup"))
+        return PasswordKeys(derive("auth"), derive("backup")).also { master.fill(0) }
+    }
+
+    private fun argon2id(password: String, salt: ByteArray): ByteArray {
+        val pw = password.toByteArray(Charsets.UTF_8)
+        try {
+            val params = Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
+                .withVersion(Argon2Parameters.ARGON2_VERSION_13).withIterations(ARGON_PASSES)
+                .withMemoryAsKB(argonMemoryKib).withParallelism(1).withSalt(salt).build()
+            val out = ByteArray(32)
+            Argon2BytesGenerator().apply { init(params) }.generateBytes(pw, out)
+            return out
+        } finally {
+            pw.fill(0)
+        }
     }
 
     fun lockBackup(key: ByteArray, user: String, data: ByteArray) = gcmSeal(key, "telegramnt-backup|$user", data)
@@ -182,6 +227,17 @@ object Crypto {
         c.doFinal(blob, 12, blob.size - 12)
     } catch (e: Exception) {
         null
+    }
+
+    /**
+     * True when [pub] is exactly the server key built into the app ([trusted]) and [sig] is its Ed25519 signature on
+     * "tellem-server-v1|" + [challenge]. That is how the Direct route tells the real server from someone else's tunnel.
+     */
+    fun verifyServerId(pub: ByteArray, sig: ByteArray, challenge: ByteArray, trusted: ByteArray): Boolean = try {
+        trusted.size == 32 && MessageDigest.isEqual(pub, trusted) &&
+            runCatching { com.google.crypto.tink.subtle.Ed25519Verify(pub).verify(sig, "tellem-server-v1|".toByteArray() + challenge) }.isSuccess
+    } catch (e: Exception) {
+        false
     }
 
     fun privateBytes(h: KeysetHandle): ByteArray = TinkProtoKeysetFormat.serializeKeyset(h, InsecureSecretKeyAccess.get())

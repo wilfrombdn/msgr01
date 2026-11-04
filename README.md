@@ -39,10 +39,12 @@ won't install over the old app.
 
 ## How it works (2.0)
 
-- Sign up = @username + password. The password goes through PBKDF2 (600k rounds), which gives two keys.
-  `auth` goes to the server, which stores a salted hash of it. `backup` never leaves the phone and locks
+- Sign up = @username + password (12+ characters, checked against common passwords). The password goes through Argon2id
+  (32 MiB, 3 passes), which gives two keys. Accounts made before 9.0 used PBKDF2 (600k rounds) and move to Argon2id the next time they
+  log in. `auth` goes to the server, which stores a salted hash of it. `backup` never leaves the phone and locks
   (AES-GCM) a backup of the private keys and friend list stored on the server. Logging in on a new phone
-  restores friends and signs the old phone out. Five wrong passwords lock the login, and the lock grows each time.
+  restores friends and signs the old phone out. Ten wrong passwords in a row start a short lock (1 minute, doubling, never over 30 minutes);
+  guesses are forgotten after a day.
 - Each account has an X25519 HPKE key and an Ed25519 signing key (Tink). Its public keys plus a friend-request
   inbox are listed under the username.
 - Add friend: look up @user, then send a sealed, signed request to their inbox. It includes a fresh mailbox for
@@ -52,7 +54,26 @@ won't install over the old app.
   512-byte steps, with replays ignored.
 - Safety code = 30 digits from both signing keys. Comparing them catches a server that swapped keys.
 - The app finds the server via `wilfrombdn.github.io/telegramnt/server.json` (https only), so it can move without an update.
-- No Google push: a foreground service keeps the connection open. Screenshots are blocked, app backups are off,
-  notifications say only "New message", and chats on the phone are saved encrypted with an Android Keystore key.
+- A foreground service keeps the connection open, so no Google is involved by default. **Wake-up pings through Google's push service
+  are opt-in** (Settings > Calls, off by default; the app doesn't even start Firebase until they're turned on). I want to eventually develop
+  my own infrastructure for this, so wake-ups don't have to go through Google at all.
+  Screenshots are blocked, app backups are off, notification text is off until you turn it on (names can be turned off too),
+  and chats on the phone are saved encrypted with an Android Keystore key.
 
 Not yet: forward secrecy (Double Ratchet), groups, pictures, multiple phones per account.
+
+
+## Who you're talking to, and the connection (9.0)
+
+- **Tor by default.** The server's .onion address is built into the app, so the address itself proves which server you reached,
+  and nobody sees your phone's internet address.
+- **Direct mode is optional and less private.** It skips Tor and goes through a Cloudflare tunnel (faster, works where Tor is blocked).
+  Cloudflare and the server can see your internet address. The app shows a plain warning before it switches on, checks the certificate
+  name on every connection, and refuses to send anything to a server that can't prove it holds the server's own key (built into the app).
+- **Add friends by QR code** to be sure of who they are: their code carries a fingerprint of their keys, and the app refuses to add them
+  if the server's directory gives different keys. Chats show "not verified" until you've scanned their code or compared the safety code.
+- **Group invitations are requests.** A friend can invite you, but you only join (and show your username to the group) when you tap Join.
+- **Pictures from other people can't crash the app:** thumbnails and photos are size-checked before they're decoded.
+- **Updates** are installed only if the file matches the checksum in the update list; Android also refuses any update not signed with
+  Tellem's key (v2 + v3 signing, so the key can be rotated if it is ever lost).
+- Builds check every downloaded library against `android/gradle/verification-metadata.xml`.

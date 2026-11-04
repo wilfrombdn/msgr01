@@ -67,6 +67,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     for (k in pins) byKey[k]?.let { list.addView(rowFor(it)) }
     inFolder += pins
     for (c in requests) list.addView(chatRow(c))   // friend requests right under the pins
+    for (inv in Messenger.core.pendingInvites()) list.addView(inviteRow(inv))   // group invitations wait for a yes
     if (q.isEmpty()) {
         inFolder += arch   // archived chats only show on their own page
         val archRows = rows.filter { it.first in arch && it.first !in pinnedKeys }
@@ -135,7 +136,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
         if (textsTab) flip.append("Phone")
         else flip.append(if (!Messenger.connected) "Connecting…" else if (Messenger.direct) APP_NAME else torTitle())
         topBar(flip,
-            if (textsTab) null else if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
+            if (textsTab) null else if (Messenger.connected) null else if (Messenger.direct) (Messenger.directProblem ?: "Direct connection") else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             *listOfNotNull<View>(
                 if (textsTab && phoneSub == "contacts") icon(R.drawable.ic_sort) { showSortMenu() } else null,   // sort button (Contacts tab)
@@ -166,6 +167,23 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
 }
 
 /** "Tellem" with a small raised "TOR" after it, like a squared number: shows the app is talking through Tor. */
+/** A friend's group invitation: nothing is joined (and nobody sees your username) until you tap Join. */
+internal fun MainActivity.inviteRow(inv: Core.Invite): View = LinearLayout(this).apply {
+    orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(12)); setBackgroundColor(listBg)
+    addView(tv("@${inv.from} invited you to a group", 15.5f, white, true))
+    addView(tv("\"${inv.name}\". Everyone in a group can see your username.", 13.5f, dim).apply { setPadding(0, dp(2), 0, dp(6)) })
+    addView(LinearLayout(context).apply {
+        addView(tv("Join", 15.5f, blue, true).apply {
+            setPadding(0, dp(6), dp(28), dp(6)); background = pressable()
+            setOnClickListener { Messenger.run({ Messenger.core.acceptInvite(inv); Messenger.kick() }, { showChats() }) { e -> toast(errorText(e)) } }
+        })
+        addView(tv("Decline", 15.5f, dim, true).apply {
+            setPadding(0, dp(6), dp(28), dp(6)); background = pressable()
+            setOnClickListener { Messenger.core.declineInvite(inv); showChats() }
+        })
+    })
+}
+
 internal fun MainActivity.torTitle() = android.text.SpannableString("$APP_NAME TOR").apply {
     setSpan(android.text.style.SuperscriptSpan(), APP_NAME.length + 1, length, 0)
     setSpan(android.text.style.RelativeSizeSpan(0.5f), APP_NAME.length, length, 0)

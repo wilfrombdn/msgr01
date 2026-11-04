@@ -81,7 +81,7 @@ internal fun MainActivity.showProfile() {
     col.addView(LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(20), dp(20), dp(20), dp(6))
         addView(ImageView(context).apply {
-            setImageBitmap(QrActivity.codeFor(me.user, 512))
+            setImageBitmap(QrActivity.codeFor(me.user, 512, Messenger.core.myKeyFingerprint()))
             background = round(Color.WHITE, 12); setPadding(dp(10), dp(10), dp(10), dp(10))
             setOnClickListener { myQr() }
         }, LinearLayout.LayoutParams(dp(200), dp(200)))

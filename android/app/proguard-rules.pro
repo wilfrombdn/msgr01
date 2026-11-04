@@ -4,6 +4,11 @@
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn javax.annotation.**
 -dontwarn android.crypto.hpke.**
+# Argon2id for passwords (BouncyCastle); everything else in it is removed by R8
+-keep class org.bouncycastle.crypto.generators.Argon2BytesGenerator { *; }
+-keep class org.bouncycastle.crypto.params.Argon2Parameters { *; }
+-keep class org.bouncycastle.crypto.params.Argon2Parameters$Builder { *; }
+-dontwarn org.bouncycastle.**
 # libsignal calls back into these classes from native code
 -keep class org.signal.libsignal.** { *; }
 -dontwarn org.signal.libsignal.**

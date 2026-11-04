@@ -38,11 +38,10 @@ internal fun MainActivity.showSettings() {
     choice("Tor (most private)", if (on) "✓ active" else Tor.status(), !direct) { if (direct) { Messenger.useDirect(false); showSettings() } }
     col.addView(settingNote("Everything goes through the Tor network, so no one, not even the server, ever sees your phone's internet address."))
     col.addView(settingRow("Tor details", "What Tor is doing, to copy and send if it won't connect") { torDetails() })
-    choice("Direct (faster)", if (on) "✓ active" else "connecting…", direct) {
-        if (!direct) popup("Use Direct?", "Faster, and works on networks that block Tor (like some work Wi-Fi). Your messages stay end-to-end encrypted, but Cloudflare and the server can see your phone's internet address. Calls still go through Tor.",
-            null, "Cancel" to dim, "Use Direct" to white) { i -> if (i == 1) { Messenger.useDirect(true); showSettings() } }
+    choice("Direct (faster, less private)", if (on) "✓ active" else (Messenger.directProblem ?: "connecting…"), direct) {
+        if (!direct) confirmDirect { Messenger.useDirect(true); showSettings() }
     }
-    col.addView(settingNote("Goes through a Cloudflare tunnel to the server. Messages stay end-to-end encrypted; your internet address is not hidden."))
+    col.addView(settingNote("Skips Tor and goes through a Cloudflare tunnel. Cloudflare and the server can see your phone's internet address. Messages stay end-to-end encrypted. Only use it if Tor is blocked on your network."))
     if (Messenger.core.unreadable > 0) col.addView(tv("⚠ ${Messenger.core.unreadable} message(s) arrived but couldn't be decrypted — the two accounts' keys are out of sync (usually from reinstalling/restoring). Fresh accounts fix this.", 13.5f, amber).apply { setPadding(dp(20), dp(2), dp(20), dp(10)) })
     if (Messenger.core.lastDrop.isNotEmpty()) col.addView(tv("diag · last fetched message: ${Messenger.core.lastDrop}", 12.5f, dim).apply { setPadding(dp(20), 0, dp(20), dp(10)) })
     col.addView(gap(8))
@@ -91,8 +90,17 @@ internal fun MainActivity.showSettings() {
         "Turn names off to just see \"$APP_NAME · New message\"."))
     // Calls when closed: each missing phone setting, tap to fix
     col.addView(tv("Calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
-    col.addView(settingSwitch("Wake-up pings", Messenger.pushOn) { on -> Messenger.pushOn = on; Messenger.settingsChanged(); PushService.register(this) })
-    col.addView(settingNote("Lets calls and messages wake $APP_NAME when it's closed, like Telegram, through Google's push service. The ping is empty: Google never sees who it's from or what it says."))
+    col.addView(settingSwitch("Wake-up pings (uses Google)", Messenger.pushOn) { on ->
+        if (!on) { setWakeUpPings(false); return@settingSwitch }
+        popup("Turn on wake-up pings?",
+            "Pings let calls and messages wake $APP_NAME when it's closed, like Telegram. They go through Google's push service, so:\n\n" +
+            "• Google learns that this phone uses $APP_NAME, and when mail arrives for it (never who it's from or what it says).\n" +
+            "• Your phone talks to Google directly, not through Tor, to set this up.\n" +
+            "• The server keeps a code for your phone next to your chats' mailboxes.\n\n" +
+            "Left off, $APP_NAME keeps its own connection open instead, and a call or message can arrive late while the phone is asleep.",
+            null, "Keep off" to dim, "Turn on" to white) { i -> if (i == 1) setWakeUpPings(true); showSettings() }
+    })
+    col.addView(settingNote("Off by default. The ping itself is empty. A pings setup that doesn't need Google is planned for later."))
     val fixes = ringFixes()
     if (fixes.isEmpty()) col.addView(tv("✓ Calls will ring this phone even when $APP_NAME is closed", 15f, green).apply { setPadding(dp(20), dp(6), dp(20), dp(6)) })
     else {
@@ -263,4 +271,24 @@ internal fun MainActivity.showAppearance() {
         setOnClickListener { Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second; Messenger.settingsChanged(); showAppearance() }
     })
     setContentView(page(topBar("Appearance", left = icon(R.drawable.ic_back) { showSettings() }), ScrollView(this).apply { addView(col) }))
+}
+
+
+/** Direct mode gives up Tor's protection, so it is never switched on without this plain-words warning. */
+internal fun MainActivity.confirmDirect(go: () -> Unit) {
+    popup("Use Direct mode?",
+        "Direct skips Tor. Before you turn it on, know what that means:\n\n" +
+        "• Cloudflare and the server can see your phone's internet address (roughly where you are) every time you connect.\n" +
+        "• They can see when you're online and how much you send. They can never read your messages: those stay end-to-end encrypted.\n" +
+        "• Anyone watching your network can see that you use $APP_NAME.\n" +
+        "• Calls still go through Tor.\n\n" +
+        "It's faster and works where Tor is blocked. If Tor works for you, stay on Tor.",
+        null, "Stay on Tor" to dim, "I understand, use Direct" to red) { i -> if (i == 1) go() }
+}
+
+/** Turns wake-up pings on or off; off also tells Google to forget this phone's ping address. */
+internal fun MainActivity.setWakeUpPings(on: Boolean) {
+    Messenger.pushOn = on; Messenger.pushChosen = true
+    Messenger.settingsChanged()
+    PushService.register(this)
 }

@@ -22,14 +22,22 @@ object Messenger {
      *  can only ever talk to the real server, and nothing (no Cloudflare, no directory fetch) sees an IP. */
     const val ONION = "http://b5yezgiz6sehrwie3qcnmplgbxcc7lfrclqukbmlnya332gh53wplzad.onion"
 
+    /** The server's own public key (Ed25519, base64). Direct mode has no onion address to prove who is there, so the server
+     *  must sign a fresh challenge with the matching private key (kept only on the server) or nothing is sent to it. */
+    const val SERVER_ID = "qQIFUTZwWF41InhYxCquqVfysdApJ26DyHG1Wko1MY4="
+
     lateinit var core: Core
     var background = true
     /** Settings > Connection: Direct (through the Cloudflare tunnel, faster, works where Tor is blocked) instead of Tor. */
     @Volatile var direct = false
     /** The Direct address last read from server.json (it changes whenever the laptop server restarts). */
     @Volatile var directUrl = ""
-    /** Settings > Calls: empty wake-up pings through Google's push service (on unless switched off). */
-    @Volatile var pushOn = true
+    /** Settings > Calls: empty wake-up pings through Google's push service. OFF until the person turns it on (it tells Google this
+     *  phone exists and when mail arrives). [pushChosen] = they have decided, so an old saved "on" can't count as consent. */
+    @Volatile var pushOn = false
+    @Volatile var pushChosen = false
+    /** Why the Direct route is blocked (the server at that address couldn't prove who it is), or null. */
+    @Volatile var directProblem: String? = null
 
     fun setPushToken(t: String) { core.pushToken = t; kick() }
 
@@ -81,7 +89,7 @@ object Messenger {
     /** Say who a message is from in notifications (off = just "Tellem · New message", and no text either). */
     var notifyNames = true
     /** Show the message itself in notifications, like a normal text. The lock screen follows the phone's own setting. */
-    var notifyText = true
+    var notifyText = false
 
     // ---------- app lock (Settings > Privacy; off by default) ----------
 
@@ -428,7 +436,7 @@ object Messenger {
         o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
         o.put("keepMediaDays", keepMediaDays).put("autoMedia", autoMedia).put("notifyNames", notifyNames).put("notifyText", notifyText).put("appLock", appLock).put("lockAfterMin", lockAfterMin)
-        o.put("direct", direct).put("directUrl", directUrl).put("ringSetupAsked", ringSetupAsked).put("pushOn", pushOn)
+        o.put("direct", direct).put("directUrl", directUrl).put("ringSetupAsked", ringSetupAsked).put("pushOn", pushOn).put("pushChosen", pushChosen)
         o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
         o.put("stickers", JSONObject().also { j -> synchronized(allStickers) { allStickers.forEach { (u, ss) -> j.put(u, org.json.JSONArray(ss)) } } })
         o.put("archived", JSONObject().also { j -> synchronized(allArchived) { allArchived.forEach { (u, ms) -> j.put(u, org.json.JSONArray(ms.toList())) } } })
@@ -441,9 +449,9 @@ object Messenger {
         o.optJSONObject("emojiUse")?.let { j -> synchronized(emojiUse) { j.keys().forEach { emojiUse[it] = j.optInt(it) } } }
         o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
         o.optJSONObject("spot")?.let { spot = Spot.from(it) }
-        keepMediaDays = o.optInt("keepMediaDays", 0); autoMedia = o.optBoolean("autoMedia", true); notifyNames = o.optBoolean("notifyNames", true); notifyText = o.optBoolean("notifyText", true)
+        keepMediaDays = o.optInt("keepMediaDays", 0); autoMedia = o.optBoolean("autoMedia", true); notifyNames = o.optBoolean("notifyNames", true); notifyText = o.optBoolean("notifyText", false)
         appLock = o.optBoolean("appLock"); lockAfterMin = o.optInt("lockAfterMin", 1).coerceAtLeast(1)
-        direct = o.optBoolean("direct"); directUrl = o.optString("directUrl"); ringSetupAsked = o.optBoolean("ringSetupAsked"); pushOn = o.optBoolean("pushOn", true)
+        direct = o.optBoolean("direct"); directUrl = o.optString("directUrl"); ringSetupAsked = o.optBoolean("ringSetupAsked"); pushChosen = o.optBoolean("pushChosen", false); pushOn = pushChosen && o.optBoolean("pushOn", false)
         o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->
             val a = j.optJSONArray(u) ?: return@forEach
             allPins[u] = MutableList(a.length()) { a.getString(it) }
@@ -550,6 +558,14 @@ object Messenger {
         var ok = core.relay.ping()
         // Direct: the tunnel address changes when the server restarts; look up the new one and try again
         if (!ok && direct && refreshDirect()) ok = core.relay.ping()
+        if (direct && directUrl.isNotEmpty()) {
+            // A tunnel address proves nothing (anyone can run one), so the server must sign our challenge with its own key.
+            // Until it does, nothing else may go to it ([Relay.directVerified]).
+            val real = ok && core.relay.verifyIdentity()
+            core.relay.directVerified = real
+            directProblem = if (ok && !real) "That isn't the real $APP_NAME server, so Direct is blocked. Switch back to Tor." else null
+            if (!real) ok = false
+        } else directProblem = null
         val now = System.currentTimeMillis()
         if (ok || Tor.socksPort() == null) lastServerOk = now   // only count time Tor was ready and the server still didn't answer
         if (ok) torRestarts = 0
@@ -572,8 +588,8 @@ object Messenger {
     /** Points the app at the .onion (Tor) or the Direct address. Calls always stay on Tor. */
     fun applyRoute() {
         val r = core.relay
-        if (direct && directUrl.isNotEmpty()) { r.server = directUrl; r.callServer = ONION }
-        else { r.server = ONION; r.callServer = null }
+        if (direct && directUrl.isNotEmpty()) { r.server = directUrl; r.callServer = ONION; r.directVerified = false }
+        else { r.server = ONION; r.callServer = null; r.directVerified = true; directProblem = null }
     }
 
     /** Reads the current Direct address from the website (straight, not through Tor). */

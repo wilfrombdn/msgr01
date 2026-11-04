@@ -100,9 +100,9 @@ class QrActivity : ComponentActivity() {
     companion object {
         const val ADD = "msgr01://add/"
 
-        /** My code: a QR of "msgr01://add/<username>", black on white so any scanner can read it. */
-        fun codeFor(user: String, size: Int): Bitmap {
-            val m = QRCodeWriter().encode(ADD + user, BarcodeFormat.QR_CODE, size, size, mapOf(EncodeHintType.MARGIN to 1))
+        /** My code: a QR of "msgr01://add/<username>?k=<key fingerprint>", black on white so any scanner can read it. */
+        fun codeFor(user: String, size: Int, keys: String? = null): Bitmap {
+            val m = QRCodeWriter().encode(ADD + user + (keys?.let { "?k=$it" } ?: ""), BarcodeFormat.QR_CODE, size, size, mapOf(EncodeHintType.MARGIN to 1))
             val px = IntArray(size * size) { i -> if (m[i % size, i / size]) Color.BLACK else Color.WHITE }
             return Bitmap.createBitmap(px, size, size, Bitmap.Config.ARGB_8888)
         }

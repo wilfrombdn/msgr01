@@ -134,7 +134,9 @@ internal fun MainActivity.linkCard(lp: org.json.JSONObject, ink: Int): View = Li
     addView(View(context).apply { setBackgroundColor(blue) }, LinearLayout.LayoutParams(dp(3), -1))
     addView(LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(8), 0, 0, 0)
-        lp.optString("s").takeIf { it.isNotEmpty() }?.let { addView(tv(it, 13.5f, blue, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }) }
+        // the address the tap really opens (the title and site name are whatever the sender chose, so they prove nothing)
+        val host = runCatching { android.net.Uri.parse(lp.optString("u")).host }.getOrNull()?.removePrefix("www.").orEmpty()
+        addView(tv(if (host.isNotEmpty()) "🔗 $host" else "🔗 link", 13.5f, blue, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         addView(tv(lp.optString("t"), 14.5f, ink, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
         lp.optString("d").takeIf { it.isNotEmpty() }?.let { addView(tv(it, 13.5f, faded).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }) }
     }, LinearLayout.LayoutParams(-2, -2))

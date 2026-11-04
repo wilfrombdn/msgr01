@@ -39,7 +39,7 @@ The same APK is also posted at the usual download link for new installs.
    cd android && UPDATE_CHECK=1 JAVA_HOME=~/opt/jdk21 ANDROID_HOME=~/Android/Sdk bash ./gradlew testDebugUnitTest --tests '*CryptoTest.publishedUpdateIsConsistent'
    ```
    This downloads `update.json` and the APK and checks the SHA-256 matches.
-6. If `server/relay.py` changed, copy it to the droplet and restart: `scp server/relay.py tellem:/opt/tellem/server/ && ssh tellem systemctl restart tellem`.
+6. If `server/relay.py` changed, run the server tests (`cd server && python -m unittest test_relay`), then the owner copies it to the droplet and restarts (asks for the admin key passphrase): `scp server/relay.py tellem:/tmp/relay-new.py && ssh tellem "sudo install -m 644 -o tellem -g tellem /tmp/relay-new.py /opt/tellem/server/relay.py && sudo systemctl restart tellem"`.
    Server and app changes must stay compatible with phones that haven't updated yet.
 
 ## Rules

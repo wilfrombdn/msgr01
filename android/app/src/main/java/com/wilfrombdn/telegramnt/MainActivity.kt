@@ -217,7 +217,7 @@ class MainActivity : Activity() {
             if (Tor.outdated) maybeCheckUpdate()   // a newer app (with a newer Tor) is the only fix
             if (System.currentTimeMillis() - connectStart >= 30_000) {
                 welcomeTorNote?.visibility = if (Messenger.direct) View.GONE else View.VISIBLE
-                welcomeTorLine?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) "Trying a direct connection…" else Tor.status() }
+                welcomeTorLine?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) (Messenger.directProblem ?: "Trying a direct connection…") else Tor.status() }
                 welcomeDirect?.apply { visibility = View.VISIBLE; text = if (Messenger.direct) "Use Tor instead" else "Connect directly instead" }
             }
             st.postDelayed(this, 1000)
@@ -542,7 +542,7 @@ class MainActivity : Activity() {
             val l = connLabel ?: return
             if (screen != Screen.SETTINGS || !l.isAttachedToWindow) return
             val on = Messenger.connected
-            l.text = if (on) "✓ active" else if (Messenger.direct) "connecting…" else Tor.status()
+            l.text = if (on) "✓ active" else if (Messenger.direct) (Messenger.directProblem ?: "connecting…") else Tor.status()
             l.setTextColor(if (on) green else amber)
             l.postDelayed(this, 1000)
         }

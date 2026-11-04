@@ -92,7 +92,7 @@ internal fun MainActivity.myQr() {
     val col = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
         addView(ImageView(context).apply {
-            setImageBitmap(QrActivity.codeFor(me.user, 512))
+            setImageBitmap(QrActivity.codeFor(me.user, 512, Messenger.core.myKeyFingerprint()))
             background = round(Color.WHITE, 12); setPadding(dp(10), dp(10), dp(10), dp(10))
         }, LinearLayout.LayoutParams(dp(230), dp(230)))
         addView(tv("@${me.user}", 17f, white, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(12), 0, 0) })
@@ -108,11 +108,16 @@ internal fun MainActivity.scanned(text: String) {
         Messenger.run({ val g = Messenger.core.joinGroupLink(text); Messenger.kick(); groupToOpen = g.id }, { groupToOpen?.let { showGroup(it) } }) { e -> toast(errorText(e)) }
         return
     }
-    val user = text.removePrefix(QrActivity.ADD).trim().lowercase()
+    val body = text.removePrefix(QrActivity.ADD).trim().lowercase()
+    val user = body.substringBefore('?')
+    val keys = body.substringAfter("?k=", "").takeIf { it.length == 32 && it.all { c -> c in "0123456789abcdef" } }
     if (!Core.USERNAME.matches(user)) return toast("That isn't a $APP_NAME code")
     if (user == Messenger.core.me?.user) return toast("That's your own code")
     Messenger.core.contact(user)?.let { return showChat(it.user) }
-    popup("Add @$user?", "Sends them a friend request.", null, "Cancel" to dim, "Add" to white) { i ->
-        if (i == 1) Messenger.run({ Messenger.core.addFriend(user); Messenger.kick() }, { showChat(user) }) { e -> toast(errorText(e)) }
+    popup("Add @$user?",
+        if (keys != null) "Sends them a friend request. Their code also checks that the server gives you their real keys."
+        else "Sends them a friend request. This older code can't check their keys, so compare the safety code with them afterwards.",
+        null, "Cancel" to dim, "Add" to white) { i ->
+        if (i == 1) Messenger.run({ Messenger.core.addFriend(user, keys); Messenger.kick() }, { showChat(user) }) { e -> toast(errorText(e)) }
     }
 }

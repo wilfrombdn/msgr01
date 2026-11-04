@@ -170,7 +170,7 @@ class Me(
     val enc: KeysetHandle,
     val sig: KeysetHandle,
     val inboxToken: String,
-    val backupKey: ByteArray,
+    var backupKey: ByteArray,   // changes once, when an old account moves from PBKDF2 to Argon2id
     var avatar: ByteArray? = null,
     var signal: SignalStore = SignalStore.create(),
     var keysPublished: Boolean = false,

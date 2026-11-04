@@ -16,13 +16,16 @@
 - Build: `cd android && JAVA_HOME=~/opt/jdk21 ANDROID_HOME=~/Android/Sdk bash ./gradlew assembleRelease`.
   `ScreenshotTest` renders screens to `app/build/shots/` (the way to preview UI here).
   `RelayFlowTest` needs a local server: `python3 server/relay.py --port 8099 --db <tmp>/t.db --test-limits`.
-- The server runs on a DigitalOcean droplet. After `relay.py` changes: `scp server/relay.py tellem:/opt/tellem/server/ && ssh tellem systemctl restart tellem`. Details in `SERVER-SETUP.md`.
+- The server runs on a DigitalOcean droplet. After `relay.py` changes: run `cd server && python -m unittest test_relay`, then deploy
+  (the owner runs this, it asks for the admin key passphrase; Claude can't type it): `scp server/relay.py tellem:/tmp/relay-new.py && ssh tellem "sudo install -m 644 -o tellem -g tellem /tmp/relay-new.py /opt/tellem/server/relay.py && sudo systemctl restart tellem"`. Details in `SERVER-SETUP.md`.
+  Keep Unix (LF) line endings in `server/` files (a CRLF script fails on Linux).
   The app reaches it only through its Tor .onion address (plus the optional Direct mode). Never add a route that bypasses Tor or exposes users' IPs
   without asking the owner first.
 - Server backups run nightly from the owner's PC (accounts only, encrypted; see `SERVER-SETUP.md`). Keep the server holding as little as possible.
 
-## Waiting for the next release (since 7.7)
-- Nothing yet (7.8 shipped the pencil/phone/plus round button with hold-to-big-camera). 7.5 (Snap, Saved Messages), 7.6 (full-screen camera, flash/timer, cleanup into feature files) and 7.7 (hold-and-release camera button, bottom Tellem|Phone switch) and 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) have not been tested on a real phone, so expect fixes.
+## Waiting for the next release (since 9.0)
+- Nothing yet. 9.0 is the security release (audit 2026-11-04): TLS certificate-name check, Argon2id passwords (old accounts upgrade on next login; new passwords 12+ chars and checked), Direct mode warning + the server must prove its identity key (`Messenger.SERVER_ID`), group invites ask first, QR codes carry a key fingerprint, wake-up pings opt-in, picture decode safety, notification text off by default, v3 signing. Not yet tested on a real phone: Argon2 speed on old phones, the new Direct warning screens, Tor onion proof-of-work under load.
+- Before 9.0: nothing waiting (7.8 shipped the pencil/phone/plus round button with hold-to-big-camera). 7.5 (Snap, Saved Messages), 7.6 (full-screen camera, flash/timer, cleanup into feature files) and 7.7 (hold-and-release camera button, bottom Tellem|Phone switch) and 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) have not been tested on a real phone, so expect fixes.
 
 ## Checking a refactor
 - Screens live in feature files (see README "Where things live"); `ScreenshotTest` writes a `.tree.txt` (view tree: types, text, sizes, positions) next to each PNG in `app/build/shots/`. Keep a copy before a refactor and diff afterwards: identical trees = same UI. Five call/download screens have live timers and always differ.
@@ -35,5 +38,6 @@
 - Signing key: unzip `app-signing-keys-2026-10-26.zip` from Google Drive folder "App signing keys (private)" so that
   `android/keystore/release.jks` and `android/keystore/keystore.properties` exist. Never commit them (this repo is public).
   Without them builds are debug-signed and can't update phones.
-- Server login: an SSH config entry `Host tellem` → `root@159.89.125.221`, and an SSH key the droplet accepts.
+- Server login: `~/.ssh/config` has `Host tellem` (user `tadmin`, passphrase-protected key `~/.ssh/tellem_admin`) and `Host tellem-backup`
+  (the nightly backup key). Root login is off. The droplet's IP is not written in this public repo; don't add it.
   `server/giphy.key` and `server/fcm.json` live only on the server; they aren't needed to build the app.

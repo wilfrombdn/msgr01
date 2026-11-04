@@ -41,7 +41,7 @@ object Updater {
         val u = Update(o.getInt("code"), o.getString("name"),
             o.optJSONArray("notes")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
             o.getString("apk"), o.optString("sha256"))
-        return u.takeIf { it.code > current(ctx) }
+        return u.takeIf { it.code > current(ctx) && it.sha256.length == 64 }   // no checksum, no update
     }
 
     private fun apkFile(ctx: Context, u: Update) = File(File(ctx.cacheDir, "update"), "tellem-${u.code}.apk")
@@ -74,7 +74,7 @@ object Updater {
                 } catch (e: IOException) {
                     if (e.message != "HTTP 416" || before == 0L) throw e   // 416 = we already have the whole file
                 }
-                if (u.sha256.isEmpty() || Crypto.sha256(f.readBytes()).hex() == u.sha256.lowercase()) return f
+                if (Crypto.sha256(f.readBytes()).hex() == u.sha256.lowercase()) return f
                 // damaged: start over from scratch once, then give up
                 f.delete()
                 if (restarted) throw Damaged()

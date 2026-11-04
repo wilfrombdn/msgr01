@@ -34,9 +34,44 @@ object Net {
             Socket(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort)))
                 .apply { connect(InetSocketAddress.createUnresolved(host, port), maxOf(connectMs, 90_000)) }
         }
-        return if (tls) (SSLSocketFactory.getDefault() as SSLSocketFactory)
-            .createSocket(raw, host, port, true).apply { (this as javax.net.ssl.SSLSocket).startHandshake() }
-        else raw
+        return if (tls) secure(raw, host, port) else raw
+    }
+
+    /**
+     * TLS on top of [raw]. A bare SSLSocket checks that the certificate is signed by a trusted authority but NOT that it
+     * was issued for [host], so anyone with a valid certificate for any domain could pose as the server. So the name is
+     * checked twice: Android's own check (endpoint identification) and ours, from the certificate's alternative names.
+     */
+    private fun secure(raw: Socket, host: String, port: Int): Socket {
+        val s = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, host, port, true) as javax.net.ssl.SSLSocket
+        try {
+            s.sslParameters = s.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
+            s.startHandshake()
+            if (!certificateIsFor(host, s.session.peerCertificates)) throw javax.net.ssl.SSLPeerUnverifiedException("certificate is not for $host")
+        } catch (e: Exception) {
+            runCatching { s.close() }
+            throw e
+        }
+        return s
+    }
+
+    /** True when the first (server) certificate lists [host] among its DNS names. */
+    internal fun certificateIsFor(host: String, chain: Array<java.security.cert.Certificate>): Boolean {
+        val cert = chain.firstOrNull() as? java.security.cert.X509Certificate ?: return false
+        val names = try { cert.subjectAlternativeNames } catch (e: Exception) { null } ?: return false
+        return names.any { it.size >= 2 && it[0] == 2 && nameMatches(host, it[1] as? String ?: "") }
+    }
+
+    /** Certificate name rules: an exact name, or `*.example.com` standing for exactly one label (never `*.com`, never `a.b.example.com`). */
+    internal fun nameMatches(host: String, pattern: String): Boolean {
+        val h = host.lowercase().trimEnd('.')
+        val p = pattern.lowercase().trimEnd('.')
+        if (h.isEmpty() || p.isEmpty()) return false
+        if (!p.startsWith("*.")) return h == p
+        val rest = p.substring(2)
+        if (!rest.contains('.') || rest.contains('*')) return false
+        val label = h.removeSuffix(".$rest")
+        return h.endsWith(".$rest") && label.isNotEmpty() && !label.contains('.')
     }
 
     /**

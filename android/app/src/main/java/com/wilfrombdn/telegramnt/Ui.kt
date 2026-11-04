@@ -117,7 +117,8 @@ internal fun MainActivity.icon(res: Int, color: Int = white, size: Int = 24, pad
 /** Profile photo if there is one, otherwise coloured initials like Telegram. */
 internal fun MainActivity.avatar(name: String, sizeDp: Int, photo: ByteArray? = null): View {
     val bmp = photo?.let { p ->
-        photoCache.getOrPut(p.contentHashCode()) { android.graphics.BitmapFactory.decodeByteArray(p, 0, p.size) }
+        val key = p.contentHashCode()
+        photoCache[key] ?: safeBitmap(p, 512)?.also { photoCache[key] = it }
     }
     if (bmp != null) return ImageView(this).apply {
         setImageBitmap(bmp)

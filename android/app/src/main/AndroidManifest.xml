@@ -38,16 +38,20 @@
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- allowBackup off: keys and chats never go to Google backups.
-         Cleartext allowed so a home test server (http://192.168...) works; messages are
-         end-to-end encrypted either way, and the app warns when the server isn't https. -->
+         Cleartext off: the app talks over its own raw sockets (Tor, or TLS with a checked certificate name), never
+         through the system's HTTP stack, so nothing legitimate needs plain http. -->
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/no_backup"
         android:fullBackupContent="false"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        <!-- Firebase must not start by itself: until the person turns on wake-up pings (Settings > Calls) the app never
+             contacts Google. PushService turns it on and off. No analytics, ever. -->
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
         <activity android:name=".MainActivity" android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
