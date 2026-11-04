@@ -90,13 +90,24 @@ class ScreenshotTest {
         v.draw(Canvas(bmp))
         val dir = File("build/shots").apply { mkdirs() }
         FileOutputStream(File(dir, "$name.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(dir, "$name.tree.txt").writeText(StringBuilder().also { dumpTree(v, 0, it) }.toString())
+    }
+
+    /** One line per view (type, text, size, position, visibility): a refactor that moves or drops anything shows up as a diff. */
+    private fun dumpTree(v: android.view.View, depth: Int, out: StringBuilder) {
+        val text = (v as? android.widget.TextView)?.text?.toString()?.replace(Regex("\\s+"), " ").orEmpty()
+        out.append("  ".repeat(depth)).append(v.javaClass.simpleName).append(" [${v.left},${v.top},${v.width}x${v.height}] vis=${v.visibility}")
+        if (text.isNotEmpty()) out.append(" \"$text\"")
+        out.append('\n')
+        (v as? android.view.ViewGroup)?.let { g -> for (i in 0 until g.childCount) dumpTree(g.getChildAt(i), depth + 1, out) }
     }
 
     private fun call(a: MainActivity, method: String, vararg args: Any) {
-        // optional (defaulted) trailing parameters are passed as null
+        // optional (defaulted) trailing parameters get a neutral value: false / 0 for primitives, null otherwise
         val m = MainActivity::class.java.declaredMethods.filter { it.name == method && it.parameterCount >= args.size }.minBy { it.parameterCount }
         m.isAccessible = true
-        m.invoke(a, *args, *arrayOfNulls<Any>(m.parameterCount - args.size))
+        val rest = m.parameterTypes.drop(args.size).map { t -> when (t) { Boolean::class.javaPrimitiveType -> false; Int::class.javaPrimitiveType -> 0; Long::class.javaPrimitiveType -> 0L; Float::class.javaPrimitiveType -> 0f; else -> null } }
+        m.invoke(a, *args, *rest.toTypedArray())
     }
 
     @Test fun screens() {
@@ -156,7 +167,7 @@ class ScreenshotTest {
         )
         MainActivity::class.java.getDeclaredField("textsTab").apply { isAccessible = true }.setBoolean(a, true)
         call(a, "showChats"); shoot(a, "t6-texts-with-spam-row")
-        call(a, "showTextSpam"); shoot(a, "t7-spam-folder")
+        call(a, "showTextSection", "spam"); shoot(a, "t7-spam-folder")
         call(a, "showTextThread", 13L); shoot(a, "t8-spam-thread")
         // Phone tab: calls (phone + Tellem) and contacts
         val f = MainActivity::class.java
