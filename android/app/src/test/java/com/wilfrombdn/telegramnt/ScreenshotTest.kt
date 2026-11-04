@@ -101,13 +101,25 @@ class ScreenshotTest {
         out.append('\n')
         (v as? android.view.ViewGroup)?.let { g -> for (i in 0 until g.childCount) dumpTree(g.getChildAt(i), depth + 1, out) }
     }
+    /** Every screen function: members of MainActivity, plus the extension functions in the feature files (static methods taking the activity first). */
+    private val screenFunctions: List<java.lang.reflect.Method> by lazy {
+        // the feature files in src/main (tests run from the app/ folder); each compiles to a <Name>Kt class
+        val facades = java.io.File("src/main/java/com/wilfrombdn/telegramnt").listFiles { f -> f.extension == "kt" }.orEmpty()
+            .mapNotNull { runCatching { Class.forName("com.wilfrombdn.telegramnt." + it.nameWithoutExtension + "Kt") }.getOrNull() }
+        MainActivity::class.java.declaredMethods.toList() + facades.flatMap { c ->
+            c.declaredMethods.filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.parameterTypes.firstOrNull() == MainActivity::class.java }
+        }
+    }
 
     private fun call(a: MainActivity, method: String, vararg args: Any) {
         // optional (defaulted) trailing parameters get a neutral value: false / 0 for primitives, null otherwise
-        val m = MainActivity::class.java.declaredMethods.filter { it.name == method && it.parameterCount >= args.size }.minBy { it.parameterCount }
-        m.isAccessible = true
-        val rest = m.parameterTypes.drop(args.size).map { t -> when (t) { Boolean::class.javaPrimitiveType -> false; Int::class.javaPrimitiveType -> 0; Long::class.javaPrimitiveType -> 0L; Float::class.javaPrimitiveType -> 0f; else -> null } }
-        m.invoke(a, *args, *rest.toTypedArray())
+        val m = screenFunctions.filter { it.name == method && !it.isSynthetic }
+            .map { it to (if (java.lang.reflect.Modifier.isStatic(it.modifiers)) 1 else 0) }
+            .filter { (f, skip) -> f.parameterCount - skip >= args.size }.minBy { (f, skip) -> f.parameterCount - skip }
+        val (fn, skip) = m
+        fn.isAccessible = true
+        val rest = fn.parameterTypes.drop(skip + args.size).map { t -> when (t) { Boolean::class.javaPrimitiveType -> false; Int::class.javaPrimitiveType -> 0; Long::class.javaPrimitiveType -> 0L; Float::class.javaPrimitiveType -> 0f; else -> null } }
+        if (skip == 1) fn.invoke(null, a, *args, *rest.toTypedArray()) else fn.invoke(a, *args, *rest.toTypedArray())
     }
 
     @Test fun screens() {
