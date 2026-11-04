@@ -121,12 +121,17 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     // The round button sits at a fixed spot: 3/4 of the way across (the middle of the gap between the Tellem | Phone switch and the right edge), and a
     // little above the bottom, so either thumb reaches it. Fixed on purpose: it must not move when you change tabs or screens.
     val fabLp = FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.START).apply {
-        leftMargin = (resources.displayMetrics.widthPixels * 0.75f).toInt() - dp(28); bottomMargin = dp(44)
+        val saved = UiPrefs.fabX(this@showChats)   // where you dragged it to (a share of the screen width), if you did
+        leftMargin = if (saved >= 0f) (resources.displayMetrics.widthPixels * saved).toInt() else (resources.displayMetrics.widthPixels * 0.75f).toInt() - dp(28)
+        bottomMargin = dp(44)
     }
-    frame.addView(if (phoneOnly) phoneButton() else fab(R.drawable.ic_edit) { showNewChat() }, fabLp)
+    val roundButton = if (phoneOnly) phoneButton() else fab(R.drawable.ic_edit) { showNewChat() }
+    frame.addView(roundButton, fabLp)
     if (q.isEmpty() && !screenSearch && !showArchive) {
         val sw = windowSwitch(all.sumOf { it.unread } + grps.sumOf { it.unread }, textsUnread())   // its width changes with unread badges, so the round button does NOT follow it (it used to jump)
+        sw.tag = "windowSwitch"
         frame.addView(sw, FrameLayout.LayoutParams(-2, dp(56), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(16), 0, 0, dp(16)) })
+        frame.post { clampFab(roundButton, frame) }   // keep the round button clear of the switch (it widens with unread badges)
     }
 
     val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
@@ -140,7 +145,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             *listOfNotNull<View>(
                 if (textsTab && phoneSub == "contacts") icon(R.drawable.ic_sort) { showSortMenu() } else null,   // sort button (Contacts tab)
-                icon(R.drawable.ic_search) { screenSearch = true; showChats() },
+                icon(R.drawable.ic_search) { screenSearch = true; wantSearchIme = true; showChats() },
             ).toTypedArray(),
         )
     }
@@ -226,10 +231,14 @@ internal fun MainActivity.searchBar(): View {
             }
         })
     }
-    // each letter redraws the screen, so take focus back and keep the keyboard up (it dropped in the Phone tab)
+    // each letter redraws the screen, so take focus back and keep the keyboard up while it is up. If you closed it and moved to
+    // another tab, it stays down (it used to pop back up): it is raised only while already up, or right after opening search.
     box.post {
-        box.requestFocus(); box.setSelection(box.text.length)
-        getSystemService(InputMethodManager::class.java).showSoftInput(box, InputMethodManager.SHOW_IMPLICIT)
+        val raise = wantSearchIme || imeVisible(); wantSearchIme = false
+        if (raise) {
+            box.requestFocus(); box.setSelection(box.text.length)
+            getSystemService(InputMethodManager::class.java).showSoftInput(box, InputMethodManager.SHOW_IMPLICIT)
+        }
     }
     return LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL

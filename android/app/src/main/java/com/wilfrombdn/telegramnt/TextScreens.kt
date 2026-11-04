@@ -121,9 +121,16 @@ internal fun MainActivity.textRow(t: Texts.Thread, pins: Set<Long> = Texts.pins(
         setBackgroundColor(listBg)
         setPadding(dp(10), dp(8), dp(14), dp(8))
         setOnClickListener { showTextThread(t.id) }
-        setOnLongClickListener { v -> dropdown(v, Gravity.END, (if (pinned) "Unpin" else "Pin to top") to { Texts.setPinned(this@textRow, t.id, !pinned) },
-            (if (t.archived) "Unarchive" else "Archive") to { Texts.setArchived(this@textRow, t.id, !t.archived); toast(if (t.archived) "Moved back to your texts" else "Archived") },
-            (if (t.spam) "Not spam" else "Move to spam") to { Texts.markSpam(this@textRow, t.id, !t.spam); toast(if (t.spam) "Moved back to your texts" else "Moved to spam") }); true }
+        setOnLongClickListener { v ->
+            buzz(v)
+            // no "Archive" here any more (it stays in the chat's ⋮ menu); an archived text can still be moved back
+            val items = listOfNotNull<Pair<String, () -> Unit>>(
+                (if (pinned) "Unpin" else "Pin to top") to { Texts.setPinned(this@textRow, t.id, !pinned) },
+                if (t.archived) "Unarchive" to { Texts.setArchived(this@textRow, t.id, false); toast("Moved back to your texts") } else null,
+                (if (t.spam) "Not spam" else "Move to spam") to { Texts.markSpam(this@textRow, t.id, !t.spam); toast(if (t.spam) "Moved back to your texts" else "Moved to spam") },
+            )
+            dropdown(v, Gravity.END, *items.toTypedArray()); true
+        }
     }
     row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54, null, numberSeed(t.addresses.joinToString(","))))   // a bare number gets "#", not "+5"
     val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
@@ -304,6 +311,7 @@ internal fun MainActivity.showNewText(body: String? = null) {
         var id = 0L
         Messenger.run({ id = Texts.threadFor(this, nums) }, { textDraft = body; showTextThread(id, nums) }) { toast("Couldn't start that text") }
     }, ctaParams())
+    imeWanted = true
     setContentView(page(topBar("New text", null, icon(R.drawable.ic_back) { leaveTexts() }), ScrollView(this).apply { addView(col) }))
     to.requestFocus()
 }

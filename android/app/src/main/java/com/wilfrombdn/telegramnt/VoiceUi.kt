@@ -26,7 +26,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
     // tap the mic = switch to round video (and back); hold = record
     val openRound = Runnable {
         roundHeld = true
-        btn.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        buzz(btn)
         @Suppress("DEPRECATION") startActivityForResult(Intent(this, RoundActivity::class.java), ROUND_VIDEO)
     }
     fun toggleMode() {
@@ -62,7 +62,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
     var held = false
     val holdSend = Runnable {
         held = true
-        btn.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        buzz(btn)
         longPressMenu(null, null, listOf(
             "Send without sound" to { special(true, 0) },
             "Schedule message" to { pickSendTime { at -> special(false, at) } },
@@ -106,7 +106,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
     fun lock() {
         locked = true; lockTouch = true
         lockPop.dismiss()
-        runCatching { getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createOneShot(25, 120)) }
+        if (UiPrefs.haptics(this)) runCatching { getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createOneShot(25, 120)) }
         slide.translationX = 0f; slide.alpha = 1f
         slide.text = "Cancel"; slide.setTextColor(red)
         slide.setOnClickListener { end(false) }
@@ -144,7 +144,7 @@ internal fun MainActivity.sendOrMic(row: LinearLayout, box: EditText, send: () -
                 if (!Voice.start(this)) { toast("Couldn't use the microphone"); return@setOnTouchListener true }
                 active = true; startX = e.rawX; startY = e.rawY
                 btn.parent?.requestDisallowInterceptTouchEvent(true)
-                runCatching { getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createOneShot(25, 120)) }
+                if (UiPrefs.haptics(this)) runCatching { getSystemService(android.os.Vibrator::class.java)?.vibrate(android.os.VibrationEffect.createOneShot(25, 120)) }
                 for (i in 0 until row.childCount) row.getChildAt(i).let { if (it !== btn) it.visibility = View.GONE }
                 row.addView(strip, 0, LinearLayout.LayoutParams(0, -2, 1f))
                 slide.translationX = 0f; timer.text = "0:00"

@@ -5,7 +5,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
-import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ScrollView
 
@@ -34,7 +33,10 @@ private class Shield(ctx: Context) : FrameLayout(ctx) {
     override fun onInterceptTouchEvent(ev: MotionEvent) = true
 }
 
-private const val SLIDE_MS = 230L
+private const val SLIDE_MS = 300L
+
+/** One soft curve for every slide and spring-back: it leaves gently and settles slowly, so motion never snaps or stops dead. */
+internal val SMOOTH: android.animation.TimeInterpolator = android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
 
 private fun MainActivity.pictureView(bmp: android.graphics.Bitmap) = android.widget.ImageView(this).apply {
     setImageBitmap(bmp); scaleType = android.widget.ImageView.ScaleType.FIT_XY
@@ -53,7 +55,7 @@ internal fun MainActivity.slideScreens(bmp: android.graphics.Bitmap, dir: Int) {
     val w = (content.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels).toFloat()
     new.translationX = dir * w
     new.lift(); pic.lift()
-    val tween = Tween(SLIDE_MS, DecelerateInterpolator(1.6f), { f -> new.translationX = dir * w * (1f - f); pic.translationX = -dir * w * f }) { slideEnd?.invoke() }
+    val tween = Tween(SLIDE_MS, SMOOTH, { f -> new.translationX = dir * w * (1f - f); pic.translationX = -dir * w * f }) { slideEnd?.invoke() }
     slideEnd = { tween.cancel(); new.translationX = 0f; new.drop(); content.removeView(shield); pic.setImageDrawable(null); slideEnd = null }
     tween.start()
 }
@@ -72,7 +74,7 @@ internal fun MainActivity.slideLists(bmp: android.graphics.Bitmap, startX: Float
     pic.translationX = startX
     new.translationX = startX + dir * w
     new.lift(); pic.lift()
-    val tween = Tween(SLIDE_MS, DecelerateInterpolator(1.6f), { f -> pic.translationX = startX + (-dir * w - startX) * f; new.translationX = (startX + dir * w) * (1f - f) }) { slideEnd?.invoke() }
+    val tween = Tween(SLIDE_MS, SMOOTH, { f -> pic.translationX = startX + (-dir * w - startX) * f; new.translationX = (startX + dir * w) * (1f - f) }) { slideEnd?.invoke() }
     slideEnd = { tween.cancel(); new.translationX = 0f; new.drop(); frame.removeView(shield); pic.setImageDrawable(null); slideEnd = null }
     tween.start()
 }
@@ -136,7 +138,7 @@ internal class TabSwipeFrame(
     }
 
     private fun list(): View? = if (childCount > 0) getChildAt(0) else null
-    private fun back(v: View?) { v ?: return; val from = v.translationX; Tween(160, DecelerateInterpolator(), { f -> v.translationX = from * (1f - f) }) { v.drop() }.start() }
+    private fun back(v: View?) { v ?: return; val from = v.translationX; Tween(260, SMOOTH, { f -> v.translationX = from * (1f - f) }) { v.drop() }.start() }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {

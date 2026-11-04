@@ -21,17 +21,19 @@ import androidx.drawerlayout.widget.DrawerLayout
 internal fun MainActivity.quickReactions(): List<String> = MainActivity.quickReactions(synchronized(Messenger.emojiUse) { Messenger.emojiUse.toMap() }, fixedReactions, fillerReactions)
 
 /**
- * Long-press menu: square-cornered panel that grows out of the spot you pressed, with an optional
+ * Long-press menu: softly rounded panel that grows out of the spot you pressed, with an optional
  * reaction bar on top ([mine] = your current reaction) and the actions below.
  */
 internal fun MainActivity.longPressMenu(mine: String?, onReact: ((String) -> Unit)?, actions: List<Pair<String, () -> Unit>>) {
+    buzz()
     val d = android.app.Dialog(this, android.R.style.Theme_Translucent_NoTitleBar)
     val root = FrameLayout(this).apply { setBackgroundColor(0x55000000); setOnClickListener { d.dismiss() } }
     val col = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = GradientDrawable().apply { setColor(bar); setStroke(dp(1), divider) }
-        elevation = dp(10).toFloat()
-        setPadding(dp(4), dp(6), dp(4), dp(6))
+        background = GradientDrawable().apply { setColor(bar); setStroke(dp(1), divider); cornerRadius = dp(18).toFloat() }
+        clipToOutline = true
+        elevation = dp(14).toFloat()
+        setPadding(dp(6), dp(8), dp(6), dp(8))
         isClickable = true      // taps inside the panel don't fall through and close it
         visibility = View.INVISIBLE
     }
@@ -54,7 +56,7 @@ internal fun MainActivity.longPressMenu(mine: String?, onReact: ((String) -> Uni
     }
     actions.forEach { (label, act) ->
         col.addView(tv(label, 16f, if (label.startsWith("Delete")) red else white).apply {
-            background = pressable(); isClickable = true; setPadding(dp(18), dp(13), dp(28), dp(13)); minWidth = dp(200)
+            background = pressable(); isClickable = true; setPadding(dp(18), dp(14), dp(28), dp(14)); minWidth = dp(210)
             setOnClickListener { d.dismiss(); act() }
         })
     }

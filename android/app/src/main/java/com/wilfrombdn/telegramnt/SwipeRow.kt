@@ -40,7 +40,7 @@ class SwipeRow(
     private var armed = false                     // held long enough (holdToSwipe): the row now follows the finger
     private val armRun = Runnable {
         if (!isAttachedToWindow) return@Runnable
-        armed = true; performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        armed = true; if (UiPrefs.haptics(context)) performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         parent?.requestDisallowInterceptTouchEvent(true)   // the screen must not take this as a tab swipe
     }
 

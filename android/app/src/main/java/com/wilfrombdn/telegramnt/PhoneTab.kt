@@ -66,8 +66,8 @@ internal fun MainActivity.addCallRows(list: LinearLayout, q: String) {
 
 internal fun MainActivity.callName(k: Phone.Call) = k.friend?.let { Messenger.core.contact(it)?.name ?: "@$it" } ?: Texts.name(this, k.number ?: "")
 
-/** The call that is opened out in the log (its time), so it stays open when the list redraws. */
-private var openCallAt = 0L
+/** The opened-out part of the call that is open now (only one at a time). */
+private var openDetail: java.lang.ref.WeakReference<View>? = null
 
 /**
  * One line of the call log: name, tag, time and what kind of call. Tap to open it downwards with the details and buttons
@@ -79,6 +79,7 @@ internal fun MainActivity.callRow(k: Phone.Call): View {
     val number = k.number
     val detail = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = if (openCallAt == k.date) View.VISIBLE else View.GONE }
     val outer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    if (openCallAt == k.date) openDetail = java.lang.ref.WeakReference<View>(detail)
     val row = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(18), dp(12), dp(16), dp(12))
@@ -86,9 +87,11 @@ internal fun MainActivity.callRow(k: Phone.Call): View {
         setOnClickListener {
             val open = detail.visibility != View.VISIBLE
             (parent as? ViewGroup)?.let { p -> (p.parent as? ViewGroup ?: p).let { root ->
-                if (animationsOn()) android.transition.TransitionManager.beginDelayedTransition(root, android.transition.AutoTransition().setDuration(180))
+                if (animationsOn()) android.transition.TransitionManager.beginDelayedTransition(root, android.transition.AutoTransition().setDuration(260).setInterpolator(SMOOTH))
             } }
+            openDetail?.get()?.takeIf { it !== detail }?.visibility = View.GONE   // only one call open at a time
             detail.visibility = if (open) View.VISIBLE else View.GONE
+            openDetail = if (open) java.lang.ref.WeakReference<View>(detail) else null
             openCallAt = if (open) k.date else 0L
         }
         setOnLongClickListener {

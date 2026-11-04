@@ -22,6 +22,14 @@ object UiPrefs {
     fun animations(ctx: Context) = prefs(ctx).getBoolean("animations", true)
     fun setAnimations(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("animations", on).apply()
 
+    /** A small buzz when a press-and-hold works (menus opening, the round button turning into a camera…). Off by default. */
+    fun haptics(ctx: Context) = prefs(ctx).getBoolean("haptics", false)
+    fun setHaptics(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("haptics", on).apply()
+
+    /** Where the round button was dragged to: how far from the left edge, as a fraction of the screen width (-1 = the usual spot). */
+    fun fabX(ctx: Context) = prefs(ctx).getFloat("fabX", -1f)
+    fun setFabX(ctx: Context, x: Float) = prefs(ctx).edit().putFloat("fabX", x).apply()
+
     /** Contacts order: "name_az" (default), "name_za", "email_az" or "email_za"; and whether they are grouped by company. */
     fun contactSort(ctx: Context) = prefs(ctx).getString("contactSort", "name_az") ?: "name_az"
     fun setContactSort(ctx: Context, sort: String) = prefs(ctx).edit().putString("contactSort", sort).apply()

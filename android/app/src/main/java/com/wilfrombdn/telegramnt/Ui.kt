@@ -84,6 +84,7 @@ internal fun MainActivity.dp(v: Int) = (v * resources.displayMetrics.density).to
 
 /** Hide the soft keyboard and drop focus (used when you tap off the message field). */
 internal fun MainActivity.dismissKeyboard() {
+    wantSearchIme = false
     val v = currentFocus ?: window.decorView
     getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(v.windowToken, 0)
     currentFocus?.clearFocus()
@@ -287,14 +288,14 @@ internal fun MainActivity.errorText(e: Exception) = when (e) {
 internal fun MainActivity.pickList(title: String, sub: String?, items: Array<String>, onPick: (Int) -> Unit) {
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     items.forEachIndexed { i, label ->
-        col.addView(tv(label, 15.5f, white).apply { setPadding(dp(20), dp(11), dp(20), dp(11)); background = pressable(); setOnClickListener { listDialog?.dismiss(); onPick(i) } })
+        col.addView(tv(label, 15.5f, white).apply { setPadding(dp(24), dp(13), dp(24), dp(13)); background = pressable(); setOnClickListener { listDialog?.dismiss(); onPick(i) } })
     }
     val wrap = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = round(bar, 4)
-        setPadding(0, dp(14), 0, dp(6))
-        addView(tv(title, 17.5f, white, true).apply { setPadding(dp(20), 0, dp(20), if (sub == null) dp(4) else dp(2)) })
-        sub?.let { addView(tv(it, 14f, dim).apply { setPadding(dp(20), 0, dp(20), dp(6)) }) }
+        background = panelBackground()
+        setPadding(0, dp(22), 0, dp(12))
+        addView(tv(title, 19f, white, true).apply { setPadding(dp(24), 0, dp(24), if (sub == null) dp(8) else dp(2)) })
+        sub?.let { addView(tv(it, 14.5f, dim).apply { setPadding(dp(24), 0, dp(24), dp(8)) }) }
         addView(gap(4))
     }
     wrap.addView(col)
@@ -302,57 +303,84 @@ internal fun MainActivity.pickList(title: String, sub: String?, items: Array<Str
     d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
     d.setContentView(ScrollView(this).apply { addView(wrap) })
     d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-    d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.86).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
+    d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.88).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
     listDialog = d
-    d.show()
+    presentDialog(d, wrap)
 }
 
 /** A plain dark rectangle that drops down right under [anchor]. */
 internal fun MainActivity.dropdown(anchor: View, side: Int, vararg items: Pair<String, () -> Unit>) {
     val box = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(0, dp(6), 0, dp(6))
-        background = round(menuBg, 4)
+        setPadding(0, dp(8), 0, dp(8))
+        background = GradientDrawable().apply { setColor(menuBg); setStroke(dp(1), divider); cornerRadius = dp(16).toFloat() }
     }
     val pw = android.widget.PopupWindow(box, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true)
     for ((label, action) in items) box.addView(tv(label, 16f, white).apply {
         minWidth = dp(200)
-        setPadding(dp(20), dp(13), dp(28), dp(13))
+        setPadding(dp(22), dp(14), dp(30), dp(14)); background = pressable()
         setOnClickListener { pw.dismiss(); action() }
     })
-    pw.elevation = dp(8).toFloat()
-    pw.setBackgroundDrawable(round(menuBg, 4))
+    pw.elevation = dp(12).toFloat()
+    pw.setBackgroundDrawable(GradientDrawable().apply { setColor(menuBg); setStroke(dp(1), divider); cornerRadius = dp(16).toFloat() })
     pw.showAsDropDown(anchor, 0, 0, side)
 }
 
+/** The panel every pop-up sits on: softly rounded, a hairline edge, and it eases in (scale + fade) unless animations are off. */
+internal fun MainActivity.panelBackground(radiusDp: Int = 22) = GradientDrawable().apply {
+    setColor(bar); setStroke(dp(1), divider); cornerRadius = dp(radiusDp).toFloat()
+}
+
+/** Dim the screen behind a dialog a bit more than Android's default and ease the panel in. */
+internal fun MainActivity.presentDialog(d: android.app.Dialog, panel: View) {
+    d.window?.setDimAmount(0.62f)
+    if (animationsOn()) {
+        panel.alpha = 0f; panel.scaleX = 0.94f; panel.scaleY = 0.94f
+        d.setOnShowListener { panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220).setInterpolator(SMOOTH).start() }
+    }
+    d.show()
+}
+
 /**
- * The app's own pop-up (instead of Android's): title, optional text or [content],
- * and buttons on the right. [onButton] gets the index of the button tapped.
+ * The app's own pop-up (instead of Android's): title, optional text or [content], and the buttons as soft pills along the bottom.
+ * The main action (white) is filled, red is a gentle red, anything else is quiet. [onButton] gets the index of the button tapped.
  */
 internal fun MainActivity.popup(title: String, message: String?, content: View?, vararg buttons: Pair<String, Int>, dialogOut: ((android.app.Dialog) -> Unit)? = null, onButton: (Int) -> Unit = {}) {
     val d = android.app.Dialog(this)
     d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
     val col = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(20), dp(16), dp(12), dp(4))
-        background = round(bar, 4)
+        setPadding(dp(24), dp(24), dp(24), dp(18))
+        background = panelBackground()
+        elevation = dp(10).toFloat()
     }
-    col.addView(tv(title, 17.5f, white, true).apply { setPadding(0, 0, dp(8), dp(6)) })
-    message?.let { col.addView(tv(it, 14.5f, dim).apply { setLineSpacing(0f, 1.08f); setPadding(0, 0, dp(8), dp(4)) }) }
-    content?.let { col.addView(it, LinearLayout.LayoutParams(-1, -2).apply { rightMargin = dp(8) }) }
-    val row = LinearLayout(this).apply { gravity = Gravity.END; setPadding(0, dp(4), 0, 0) }
+    col.addView(tv(title, 19f, white, true).apply { setPadding(0, 0, 0, dp(8)) })
+    message?.let { col.addView(tv(it, 15f, dim).apply { setLineSpacing(0f, 1.18f); setPadding(0, 0, 0, dp(6)) }) }
+    content?.let { col.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+    val stacked = buttons.size > 2
+    val row = LinearLayout(this).apply { orientation = if (stacked) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(0, dp(14), 0, 0) }
     buttons.forEachIndexed { i, (label, color) ->
-        row.addView(tv(label.uppercase(), 14f, color, true).apply {
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+        val main = color == white && i == buttons.size - 1          // the action you came here to do
+        val fill = when {
+            main -> white
+            color == red -> (red and 0x00FFFFFF) or (0x2E shl 24)
+            color == dim -> pick("#1FFFFFFF", "#12000000")
+            else -> (color and 0x00FFFFFF) or (0x2E shl 24)
+        }
+        val ink2 = if (main) ink else if (color == dim) white else color
+        row.addView(tv(label, 15f, ink2, true).apply {
+            gravity = Gravity.CENTER; maxLines = 1
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = GradientDrawable().apply { setColor(fill); cornerRadius = dp(26).toFloat() }
             setOnClickListener { d.dismiss(); onButton(i) }
-        })
+        }, if (stacked) LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) } else LinearLayout.LayoutParams(0, -2, 1f).apply { if (i > 0) leftMargin = dp(10) })
     }
     col.addView(row, LinearLayout.LayoutParams(-1, -2))
     d.setContentView(col)
     d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-    d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.86).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
+    d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.88).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
     dialogOut?.invoke(d)
-    d.show()
+    presentDialog(d, col)
 }
 
 // ---------- settings ----------
@@ -392,3 +420,16 @@ internal fun MainActivity.settingNote(text: String) = tv(text, 13.5f, dim).apply
 internal fun avatarSeed(user: String) =
     if (user.startsWith("sms:")) "sms:" + user.drop(4).filter { it.isDigit() }.takeLast(10) else "u:$user"
 internal fun numberSeed(number: String) = "sms:" + number.filter { it.isDigit() }.takeLast(10)
+
+/** Is the soft keyboard on screen right now? */
+internal fun MainActivity.imeVisible(): Boolean {
+    val v = window.decorView
+    if (android.os.Build.VERSION.SDK_INT >= 30) return v.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime()) == true
+    val r = android.graphics.Rect(); v.getWindowVisibleDisplayFrame(r)
+    return v.rootView.height - r.bottom > dp(120)
+}
+
+/** A small buzz for a press-and-hold that worked, only when Appearance → "Vibrate when a hold works" is on. */
+internal fun MainActivity.buzz(v: View? = null) {
+    if (UiPrefs.haptics(this)) (v ?: window.decorView).performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+}

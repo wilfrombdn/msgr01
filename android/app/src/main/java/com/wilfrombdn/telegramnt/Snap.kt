@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
@@ -16,7 +17,7 @@ import android.widget.ScrollView
 
 /**
  * The round camera button. A tap does the button's normal job (new chat, new text, new contact, dial pad).
- * Hold it until it buzzes and let go: the camera opens for a snap, no menu in between.
+ * Hold it until it turns into a camera and let go: the camera opens for a snap, no menu in between. Keep holding for 3 seconds and you can slide the button sideways instead.
  * Moving your finger off the button before it buzzes cancels both.
  */
 /** The round button; when the app comes back into view (say from the camera) it asks the touch handler to forget any half-finished hold. */
@@ -39,6 +40,7 @@ internal fun MainActivity.fab(res: Int, onTap: () -> Unit) = FabView(this).apply
 internal fun MainActivity.snapHold(fab: ImageView, res: Int): () -> Unit {
     val ui = android.os.Handler(android.os.Looper.getMainLooper())
     var armed = false; var cancelled = false
+    var dragging = false; var startLeft = 0
     var sx = 0f; var sy = 0f
     var grow: Tween? = null
     val base = dp(56); val swell = dp(63); val big = dp(93)   // normal, filling up while you hold, and the finished camera (1 2/3 bigger)
@@ -62,61 +64,107 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int): () -> Unit {
     // Like a balloon: it slowly fills while you hold, then pops out to full size with a bounce and the camera appears.
     // Let go early or drag away and the air goes back out.
     val deflate = { sizeTo(base, 140, android.view.animation.DecelerateInterpolator()) }
-    // When the hold completes and it pops into a camera, Snap opens by itself a moment later (no need to let go).
+    // Once it has popped into a camera, letting go opens Snap. Keep holding for 3 seconds instead and the button comes loose:
+    // slide it left or right (where the screen has room for that), let go to leave it there.
     var launched = false
-    val launch = Runnable {
-        if (armed && !cancelled) {
-            launched = true; armed = false; fab.isPressed = false
-            startSnap()
-            ui.postDelayed({ fab.setImageResource(res); deflate() }, 450)   // the camera covers the screen; the button goes back to normal behind it
-        }
-    }
+    val launch = Runnable { }   // the camera no longer opens by itself while you hold, or the 3-second move could never happen
     val arm = Runnable {
-        armed = true; fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        armed = true; buzz(fab)
         fab.setImageResource(R.drawable.ic_camera)
         sizeTo(big, 320, android.view.animation.OvershootInterpolator(3.2f))
-        ui.postDelayed(launch, 100)   // long enough to see it pop
+    }
+    fun movable(): Boolean {
+        val lp = fab.layoutParams as? FrameLayout.LayoutParams ?: return false
+        val h = lp.gravity and Gravity.HORIZONTAL_GRAVITY_MASK
+        return (h == Gravity.START || h == Gravity.LEFT) && fab.parent is FrameLayout
+    }
+    val dragArm = Runnable {
+        if (armed && !cancelled && !dragging && movable()) {
+            val lp = fab.layoutParams as FrameLayout.LayoutParams
+            dragging = true; armed = false; startLeft = lp.leftMargin
+            buzz(fab)
+            fab.setImageResource(res)
+            grow?.cancel(); setSize(lp, base)
+            fab.animate().scaleX(1.14f).scaleY(1.14f).setDuration(120).start()
+            fab.elevation = dp(12).toFloat()
+        }
+    }
+    fun endDrag(save: Boolean) {
+        if (!dragging) return
+        dragging = false
+        fab.animate().scaleX(1f).scaleY(1f).setDuration(120).start(); fab.elevation = dp(6).toFloat()
+        val w = (fab.parent as? View)?.width ?: 0
+        if (save && w > 0) UiPrefs.setFabX(this, (fab.layoutParams as FrameLayout.LayoutParams).leftMargin.toFloat() / w)
     }
     fun cancelArmed() { armed = false; fab.setImageResource(res); deflate() }
     fun outside(v: View, e: MotionEvent): Boolean {
-        val m = dp(8)   // a little slack so a shaky thumb doesn't cancel
+        val m = dp(8)   // a little slack so a shaky thumb does not cancel
         return e.x < -m || e.y < -m || e.x > v.width + m || e.y > v.height + m
     }
     fab.setOnTouchListener { v, e ->
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 v.parent?.requestDisallowInterceptTouchEvent(true)
-                ui.removeCallbacks(arm); ui.removeCallbacks(launch); grow?.cancel()   // nothing left over from an earlier press
+                ui.removeCallbacks(arm); ui.removeCallbacks(dragArm); grow?.cancel(); endDrag(false)   // nothing left over from an earlier press
                 sx = e.rawX; sy = e.rawY; armed = false; cancelled = false; launched = false
-                v.isPressed = true; ui.postDelayed(arm, 200)
+                v.isPressed = true; ui.postDelayed(arm, 200); ui.postDelayed(dragArm, 3000)
                 sizeTo(swell, 200, android.view.animation.AccelerateInterpolator(1.3f))   // starts filling right away
             }
             MotionEvent.ACTION_MOVE ->
-                if (!cancelled && !launched) {
+                if (dragging) {
+                    val parent = fab.parent as? ViewGroup
+                    val lp = fab.layoutParams as? FrameLayout.LayoutParams
+                    if (parent != null && lp != null) {
+                        val (mn, mx) = fabRange(parent, base)
+                        lp.leftMargin = (startLeft + (e.rawX - sx)).toInt().coerceIn(mn, maxOf(mn, mx))
+                        fab.layoutParams = lp
+                    }
+                } else if (!cancelled && !launched) {
                     if (armed) {
                         // dragged off the button after it turned into a camera: back to normal, no snap
-                        if (outside(v, e)) { cancelled = true; ui.removeCallbacks(launch); v.isPressed = false; cancelArmed() }
+                        if (outside(v, e)) { cancelled = true; ui.removeCallbacks(dragArm); v.isPressed = false; cancelArmed() }
                     } else if (Math.hypot((e.rawX - sx).toDouble(), (e.rawY - sy).toDouble()) > dp(12)) {
-                        cancelled = true; ui.removeCallbacks(arm); v.isPressed = false; deflate()   // dragged off before it popped: neither a tap nor a snap
+                        cancelled = true; ui.removeCallbacks(arm); ui.removeCallbacks(dragArm); v.isPressed = false; deflate()   // dragged off before it popped: neither a tap nor a snap
                     }
                 }
             MotionEvent.ACTION_UP -> {
-                ui.removeCallbacks(arm); v.isPressed = false
-                if (launched) { /* the camera is already open */ }
-                else if (armed) { ui.removeCallbacks(launch); cancelArmed(); startSnap() }   // let go just before it opened by itself
+                ui.removeCallbacks(arm); ui.removeCallbacks(dragArm); v.isPressed = false
+                if (dragging) endDrag(true)
+                else if (armed) { cancelArmed(); startSnap() }   // let go after it turned into a camera: open it
                 else { if (!cancelled) deflate(); if (!cancelled) v.performClick() }
             }
-            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false; if (!launched) { ui.removeCallbacks(launch); if (armed) cancelArmed() else deflate() } }
+            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); ui.removeCallbacks(dragArm); v.isPressed = false; endDrag(true); if (armed) cancelArmed() else if (!cancelled) deflate() }
         }
         true
     }
     // Forget any half-finished hold and put the button back to normal at once (it used to stay stuck after backing out of the camera).
     return {
-        ui.removeCallbacks(arm); ui.removeCallbacks(launch)
+        ui.removeCallbacks(arm); ui.removeCallbacks(dragArm)
+        endDrag(false)
         armed = false; cancelled = false; launched = false
         grow?.cancel(); fab.isPressed = false; fab.setImageResource(res)
         fab.layoutParams?.let { setSize(it, base) }
     }
+}
+
+/**
+ * How far from the left edge the round button may sit: from just past the Tellem | Phone switch to the screen's right edge,
+ * keeping the same gap the switch keeps from the left edge, so the button never touches the switch or the wall.
+ */
+internal fun MainActivity.fabRange(parent: ViewGroup, buttonWidth: Int): Pair<Int, Int> {
+    var pill: View? = null
+    for (i in 0 until parent.childCount) if (parent.getChildAt(i).tag == "windowSwitch") pill = parent.getChildAt(i)
+    val gap = (pill?.layoutParams as? FrameLayout.LayoutParams)?.leftMargin ?: dp(16)
+    val min = (pill?.right?.takeIf { it > 0 } ?: 0) + gap
+    return min to (parent.width - gap - buttonWidth)
+}
+
+/** Put the round button back inside its allowed range (the switch widens when unread badges appear, the screen may rotate). */
+internal fun MainActivity.clampFab(fab: View, parent: ViewGroup) {
+    val lp = fab.layoutParams as? FrameLayout.LayoutParams ?: return
+    val (mn, mx) = fabRange(parent, dp(56))
+    val left = lp.leftMargin.coerceIn(mn, maxOf(mn, mx))
+    if (left != lp.leftMargin) { lp.leftMargin = left; fab.layoutParams = lp }
 }
 
 internal fun MainActivity.startSnap() {

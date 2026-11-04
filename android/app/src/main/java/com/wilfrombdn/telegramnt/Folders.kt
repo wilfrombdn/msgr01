@@ -67,7 +67,7 @@ internal fun MainActivity.newFolder() {
 }
 
 internal fun MainActivity.startChatDrag(row: View, key: String) {
-    row.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    buzz(row)
     dragging = true
     dragRow = row
     if (!row.startDragAndDrop(ClipData.newPlainText("chat", key), View.DragShadowBuilder(row), key, 0)) dragging = false

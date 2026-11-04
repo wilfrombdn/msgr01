@@ -58,7 +58,11 @@ class MainActivity : Activity() {
     // bit of a textured, "real surface" feel. Same base colour, just gently grainy. Cached per colour.
     internal val noiseTiles = HashMap<Int, android.graphics.Bitmap>()
 
+    internal var openCallAt = 0L                          // the call opened out in the Calls list (0 = none); it closes when you change screen or tab
+    internal var imeWanted = false                        // the screen being shown will open the keyboard itself
+    internal var wantSearchIme = false                    // opening search: raise the keyboard (not on every redraw)
     internal var screen = Screen.CHATS
+        set(v) { if (v != field) openCallAt = 0L; field = v }
     internal var chatUser: String? = null
     internal var search = ""
     internal val refresh: () -> Unit = { redrawSoon() }
@@ -128,6 +132,14 @@ class MainActivity : Activity() {
         Texts.unlisten(textsChanged); Texts.openThread = 0
         if (!Messenger.background) stopService(Intent(this, SyncService::class.java))
         super.onStop()
+    }
+
+    /** Every screen change goes through here. If the keyboard was down, it stays down unless the new screen asks for it (it used to pop back up). */
+    override fun setContentView(view: View?) {
+        val wasUp = imeVisible()
+        super.setContentView(view)
+        val want = imeWanted || wantSearchIme; imeWanted = false
+        if (!wasUp && !want) window.decorView.post { getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(window.decorView.windowToken, 0) }
     }
 
     @Deprecated("Deprecated in Java")
@@ -259,7 +271,8 @@ class MainActivity : Activity() {
     // ---------- normal texts (SMS/MMS): kept visibly apart from private Tellem chats ----------
 
     internal val smsGreen = Color.parseColor("#2E7D4F")   // normal texts' own bubble colour, never a Tellem one
-    internal var textsTab = false                         // separate mode: the Texts tab is showing
+    internal var textsTab = false
+        set(v) { if (v != field) openCallAt = 0L; field = v }                        // separate mode: the Texts tab is showing
     internal var textThread = 0L
     internal var textPeople: List<String> = emptyList()
     internal var textImage: Pair<ByteArray, String>? = null
@@ -269,6 +282,7 @@ class MainActivity : Activity() {
     internal val textsChanged: () -> Unit = { redrawSoon() }
 
     internal var phoneSub = "texts"
+        set(v) { if (v != field) openCallAt = 0L; field = v }
     internal var phoneCalls: List<Phone.Call>? = null
     internal var phonePeople: List<Phone.Person>? = null
     internal var phoneLoaded = 0L
