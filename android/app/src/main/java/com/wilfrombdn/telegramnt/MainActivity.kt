@@ -956,9 +956,9 @@ class MainActivity : Activity() {
         val frame = FrameLayout(this)
         frame.addView(scroll)
         frame.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_edit)
+            setImageResource(R.drawable.ic_camera)
             setColorFilter(ink)
-            setPadding(dp(16), dp(16), dp(16), dp(16))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
             background = circle(white)
             elevation = dp(6).toFloat()
             setOnClickListener { showNewChat() }
@@ -1795,8 +1795,8 @@ class MainActivity : Activity() {
     }
 
     private fun newTextButton() = ImageView(this).apply {
-        setImageResource(R.drawable.ic_edit); setColorFilter(Color.WHITE)
-        setPadding(dp(16), dp(16), dp(16), dp(16)); background = circle(smsGreen); elevation = dp(6).toFloat()
+        setImageResource(R.drawable.ic_camera); setColorFilter(Color.WHITE)
+        setPadding(dp(12), dp(12), dp(12), dp(12)); background = circle(smsGreen); elevation = dp(6).toFloat()
         setOnClickListener { showNewText() }
     }
 
