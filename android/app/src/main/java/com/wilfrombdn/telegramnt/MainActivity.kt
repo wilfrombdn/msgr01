@@ -73,6 +73,7 @@ class MainActivity : Activity() {
         // keep chats out of screenshots and the recent-apps preview
         applyShotPolicy()
         applyBars()
+        window.decorView.viewTreeObserver.addOnScrollChangedListener { onAnyScroll() }   // Tellem's own scroll bar (Scrollbar.kt)
         Messenger.init(this)
         SyncService.channels(this)
         File(cacheDir, "open").deleteRecursively() // unlocked copies of opened attachments

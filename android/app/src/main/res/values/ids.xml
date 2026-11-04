@@ -4,4 +4,6 @@
     <item name="qr_preview" type="id" />
     <!-- a message's text, so a pinch can resize it -->
     <item name="msg_text" type="id" />
+    <!-- Tellem's own scroll indicator, kept on each ScrollView (Scrollbar.kt) -->
+    <item name="scroll_indicator" type="id" />
 </resources>
