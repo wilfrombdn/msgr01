@@ -25,7 +25,9 @@ class SwipeRow(
     private val onDelete: () -> Unit,
     private val onPin: (() -> Unit)? = null,
     pinLabel: String = "Pin",
+    pinEmoji: String = "📌",
     private val directRight: Boolean = false,   // swiping right far enough runs onPin at once, no second tap
+    private val holdToSwipe: Boolean = false,   // the row only slides after a half-second hold; a quick swipe is left to the screen (Phone tabs)
 ) : FrameLayout(context) {
     private val density = resources.displayMetrics.density
     private val reveal = (84 * density)          // how far the row slides to show a button
@@ -35,6 +37,12 @@ class SwipeRow(
     private var downY = 0f
     private var dragging = false
     private var side = 0                          // -1 trash showing, 1 pin showing, 0 closed
+    private var armed = false                     // held long enough (holdToSwipe): the row now follows the finger
+    private val armRun = Runnable {
+        if (!isAttachedToWindow) return@Runnable
+        armed = true; performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        parent?.requestDisallowInterceptTouchEvent(true)   // the screen must not take this as a tab swipe
+    }
 
     // red delete button at the right edge, hidden until a swipe begins
     private val deleteBtn = LinearLayout(context).apply {
@@ -56,7 +64,7 @@ class SwipeRow(
         gravity = Gravity.CENTER
         visibility = View.INVISIBLE
         addView(TextView(context).apply {
-            text = "📌\n$pinLabel"; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER
+            text = "$pinEmoji\n$pinLabel"; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER
             setOnClickListener { settle(0); onPin?.invoke() }
         })
     }
@@ -66,6 +74,7 @@ class SwipeRow(
         if (onPin != null) addView(pinBtn, LayoutParams(reveal.toInt(), LayoutParams.MATCH_PARENT, Gravity.START))
         addView(front, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         front.setOnClickListener { if (side != 0) settle(0) else onOpen() }
+        if (holdToSwipe) front.isLongClickable = false   // the hold belongs to swiping; the row's menu opens when you let go without moving
     }
 
     private fun beginDrag(dx: Float) {
@@ -80,10 +89,18 @@ class SwipeRow(
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = ev.x; downY = ev.y; dragging = false }
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x; downY = ev.y; dragging = false; armed = false
+                if (holdToSwipe) postDelayed(armRun, 500)
+            }
             MotionEvent.ACTION_MOVE -> {
                 val dx = ev.x - downX
                 val dy = ev.y - downY
+                if (holdToSwipe && !armed && side == 0) {
+                    // moved before the hold finished: not ours (the screen reads it as a swipe between tabs, or the list scrolls)
+                    if (abs(dx) > slop || abs(dy) > slop) removeCallbacks(armRun)
+                    return false
+                }
                 // only take over for a clear horizontal drag, so the list still scrolls vertically
                 if (abs(dx) > slop && abs(dx) > abs(dy) * 1.5f && (dx < 0 || side != 0 || onPin != null)) {
                     dragging = true
@@ -91,9 +108,17 @@ class SwipeRow(
                     return true
                 }
             }
+            MotionEvent.ACTION_UP -> {
+                removeCallbacks(armRun)
+                if (holdToSwipe && armed && !dragging) { armed = false; front.performLongClick(); return true }   // held, then let go: the row's menu
+                armed = false
+            }
+            MotionEvent.ACTION_CANCEL -> { removeCallbacks(armRun); armed = false }
         }
         return false
     }
+
+    override fun onDetachedFromWindow() { removeCallbacks(armRun); super.onDetachedFromWindow() }
 
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
@@ -105,7 +130,7 @@ class SwipeRow(
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                val x = front.translationX
+                val x = front.translationX; armed = false
                 if (directRight && x > reveal * 0.75f) { settle(0); onPin?.invoke(); return dragging }
                 settle(if (x < -reveal / 2) -1 else if (x > reveal / 2) 1 else 0)
                 return dragging

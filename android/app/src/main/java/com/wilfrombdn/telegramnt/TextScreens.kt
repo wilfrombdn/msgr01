@@ -148,7 +148,8 @@ internal fun MainActivity.textRow(t: Texts.Thread, pins: Set<Long> = Texts.pins(
         when { t.spam -> { Texts.markSpam(this, t.id, false); toast("Moved back to your texts") }
             t.archived -> { Texts.setArchived(this, t.id, false); toast("Moved back to your texts") }
             else -> { Texts.setArchived(this, t.id, true); toast("Archived") } }
-    }, pinLabel = if (t.spam) "Not spam" else if (t.archived) "Unarchive" else "Archive", directRight = true)
+    }, pinLabel = if (t.spam) "Not spam" else if (t.archived) "Unarchive" else "Archive", directRight = true, pinEmoji = "✉️",
+        holdToSwipe = textsTab && screen == Screen.CHATS)
     return LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         addView(swipe, LinearLayout.LayoutParams(-1, -2))

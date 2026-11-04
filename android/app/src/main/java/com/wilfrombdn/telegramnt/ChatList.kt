@@ -113,11 +113,24 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     })
     scroll.setOnScrollChangeListener { _, _, sy, _, _ -> chatsScrollY = sy }
     enableFolderDrops(list, scroll)
-    val frame = FrameLayout(this)
+    val frame = TabSwipeFrame(this, phoneOnly, { drawer?.openDrawer(GravityCompat.START) }) { d -> swipePhoneTab(d) }
     frame.addView(scroll)
-    frame.addView(if (phoneOnly) phoneButton() else fab(R.drawable.ic_edit) { showNewChat() }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(16)) })
-    if (q.isEmpty() && !screenSearch && !showArchive) frame.addView(windowSwitch(all.sumOf { it.unread } + grps.sumOf { it.unread }, textsUnread()),
-        FrameLayout.LayoutParams(-2, dp(56), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(16), 0, 0, dp(16)) })
+    // The round button sits in the middle of the gap between the Tellem | Phone switch and the right edge of the screen, and a
+    // little above the bottom, so either thumb reaches it. (Until the switch has been measured, 3/4 of the way across is close.)
+    val fabLp = FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.START).apply {
+        leftMargin = (resources.displayMetrics.widthPixels * 0.75f).toInt() - dp(28); bottomMargin = dp(44)
+    }
+    frame.addView(if (phoneOnly) phoneButton() else fab(R.drawable.ic_edit) { showNewChat() }, fabLp)
+    if (q.isEmpty() && !screenSearch && !showArchive) {
+        val sw = windowSwitch(all.sumOf { it.unread } + grps.sumOf { it.unread }, textsUnread())
+        frame.addView(sw, FrameLayout.LayoutParams(-2, dp(56), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(16), 0, 0, dp(16)) })
+        sw.addOnLayoutChangeListener { _, _, _, right, _, _, _, _, _ ->
+            if (frame.width > 0) {
+                val m = (right + frame.width) / 2 - dp(28)
+                if (fabLp.leftMargin != m) { fabLp.leftMargin = m; frame.requestLayout() }
+            }
+        }
+    }
 
     val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
     else if (search.isNotEmpty() || screenSearch) searchBar() else {

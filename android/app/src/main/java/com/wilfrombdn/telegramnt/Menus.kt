@@ -233,7 +233,8 @@ internal fun MainActivity.drawerPanel(d: DrawerLayout): View {
     col.addView(tv("$APP_NAME ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")}", 12f, faint).apply {
         setPadding(dp(22), dp(14), dp(22), dp(16))
     })
-    return LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(listBg); addView(col, LinearLayout.LayoutParams(-1, -1)) }
+    // clickable: taps on empty parts of the sidebar stop here instead of falling through to the screen behind it
+    return LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(listBg); isClickable = true; addView(col, LinearLayout.LayoutParams(-1, -1)) }
 }
 
 internal fun MainActivity.safety(c: Contact) {

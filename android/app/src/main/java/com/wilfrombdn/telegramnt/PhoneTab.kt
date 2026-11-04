@@ -3,12 +3,16 @@ package com.wilfrombdn.telegramnt
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.text.InputType
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
+import android.widget.FrameLayout
 import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -216,4 +220,50 @@ internal fun <T> MainActivity.addBatched(list: LinearLayout, items: List<T>, row
         }
         list.post(rest)
     }
+}
+
+/**
+ * The list area of the chat screens. A swipe right that starts at the very left edge pulls out the sidebar (any screen).
+ * On the Phone tabs ([tabs]) a quick swipe left or right elsewhere moves between Contacts, Calls and Texts
+ * (rows only slide after a hold).
+ */
+internal class TabSwipeFrame(ctx: Context, private val tabs: Boolean, private val onEdge: () -> Unit, private val onSwipe: (Int) -> Unit) : FrameLayout(ctx) {
+    private val slop = ViewConfiguration.get(ctx).scaledTouchSlop * 2
+    private val density = ctx.resources.displayMetrics.density
+    private val far = 64 * density
+    private val edge = 36 * density
+    private var x0 = 0f; private var y0 = 0f; private var swiping = false; private var fromEdge = false
+
+    override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { x0 = e.x; y0 = e.y; swiping = false; fromEdge = e.x < edge }
+            MotionEvent.ACTION_MOVE -> if (!swiping) {
+                val dx = e.x - x0; val dy = e.y - y0
+                val horizontal = Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy) * 1.5f
+                if (horizontal && ((fromEdge && dx > 0) || tabs)) { swiping = true; parent?.requestDisallowInterceptTouchEvent(true); return true }
+            }
+        }
+        return false
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_UP -> if (swiping) {
+                swiping = false; val dx = e.x - x0
+                if (fromEdge && dx > 0) { if (dx > far / 2) onEdge() } else if (Math.abs(dx) > far) onSwipe(if (dx < 0) 1 else -1)
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> swiping = false
+        }
+        return swiping
+    }
+}
+
+/** Move one tab along (1 = the next, to the right; -1 = the previous). Does nothing at either end. */
+internal fun MainActivity.swipePhoneTab(dir: Int) {
+    val mixed = Texts.canRead(this) && Texts.mixed(this)
+    val order = listOf("contacts", "calls") + (if (!mixed) listOf("texts") else emptyList()) + (if (folderPlace() == "tab") listOf("folders") else emptyList())
+    val i = order.indexOf(phoneSub).takeIf { it >= 0 } ?: return
+    val to = order.getOrNull(i + dir) ?: return
+    phoneSub = to; chatsScrollY = 0; showChats()
 }
