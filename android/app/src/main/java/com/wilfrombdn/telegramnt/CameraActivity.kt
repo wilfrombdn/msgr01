@@ -149,7 +149,7 @@ class CameraActivity : ComponentActivity() {
             val p = future.get()
             provider = p
             val prev = Preview.Builder().build().also { it.surfaceProvider = preview.surfaceProvider }
-            imageCapture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build()
+            imageCapture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build()   // full resolution, not the reduced fast-shutter size
             val recorder = Recorder.Builder()
                 .setQualitySelector(QualitySelector.from(Quality.HD, androidx.camera.video.FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)))
                 .build()
@@ -157,17 +157,31 @@ class CameraActivity : ComponentActivity() {
             val selector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
             try {
                 p.unbindAll()
-                camera = p.bindToLifecycle(this, selector, prev, imageCapture, videoCapture)
+                camera = p.bindToLifecycle(this, selector, screenShaped(prev, imageCapture!!, videoCapture))
             } catch (e: Exception) {
                 // some devices can't run photo + video together; fall back to photo only
                 try {
                     p.unbindAll()
                     videoCapture = null
-                    camera = p.bindToLifecycle(this, selector, prev, imageCapture)
+                    camera = p.bindToLifecycle(this, selector, screenShaped(prev, imageCapture!!, null))
                     hint.text = "Tap for photo"
                 } catch (e2: Exception) { toast("Couldn't open the camera"); finish() }
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    /**
+     * Photos and videos are cropped to exactly what the viewfinder shows (the phone's screen shape),
+     * so a shot fills the screen edge to edge instead of coming out as the sensor's 4:3.
+     */
+    private fun screenShaped(prev: Preview, photo: ImageCapture, video: VideoCapture<Recorder>?): androidx.camera.core.UseCaseGroup {
+        val dm = resources.displayMetrics
+        val w = preview.width.takeIf { it > 0 } ?: dm.widthPixels
+        val h = preview.height.takeIf { it > 0 } ?: dm.heightPixels
+        val port = androidx.camera.core.ViewPort.Builder(android.util.Rational(w, h), android.view.Surface.ROTATION_0)
+            .setScaleType(androidx.camera.core.ViewPort.FILL_CENTER).build()
+        return androidx.camera.core.UseCaseGroup.Builder().setViewPort(port).addUseCase(prev).addUseCase(photo)
+            .apply { video?.let { addUseCase(it) } }.build()
     }
 
     private fun setZoom(ratio: Float) {
@@ -262,7 +276,7 @@ class CameraActivity : ComponentActivity() {
         layer.addView(stage, FrameLayout.LayoutParams(-1, -1))
         var shot: android.graphics.Bitmap? = null
         if (isPhoto) {
-            shot = decodeUpright(file, 2000)
+            shot = decodeUpright(file, 2560)
             stage.addView(ImageView(this).apply { setImageBitmap(shot); scaleType = ImageView.ScaleType.FIT_CENTER }, FrameLayout.LayoutParams(-1, -1))
         } else {
             val vv = android.widget.VideoView(this)

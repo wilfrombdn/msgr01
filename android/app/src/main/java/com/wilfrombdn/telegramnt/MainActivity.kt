@@ -1413,8 +1413,8 @@ class MainActivity : Activity() {
             val grp = picked.filter { it.startsWith("g:") }.map { it.substring(2) }.mapNotNull { core.group(it) }
             Messenger.run({
                 if (photo) {
-                    val bmp = loadPhoto(uri) ?: throw UserError("Couldn't open that photo")
-                    val data = jpeg(bmp, 1600, 85); val thumb = thumbOf(bmp)
+                    val bmp = loadPhoto(uri, CAMERA_SIDE) ?: throw UserError("Couldn't open that photo")
+                    val data = jpeg(bmp, CAMERA_SIDE, 90); val thumb = thumbOf(bmp)
                     tellem.forEach { Messenger.sendFile(it, "snap.jpg", "image/jpeg", data, thumb) }
                     grp.forEach { Messenger.sendGroupFile(it, "snap.jpg", "image/jpeg", data, thumb) }
                     if (sms.isNotEmpty()) {
@@ -2118,6 +2118,8 @@ class MainActivity : Activity() {
         private const val PICK_ATTACH_FILE = 9
         private const val TAKE_MEDIA = 12
         private const val SNAP = 61
+        /** Longest side kept for in-app camera photos: at least a phone screen tall, so nothing is shrunk. */
+        private const val CAMERA_SIDE = 2560
         private const val CREATE_RECOVERY = 10
         private const val OPEN_RECOVERY = 11
         private const val SAVE_IMAGE = 13
@@ -4497,6 +4499,7 @@ class MainActivity : Activity() {
         val c = attachTo?.let { Messenger.core.contact(it) }
         val g = attachGroupId?.let { Messenger.core.group(it) }
         val once = sendOnce && c != null && asPhoto; sendOnce = false
+        val fromCamera = uri.authority == "$packageName.files"   // the in-app camera, not the gallery
         if (c == null && g == null) return
         // send to whichever target the attach menu was opened from
         fun out(name: String, mime: String, data: ByteArray, thumb: ByteArray?) {
@@ -4515,8 +4518,8 @@ class MainActivity : Activity() {
             val mime = contentResolver.getType(uri) ?: "application/octet-stream"
             if (mime != "image/gif" && (asPhoto || mime.startsWith("image/"))) {
                 // re-saved as JPEG: smaller, and hidden details like GPS location are dropped
-                val bmp = loadPhoto(uri) ?: throw UserError("Couldn't open that photo")
-                out(name.substringBeforeLast('.') + ".jpg", "image/jpeg", jpeg(bmp, 1600, 85), thumbOf(bmp))
+                val bmp = loadPhoto(uri, if (fromCamera) CAMERA_SIDE else 2000) ?: throw UserError("Couldn't open that photo")
+                out(name.substringBeforeLast('.') + ".jpg", "image/jpeg", jpeg(bmp, if (fromCamera) CAMERA_SIDE else 1600, if (fromCamera) 90 else 85), thumbOf(bmp))
             } else {
                 if (size > Core.MAX_FILE) throw UserError("Files can be up to ${Core.MAX_FILE / 1024 / 1024} MB")
                 val raw = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError("Couldn't read that file")
@@ -5008,8 +5011,7 @@ class MainActivity : Activity() {
     }
 
     /** Opens the chosen photo at a sensible size, the right way up. */
-    private fun loadPhoto(uri: android.net.Uri): android.graphics.Bitmap? {
-        val maxSide = 2000
+    private fun loadPhoto(uri: android.net.Uri, maxSide: Int = 2000): android.graphics.Bitmap? {
         if (Build.VERSION.SDK_INT >= 28) {
             return android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(contentResolver, uri)) { d, info, _ ->
                 val big = maxOf(info.size.width, info.size.height)
