@@ -71,11 +71,11 @@ internal fun MainActivity.startSnap() {
 
 /** The shot is taken: pick who gets it. Backing out (or sending) puts you back on the screen you left. */
 internal fun MainActivity.showSnapSend(uri: android.net.Uri, photo: Boolean, caption: String) {
-    if (screen != "snapsend") {
+    if (screen != Screen.SNAP_SEND) {
         snapBack = findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
         snapScreen = screen
     }
-    screen = "snapsend"; snapUri = uri
+    screen = Screen.SNAP_SEND; snapUri = uri
     val picked = LinkedHashSet<String>()   // "t:user" Tellem friend, "g:id" group, "s:number" text
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     val send = mainButton("Pick who to send to") {}
@@ -129,7 +129,7 @@ internal fun MainActivity.showSnapSend(uri: android.net.Uri, photo: Boolean, cap
         col.addView(people)
         var found: List<Phone.Person> = emptyList()
         Messenger.run({ found = Phone.people(this) }, {
-            if (screen == "snapsend") found.forEach { p -> p.numbers.take(3).forEach { (n, label) -> row(people, "s:${n.filter { c -> c.isDigit() || c == '+' }}", p.name, "$label · $n", null) } }
+            if (screen == Screen.SNAP_SEND) found.forEach { p -> p.numbers.take(3).forEach { (n, label) -> row(people, "s:${n.filter { c -> c.isDigit() || c == '+' }}", p.name, "$label · $n", null) } }
         })
     }
     col.addView(gap(24))
@@ -183,5 +183,5 @@ internal fun MainActivity.leaveSnap() {
     snapUri = null
     val back = snapBack; snapBack = null
     screen = snapScreen
-    if (back == null || snapScreen == "chats") showChats() else setContentView(back)
+    if (back == null || snapScreen == Screen.CHATS) showChats() else setContentView(back)
 }

@@ -15,7 +15,7 @@ import android.widget.Switch
 import android.widget.TextView
 
 internal fun MainActivity.showSettings() {
-    screen = "settings"
+    screen = Screen.SETTINGS
     connLabel = null
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     col.addView(gap(8))
@@ -122,7 +122,7 @@ internal fun MainActivity.mb(n: Long) = when {
 
 /** How much each chat's photos/videos/files take, clear them per chat, and auto-delete old ones. */
 internal fun MainActivity.showStorage() {
-    screen = "storage"
+    screen = Screen.STORAGE
     val core = Messenger.core
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     data class Item(val name: String, val avatar: ByteArray?, val msgs: List<Msg>, val bytes: Long)
@@ -181,7 +181,7 @@ internal fun MainActivity.showStorage() {
 // ---------- appearance ----------
 
 internal fun MainActivity.showAppearance() {
-    screen = "appearance"
+    screen = Screen.APPEARANCE
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
     // live preview

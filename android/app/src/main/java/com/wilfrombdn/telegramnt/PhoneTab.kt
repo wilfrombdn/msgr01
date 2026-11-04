@@ -21,7 +21,7 @@ internal fun MainActivity.loadPhone() {
     Messenger.run({ calls = Phone.calls(this); people = Phone.people(this); calls.mapNotNull { it.number }.forEach { Texts.name(this, it) } }, {
         val changed = calls.size != phoneCalls?.size || calls.firstOrNull()?.date != phoneCalls?.firstOrNull()?.date || people.size != phonePeople?.size
         phoneCalls = calls; phonePeople = people
-        if (changed && screen == "chats" && textsTab) showChats()
+        if (changed && screen == Screen.CHATS && textsTab) showChats()
     })
 }
 
@@ -124,7 +124,7 @@ internal fun MainActivity.addContactRows(list: LinearLayout, q: String) {
 
 /** New contact, made right here (name, number, email) and saved to the phone's contacts. [number] pre-fills it. */
 internal fun MainActivity.showAddContact(number: String?, back: () -> Unit) {
-    screen = "addcontact"
+    screen = Screen.ADD_CONTACT
     addContactBack = back
     val first = field("First name").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
     val last = field("Last name").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }

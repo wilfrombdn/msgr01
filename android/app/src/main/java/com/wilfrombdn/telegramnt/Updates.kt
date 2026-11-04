@@ -17,7 +17,7 @@ internal fun MainActivity.maybeCheckUpdate() {
     if (System.currentTimeMillis() - updateChecked < 10 * 60_000L) return   // every app open, at most every 10 minutes
     updateChecked = System.currentTimeMillis()
     var u: Updater.Update? = null
-    Messenger.run({ u = Updater.check(this) }, { u?.let { if (screen != "viewer" && screen != "crop") updatePrompt(it) } }) {
+    Messenger.run({ u = Updater.check(this) }, { u?.let { if (screen != Screen.VIEWER && screen != Screen.CROP) updatePrompt(it) } }) {
         updateChecked = System.currentTimeMillis() - 10 * 60_000L + 60_000L   // couldn't reach it: try again in a minute
     }
 }

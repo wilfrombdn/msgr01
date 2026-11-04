@@ -57,7 +57,7 @@ class MainActivity : Activity() {
     // bit of a textured, "real surface" feel. Same base colour, just gently grainy. Cached per colour.
     internal val noiseTiles = HashMap<Int, android.graphics.Bitmap>()
 
-    internal var screen = "chats"
+    internal var screen = Screen.CHATS
     internal var chatUser: String? = null
     internal var search = ""
     internal val refresh: () -> Unit = { redraw() }
@@ -132,16 +132,16 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when {
             emojiPopup != null -> { emojiPopup?.dismiss(); emojiPopup = null }
-            (replyTo != null || editing != null) && (screen == "chat" || screen == "group") -> cancelReply()
+            (replyTo != null || editing != null) && (screen == Screen.CHAT || screen == Screen.GROUP) -> cancelReply()
             drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
-            screen == "snapsend" -> cancelSnap()
-            screen == "textthread" || screen == "newtext" || screen == "textspam" -> leaveTexts()
-            !Messenger.signedIn && screen != "welcome" -> showWelcome()
-            screen == "viewer" -> leaveViewer()
-            screen == "storage" -> showSettings()
-            screen == "addcontact" -> addContactBack()
-            screen == "chats" && showArchive -> { showArchive = false; showChats() }
-            Messenger.signedIn && screen != "chats" -> showChats()
+            screen == Screen.SNAP_SEND -> cancelSnap()
+            screen == Screen.TEXT_THREAD || screen == Screen.NEW_TEXT || screen == Screen.TEXT_SPAM -> leaveTexts()
+            !Messenger.signedIn && screen != Screen.WELCOME -> showWelcome()
+            screen == Screen.VIEWER -> leaveViewer()
+            screen == Screen.STORAGE -> showSettings()
+            screen == Screen.ADD_CONTACT -> addContactBack()
+            screen == Screen.CHATS && showArchive -> { showArchive = false; showChats() }
+            Messenger.signedIn && screen != Screen.CHATS -> showChats()
             search.isNotEmpty() -> { search = ""; showChats() }
             else -> super.onBackPressed()
         }
@@ -160,10 +160,10 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // back from "allow installs from Tellem": carry on with the update
-        if (newContactPending) { newContactPending = false; Messenger.run({ Texts.forgetNames(); Texts.threads.forEach { t -> t.addresses.forEach { Texts.name(this, it) } } }, { if (screen == "textthread") showTextThread(textThread) else if (screen == "chats") showChats() }) }
+        if (newContactPending) { newContactPending = false; Messenger.run({ Texts.forgetNames(); Texts.threads.forEach { t -> t.addresses.forEach { Texts.name(this, it) } } }, { if (screen == Screen.TEXT_THREAD) showTextThread(textThread) else if (screen == Screen.CHATS) showChats() }) }
         pendingApk?.let { f -> if (packageManager.canRequestPackageInstalls()) { pendingApk = null; Messenger.run({ Updater.install(this, f) }) } }
         // back from a phone setting (battery, full-screen alerts, default texting app): show what changed
-        if (screen == "settings" || screen == "textthread" && textMadeDefault != Texts.isDefault(this)) rebuildTextScreen()
+        if (screen == Screen.SETTINGS || screen == Screen.TEXT_THREAD && textMadeDefault != Texts.isDefault(this)) rebuildTextScreen()
     }
 
     internal val photoCache = HashMap<Int, android.graphics.Bitmap?>()
@@ -183,7 +183,7 @@ class MainActivity : Activity() {
     internal val ticker = object : Runnable {
         override fun run() {
             val st = welcomeStatus ?: return
-            if (screen !in listOf("welcome") || celebrating) return
+            if (screen != Screen.WELCOME || celebrating) return
             if (Messenger.connected) {
                 welcomeTorNote?.visibility = View.GONE; welcomeTorLine?.visibility = View.GONE; welcomeDirect?.visibility = View.GONE
                 if (st.text.isEmpty()) return   // already connected when the screen opened: nothing to show
@@ -192,7 +192,7 @@ class MainActivity : Activity() {
                 st.postDelayed({
                     celebrating = false
                     st.text = ""; st.setTextColor(dim)
-                    if (screen == "welcome") pendingNext?.let { pendingNext = null; it() }
+                    if (screen == Screen.WELCOME) pendingNext?.let { pendingNext = null; it() }
                 }, 1000)
                 return
             }
@@ -257,7 +257,7 @@ class MainActivity : Activity() {
     // ---------- Snap: hold the pencil, slide onto "Snap", let go ----------
 
     internal var snapBack: View? = null     // the screen you were on, put back after sending
-    internal var snapScreen = "chats"
+    internal var snapScreen = Screen.CHATS
     internal var snapUri: android.net.Uri? = null
 
     internal var addContactBack: () -> Unit = {}
@@ -330,7 +330,7 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == TEXT_PERMS || requestCode == CALL_LOG_PERM || requestCode == CONTACTS_PERM) {
             Texts.forgetNames(); Texts.reload(this); phoneLoaded = 0; phoneCalls = null
-            if (screen == "chats") showChats()
+            if (screen == Screen.CHATS) showChats()
             return
         }
         if (requestCode == ADD_CONTACT_PERM) {
@@ -366,7 +366,7 @@ class MainActivity : Activity() {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) { touchX = ev.rawX; touchY = ev.rawY; touchT = ev.eventTime }
         val handled = super.dispatchTouchEvent(ev)
         // a quick tap anywhere outside the composer closes the emoji panel and the keyboard, like Telegram
-        if (ev.actionMasked == MotionEvent.ACTION_UP && (screen == "chat" || screen == "group")) {
+        if (ev.actionMasked == MotionEvent.ACTION_UP && (screen == Screen.CHAT || screen == Screen.GROUP)) {
             val slop = ViewConfiguration.get(this).scaledTouchSlop
             val tap = Math.abs(ev.rawX - touchX) < slop && Math.abs(ev.rawY - touchY) < slop &&
                 ev.eventTime - touchT < ViewConfiguration.getLongPressTimeout()
@@ -521,7 +521,7 @@ class MainActivity : Activity() {
     internal val connTick = object : Runnable {
         override fun run() {
             val l = connLabel ?: return
-            if (screen != "settings" || !l.isAttachedToWindow) return
+            if (screen != Screen.SETTINGS || !l.isAttachedToWindow) return
             val on = Messenger.connected
             l.text = if (on) "✓ active" else if (Messenger.direct) "connecting…" else Tor.status()
             l.setTextColor(if (on) green else amber)

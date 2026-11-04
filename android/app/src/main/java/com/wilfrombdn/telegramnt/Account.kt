@@ -13,7 +13,7 @@ import android.widget.ScrollView
 // ---------- welcome, sign up, log in ----------
 
 internal fun MainActivity.showWelcome() {
-    screen = "welcome"
+    screen = Screen.WELCOME
     val col = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
@@ -95,7 +95,7 @@ internal fun MainActivity.connectThen(next: () -> Unit) {
 }
 
 internal fun MainActivity.accountForm(title: String, signup: Boolean) {
-    screen = if (signup) "signup" else "login"
+    screen = if (signup) Screen.SIGNUP else Screen.LOGIN
     val col = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER

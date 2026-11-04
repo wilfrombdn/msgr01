@@ -13,7 +13,7 @@ import android.widget.ScrollView
 // ---------- add a friend ----------
 
 internal fun MainActivity.showNewChat() {
-    screen = "new"
+    screen = Screen.NEW_CHAT
     val me = Messenger.core.me ?: return
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(20), dp(20), dp(20)) }
     // first option, like Telegram: add someone by scanning the QR code on their phone

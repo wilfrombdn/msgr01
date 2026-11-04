@@ -25,7 +25,7 @@ internal fun MainActivity.pickPhoto() {
 }
 
 internal fun MainActivity.showCrop(photo: android.graphics.Bitmap) {
-    screen = "crop"
+    screen = Screen.CROP
     val crop = CropView(this, photo)
     val bottom = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
@@ -57,7 +57,7 @@ internal fun MainActivity.showCrop(photo: android.graphics.Bitmap) {
 // ---------- your profile (personal) ----------
 
 internal fun MainActivity.showProfile() {
-    screen = "profile"
+    screen = Screen.PROFILE
     val me = Messenger.core.me ?: return
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     col.addView(LinearLayout(this).apply {

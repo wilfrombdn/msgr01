@@ -23,7 +23,7 @@ import java.util.Locale
 
 internal fun MainActivity.showChat(user: String, restore: Pair<String, Int>? = null) {
     val c = Messenger.core.contact(user) ?: return showChats()
-    screen = "chat"
+    screen = Screen.CHAT
     chatUser = user
     Messenger.core.openChat = user
     stick = restore == null; restoreTo = restore
@@ -217,7 +217,7 @@ internal fun MainActivity.showBar(title: String, m: Msg, box: EditText?) {
 }
 
 internal fun MainActivity.cancelReply() {
-    if (editing != null) { editing = null; (if (screen == "group") groupBox else chatBox)?.setText("") }
+    if (editing != null) { editing = null; (if (screen == Screen.GROUP) groupBox else chatBox)?.setText("") }
     replyTo = null; replyBar?.visibility = View.GONE
 }
 
@@ -290,8 +290,8 @@ internal fun MainActivity.restoreAnchor(s: ScrollView, list: LinearLayout, r: Pa
 
 /** Remembers the open chat and your place in it, so coming back (even after the app was closed) lands there. */
 internal fun MainActivity.saveSpot() {
-    val inChat = screen == "chat" || (screen == "viewer" && chatUser != null)
-    val inGroup = screen == "group" || (screen == "viewer" && chatUser == null && groupId != null)
+    val inChat = screen == Screen.CHAT || (screen == Screen.VIEWER && chatUser != null)
+    val inGroup = screen == Screen.GROUP || (screen == Screen.VIEWER && chatUser == null && groupId != null)
     val sc = if (inChat) scroller else if (inGroup) groupScroller else null
     val list = if (inChat) bubbles else groupBubbles
     Messenger.spot = when {
@@ -381,7 +381,7 @@ internal fun MainActivity.msgText(m: Msg, ink: Int, people: Set<String>, onLong:
     return tv("", 16f, ink).apply {
         textSize = look.msg
         text = Format.render(m.text, ink, blue, people + me, m.id in shownSpoilers) {
-            shownSpoilers.add(m.id); if (screen == "group") fillGroup() else fillChat()
+            shownSpoilers.add(m.id); if (screen == Screen.GROUP) fillGroup() else fillChat()
         }
         setLinkTextColor(if (ink == Color.WHITE || ink == 0xFFFFFFFF.toInt()) Color.parseColor("#8CC4FF") else Color.parseColor("#1F6FC5"))
         movementMethod = android.text.method.LinkMovementMethod.getInstance()

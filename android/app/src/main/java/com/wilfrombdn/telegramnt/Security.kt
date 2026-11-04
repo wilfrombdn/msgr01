@@ -8,8 +8,8 @@ import android.widget.LinearLayout
 
 /** Nothing but the logo and an Unlock button until the phone's own lock (fingerprint, face, PIN) is passed. */
 internal fun MainActivity.showLock() {
-    val firstShow = screen != "lock"
-    screen = "lock"
+    val firstShow = screen != Screen.LOCK
+    screen = Screen.LOCK
     val km = getSystemService(android.app.KeyguardManager::class.java)
     if (!km.isDeviceSecure) {
         // the phone's screen lock was removed: don't trap anyone behind a lock that can't open
@@ -35,7 +35,7 @@ internal fun MainActivity.askToUnlock() {
 internal fun MainActivity.unlocked() {
     Messenger.unlock(); lockAsked = false
     Destruct.touch(this)   // only someone who can unlock it restarts the self-destruct countdown
-    screen = ""
+    screen = Screen.NONE
     if (Messenger.signedIn) reopenSpot() else showWelcome()
     afterUnlock?.let { afterUnlock = null; handle(it) }
 }

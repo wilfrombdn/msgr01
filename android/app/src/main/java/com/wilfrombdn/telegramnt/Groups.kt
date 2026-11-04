@@ -70,7 +70,7 @@ internal fun MainActivity.groupRow(g: Group, key: String? = null, bg: Int = list
 // ---------- groups ----------
 
 internal fun MainActivity.showNewGroup() {
-    screen = "newgroup"
+    screen = Screen.NEW_GROUP
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(20), dp(20), dp(20)) }
     col.addView(tv("New group", 20f, white, true))
     col.addView(gap(14))
@@ -136,7 +136,7 @@ internal fun MainActivity.joinGroupPrompt() {
 
 internal fun MainActivity.showGroup(id: String, restore: Pair<String, Int>? = null) {
     val g = Messenger.core.group(id) ?: return showChats()
-    screen = "group"; groupId = id; chatUser = null
+    screen = Screen.GROUP; groupId = id; chatUser = null
     Messenger.core.openChat = "g:$id"
     stick = restore == null; restoreTo = restore
     groupTop = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -307,7 +307,7 @@ internal fun MainActivity.addToGroup(g: Group) {
 
 /** Admin-only screen: rename, read-only, and who the admins are. */
 internal fun MainActivity.showGroupSettings(g: Group) {
-    screen = "groupsettings"
+    screen = Screen.GROUP_SETTINGS
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     col.addView(tv("Name", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
     val nameBox = field("Group name", g.name)

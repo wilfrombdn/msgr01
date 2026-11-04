@@ -34,7 +34,7 @@ internal fun MainActivity.callRoleResult() {
         toast("$APP_NAME now handles phone calls")
         if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.ANSWER_PHONE_CALLS), CALL_PERM)
     }
-    if (screen == "settings") showSettings()
+    if (screen == Screen.SETTINGS) showSettings()
 }
 
 internal fun MainActivity.askTextRole() {
@@ -62,8 +62,8 @@ internal fun MainActivity.textRoleResult() {
 
 /** The texting-app state decides the bottom of a text chat (message box or "make Tellem…"), so rebuild it. */
 internal fun MainActivity.rebuildTextScreen() = when (screen) {
-    "settings" -> showSettings()
-    "textthread" -> showTextThread(textThread, textPeople.ifEmpty { null })
+    Screen.SETTINGS -> showSettings()
+    Screen.TEXT_THREAD -> showTextThread(textThread, textPeople.ifEmpty { null })
     else -> redraw()
 }
 
@@ -167,7 +167,7 @@ internal fun MainActivity.sectionRow(icon: String, label: String, n: Int, open: 
 
 /** "archive", "codes" or "spam". Nothing is deleted unless you clear it. */
 internal fun MainActivity.showTextSection(kind: String) {
-    screen = "textspam"
+    screen = Screen.TEXT_SPAM
     textSectionKind = kind
     val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     list.addView(settingNote(when (kind) {
@@ -248,7 +248,7 @@ internal fun MainActivity.textThreadMenu(anchor: View) {
 
 /** Signed out but Tellem is the texting app: texts still have to be reachable. */
 internal fun MainActivity.showTextList() {
-    screen = "textlist"
+    screen = Screen.TEXT_LIST
     val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     addTextRows(list, "")
     val frame = FrameLayout(this)
@@ -264,14 +264,14 @@ internal fun MainActivity.newTextButton() = ImageView(this).apply {
 }
 
 internal fun MainActivity.leaveTexts() {
-    if (screen == "textthread") textScroll?.let { s -> if (atBottom(s)) textSpots.remove(textThread) else textSpots[textThread] = s.scrollY }
+    if (screen == Screen.TEXT_THREAD) textScroll?.let { s -> if (atBottom(s)) textSpots.remove(textThread) else textSpots[textThread] = s.scrollY }
     Texts.openThread = 0
     if (Messenger.signedIn) { textsTab = !Texts.mixed(this); phoneSub = "texts"; showChats() } else showTextList()
 }
 
 /** "To:" numbers (or pick a contact), then the thread. */
 internal fun MainActivity.showNewText(body: String? = null) {
-    screen = "newtext"
+    screen = Screen.NEW_TEXT
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16)) }
     val to = field("Phone number(s), separated by commas").apply { inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher()) }
     newTextTo = to
@@ -314,7 +314,7 @@ internal fun MainActivity.openTextIntent(i: Intent) {
 }
 
 internal fun MainActivity.showTextThread(id: Long, people: List<String>? = null) {
-    screen = "textthread"
+    screen = Screen.TEXT_THREAD
     textMadeDefault = Texts.isDefault(this)
     textThread = id
     Texts.openThread = id
@@ -401,7 +401,7 @@ internal fun MainActivity.showTextThread(id: Long, people: List<String>? = null)
     fillTextThread()
     if (textPeople.isEmpty()) {   // opened from a notification before the thread list loaded
         var found: List<String> = emptyList()
-        Messenger.run({ found = Texts.addressesOf(this, id) }, { if (found.isNotEmpty() && screen == "textthread" && textThread == id) showTextThread(id, found) })
+        Messenger.run({ found = Texts.addressesOf(this, id) }, { if (found.isNotEmpty() && screen == Screen.TEXT_THREAD && textThread == id) showTextThread(id, found) })
     }
 }
 
@@ -413,7 +413,7 @@ internal fun MainActivity.fillTextThread() {
         msgs.mapNotNull { it.from }.forEach { Texts.name(this, it) }   // look names up here, not while drawing
     }, {
         val list = textList ?: return@run
-        if (screen != "textthread" || textThread != id) return@run
+        if (screen != Screen.TEXT_THREAD || textThread != id) return@run
         if (Texts.threads.firstOrNull { it.id == id }?.unread ?: 1 > 0) Texts.markRead(this, id)
         // reuse bubbles that haven't changed: redrawing them all made the chat jump on every send
         val keys = msgs.map { "${if (it.mms) "m" else "s"}${it.id}:${it.state}:${it.attachments.size}:${it.body.length}" }

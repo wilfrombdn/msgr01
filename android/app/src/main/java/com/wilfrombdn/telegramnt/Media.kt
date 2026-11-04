@@ -185,7 +185,7 @@ internal fun MainActivity.showOnce(m: Msg) {
         bmp = decodeSmall(bytes, 2400)
     }, {
         val b = bmp ?: return@run toast("Couldn't open that photo")
-        screen = "viewer"
+        screen = Screen.VIEWER
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(ImageView(context).apply { setImageBitmap(b); scaleType = ImageView.ScaleType.FIT_CENTER })
@@ -221,7 +221,7 @@ internal fun MainActivity.showImage(m: Msg) {
         bmp = bytes?.let { decodeSmall(it, 2400) }
     }, {
         val b = bmp ?: return@run toast("Couldn't open that photo")
-        screen = "viewer"
+        screen = Screen.VIEWER
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(ImageView(context).apply {

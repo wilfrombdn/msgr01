@@ -49,19 +49,20 @@ internal fun MainActivity.applyBars() {
 }
 
 internal fun MainActivity.redraw() {
-    if (Messenger.locked && Messenger.signedIn) { if (screen != "lock") showLock(); return }
+    if (Messenger.locked && Messenger.signedIn) { if (screen != Screen.LOCK) showLock(); return }
     maybeCheckUpdate()
-    if (screen == "textthread") return fillTextThread()   // texts work signed in or not
-    if (screen == "textlist") return showTextList()
-    if (screen == "textspam") return showTextSection(textSectionKind)
+    if (screen == Screen.TEXT_THREAD) return fillTextThread()   // texts work signed in or not
+    if (screen == Screen.TEXT_LIST) return showTextList()
+    if (screen == Screen.TEXT_SPAM) return showTextSection(textSectionKind)
     if (!Messenger.signedIn) {
-        if (screen != "welcome" && screen != "signup" && screen != "login" && screen != "newtext" && screen != "addcontact") showWelcome()
+        if (screen != Screen.WELCOME && screen != Screen.SIGNUP && screen != Screen.LOGIN && screen != Screen.NEW_TEXT && screen != Screen.ADD_CONTACT) showWelcome()
         return
     }
     when (screen) {
-        "chats" -> if (!dragging) showChats()
-        "chat" -> chatUser?.let { if (Messenger.core.contact(it) != null) fillChat() else showChats() }
-        "group" -> groupId?.let { if (Messenger.core.group(it) != null) fillGroup() else showChats() }
+        Screen.CHATS -> if (!dragging) showChats()
+        Screen.CHAT -> chatUser?.let { if (Messenger.core.contact(it) != null) fillChat() else showChats() }
+        Screen.GROUP -> groupId?.let { if (Messenger.core.group(it) != null) fillGroup() else showChats() }
+        else -> {}
     }
 }
 

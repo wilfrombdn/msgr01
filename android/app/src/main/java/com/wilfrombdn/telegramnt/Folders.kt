@@ -125,7 +125,7 @@ internal fun MainActivity.enableFolderDrops(list: LinearLayout, scroll: ScrollVi
             }
             android.view.DragEvent.ACTION_DRAG_ENDED -> {
                 light(null)
-                if (dragging) { dragging = false; list.post { if (screen == "chats") showChats() } }
+                if (dragging) { dragging = false; list.post { if (screen == Screen.CHATS) showChats() } }
                 true
             }
             else -> true

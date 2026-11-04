@@ -17,11 +17,11 @@ import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 
 internal fun MainActivity.showChats(searchOnly: Boolean = false) {
-    val refreshing = screen == "chats"   // same screen redrawing (new message, reconnect), not arriving from elsewhere
+    val refreshing = screen == Screen.CHATS   // same screen redrawing (new message, reconnect), not arriving from elsewhere
     if (!refreshing) window.decorView.post { maybeAskRingSetup() }
     emojiPopup?.dismiss(); emojiPopup = null
-    if (screen != "chats") Messenger.spot = Spot()
-    screen = "chats"
+    if (screen != Screen.CHATS) Messenger.spot = Spot()
+    screen = Screen.CHATS
     chatUser = null
     Messenger.core.openChat = null
     val core = Messenger.core
@@ -159,7 +159,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     setContentView(d)
     if (keepOpen) d.openDrawer(GravityCompat.START, false)
     // while still connecting over Tor, refresh so the status line (bootstrap %, ready, error) updates live
-    if (!Messenger.connected) d.postDelayed({ if (screen == "chats" && !Messenger.connected) redraw() }, 3000)
+    if (!Messenger.connected) d.postDelayed({ if (screen == Screen.CHATS && !Messenger.connected) redraw() }, 3000)
 }
 
 /** "Tellem" with a small raised "TOR" after it, like a squared number: shows the app is talking through Tor. */
