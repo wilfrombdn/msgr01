@@ -526,6 +526,7 @@ class MainActivity : Activity() {
         if (requestCode == PICK_CONTACT_PHOTO) return contactPhotoPicked(uri)
         if (requestCode == PICK_CONTACT) return contactPicked(uri)
         if (requestCode == TEXT_IMAGE) return textImagePicked(uri)
+        if (requestCode == TEXT_CAMERA) return textImagePicked(uri, fromCamera = true)
         if (requestCode != PICK_PHOTO) return
         var bmp: android.graphics.Bitmap? = null
         Messenger.run({ bmp = loadPhoto(uri) }, { bmp?.let { showCrop(it) } ?: toast("Couldn't open that photo") }) {

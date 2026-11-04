@@ -379,9 +379,9 @@ internal fun MainActivity.showTextThread(id: Long, people: List<String>? = null)
             Texts.send(this@showTextThread, textPeople, body, pic)
         }
         input.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
-        input.addView(icon(R.drawable.ic_attach, dim, pad = 10) {
-            runCatching { @Suppress("DEPRECATION") startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), TEXT_IMAGE) }
-        })
+        var attachBtn: View? = null
+        attachBtn = icon(R.drawable.ic_attach, dim, pad = 10) { attachBtn?.let { textAttachMenu(it) } }
+        input.addView(attachBtn)
         input.addView(icon(R.drawable.ic_send, smsGreen, pad = 10) { send() })
         addView(input)
     }
@@ -512,12 +512,44 @@ internal fun MainActivity.textPicture(a: Texts.Attachment): View {
     return iv
 }
 
-/** A photo chosen for a picture text, shrunk to fit the carrier's size limit. */
-internal fun MainActivity.textImagePicked(uri: android.net.Uri) {
+/** The paperclip in a text conversation: take a picture with the in-app camera, or pick one from the phone. */
+internal fun MainActivity.textAttachMenu(anchor: View) {
+    val panel = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = round(menuBg, 10)
+        elevation = dp(10).toFloat()
+        setPadding(0, dp(6), 0, dp(6))
+    }
+    val pw = android.widget.PopupWindow(panel, dp(190), ViewGroup.LayoutParams.WRAP_CONTENT, true)
+    fun row(res: Int, label: String, go: () -> Unit) = panel.addView(LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(18), dp(14), dp(20), dp(14))
+        background = pressable()
+        isClickable = true
+        addView(icon(res, white, 22, 0))
+        addView(tv(label, 16f, white).apply { setPadding(dp(16), 0, 0, 0) })
+        setOnClickListener { pw.dismiss(); go() }
+    })
+    row(R.drawable.ic_camera, "Camera") {
+        @Suppress("DEPRECATION") startActivityForResult(Intent(this, CameraActivity::class.java).putExtra("photoOnly", true), TEXT_CAMERA)
+    }
+    row(R.drawable.ic_folder, "Photo") {
+        runCatching { @Suppress("DEPRECATION") startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), TEXT_IMAGE) }
+    }
+    pw.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+    pw.isOutsideTouchable = true
+    panel.measure(View.MeasureSpec.makeMeasureSpec(dp(190), View.MeasureSpec.EXACTLY), View.MeasureSpec.UNSPECIFIED)
+    pw.showAsDropDown(anchor, -dp(130), -(anchor.height + panel.measuredHeight + dp(6)))   // opens upward, just above the clip
+}
+
+/** A photo chosen for a picture text, shrunk to fit the carrier's size limit. [fromCamera]: the in-app camera's temporary file is deleted once read. */
+internal fun MainActivity.textImagePicked(uri: android.net.Uri, fromCamera: Boolean = false) {
     val limit = (Texts.mmsLimit(this) * 0.9).toInt()
     var out: ByteArray? = null
     Messenger.run({
-        val bmp = loadPhoto(uri) ?: return@run
+        val bmp = loadPhoto(uri)
+        if (fromCamera) runCatching { contentResolver.delete(uri, null, null) }   // the unencrypted temp copy has been read into memory
+        if (bmp == null) return@run
         var side = 1600; var q = 85
         var b = jpeg(bmp, side, q)
         while (b.size > limit && side > 320) { if (q > 60) q -= 10 else side = side * 3 / 4; b = jpeg(bmp, side, q) }

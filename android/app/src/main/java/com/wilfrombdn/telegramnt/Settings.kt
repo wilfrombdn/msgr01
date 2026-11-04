@@ -35,13 +35,13 @@ internal fun MainActivity.showSettings() {
         if (picked) addView(tv(state, 13.5f, if (on) green else amber).also { connLabel = it })
         setOnClickListener { go() }
     })
-    choice("Tor (most private)", if (on) "✓ active" else Tor.status(), !direct) { if (direct) { Messenger.useDirect(false); showSettings() } }
-    col.addView(settingNote("Everything goes through the Tor network, so no one, not even the server, ever sees your phone's internet address."))
-    col.addView(settingRow("Tor details", "What Tor is doing, to copy and send if it won't connect") { torDetails() })
     choice("Direct (faster, less private)", if (on) "✓ active" else (Messenger.directProblem ?: "connecting…"), direct) {
         if (!direct) confirmDirect { Messenger.useDirect(true); showSettings() }
     }
     col.addView(settingNote("Skips Tor and goes through a Cloudflare tunnel. Cloudflare and the server can see your phone's internet address. Messages stay end-to-end encrypted. Only use it if Tor is blocked on your network."))
+    choice("Tor (most private)", if (on) "✓ active" else Tor.status(), !direct) { if (direct) { Messenger.useDirect(false); showSettings() } }
+    col.addView(settingNote("Everything goes through the Tor network, so no one, not even the server, ever sees your phone's internet address."))
+    col.addView(settingRow("Tor details", "What Tor is doing, to copy and send if it won't connect") { torDetails() })
     if (Messenger.core.unreadable > 0) col.addView(tv("⚠ ${Messenger.core.unreadable} message(s) arrived but couldn't be decrypted — the two accounts' keys are out of sync (usually from reinstalling/restoring). Fresh accounts fix this.", 13.5f, amber).apply { setPadding(dp(20), dp(2), dp(20), dp(10)) })
     if (Messenger.core.lastDrop.isNotEmpty()) col.addView(tv("diag · last fetched message: ${Messenger.core.lastDrop}", 12.5f, dim).apply { setPadding(dp(20), 0, dp(20), dp(10)) })
     col.addView(gap(8))

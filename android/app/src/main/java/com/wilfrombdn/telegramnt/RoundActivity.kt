@@ -11,6 +11,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
@@ -68,8 +69,9 @@ class RoundActivity : ComponentActivity() {
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFE53935.toInt()); setStroke(d(5), Color.WHITE) }
             setOnClickListener { keep = true; recording?.stop() }
         }
-        val cancel = TextView(this).apply {
-            text = "✕"; setTextColor(Color.WHITE); textSize = 22f; gravity = Gravity.CENTER
+        val cancel = ImageView(this).apply {
+            setImageResource(R.drawable.ic_close); setColorFilter(Color.WHITE); scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(d(14), d(14), d(14), d(14))   // a drawn icon is centred exactly; the ✕ text character wasn't
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x44FFFFFF) }
             setOnClickListener { keep = false; if (recording != null) recording?.stop() else finish() }
         }

@@ -61,12 +61,14 @@ class CameraActivity : ComponentActivity() {
     private var flashOn = false                    // per visit: a new camera always starts with the flash off
     private var timerSecs = 0                      // per visit: a new camera always starts instant (0)
     private var counting = false
-    private lateinit var flashBtn: TextView
+    private lateinit var flashBtn: ImageView
     private lateinit var timerBtn: TextView
     private lateinit var countdown: TextView
+    private var photoOnly = false                  // picture texts can't carry video: no hold-to-record
     private var snap = false                       // snap mode: after the shot, add a caption and send
     private lateinit var rootView: FrameLayout
     private var editLayer: FrameLayout? = null
+    private var editFile: File? = null   // the shot being previewed, so backing out can discard it
     private val ui = android.os.Handler(android.os.Looper.getMainLooper())
     private val startVideo = Runnable { beginVideo() }
 
@@ -79,6 +81,7 @@ class CameraActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)   // no screenshots / recents preview
         snap = intent.getBooleanExtra("snap", false)
+        photoOnly = intent.getBooleanExtra("photoOnly", false)
         cacheDir.resolve("camera").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
         setContentView(buildUi())
         refreshControls()
@@ -120,11 +123,11 @@ class CameraActivity : ComponentActivity() {
         root.addView(timer, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = d(28) })
 
         // close (X)
-        root.addView(iconButton("✕") { cancelCountdown(); finish() }, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.START).apply { leftMargin = d(12); topMargin = d(20) })
+        root.addView(iconImage(R.drawable.ic_close) { cancelCountdown(); finish() }, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.START).apply { leftMargin = d(12); topMargin = d(20) })
         // flip camera
         root.addView(iconButton("⟲") { front = !front; startCamera() }, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.END).apply { rightMargin = d(12); topMargin = d(20) })
         // flash and timer: both are off every time the camera opens (nothing is remembered)
-        flashBtn = iconButton("⚡") { flashOn = !flashOn; applyFlash(); refreshControls() }
+        flashBtn = iconImage(R.drawable.ic_flash) { flashOn = !flashOn; applyFlash(); refreshControls() }
         root.addView(flashBtn, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.END).apply { rightMargin = d(12); topMargin = d(76) })
         timerBtn = iconButton("⏱") { timerSecs = TIMER_STEPS[(TIMER_STEPS.indexOf(timerSecs) + 1) % TIMER_STEPS.size]; refreshControls() }
         root.addView(timerBtn, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.END).apply { rightMargin = d(12); topMargin = d(132) })
@@ -156,6 +159,14 @@ class CameraActivity : ComponentActivity() {
         setOnClickListener { onClick() }
     }
 
+    /** A round button with a drawn icon (white by default) exactly centred in it; text glyphs like ✕ and ⚡ never are. */
+    private fun iconImage(res: Int, onClick: () -> Unit) = ImageView(this).apply {
+        setImageResource(res); setColorFilter(Color.WHITE); scaleType = ImageView.ScaleType.CENTER_INSIDE
+        setPadding(d(13), d(13), d(13), d(13))
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x66000000) }
+        setOnClickListener { onClick() }
+    }
+
     private fun ring(ringColor: Int, fill: Int) = GradientDrawable().apply {
         shape = GradientDrawable.OVAL; setColor(fill); setStroke(d(5), ringColor)
     }
@@ -177,7 +188,7 @@ class CameraActivity : ComponentActivity() {
             val recorder = Recorder.Builder()
                 .setQualitySelector(QualitySelector.from(Quality.HD, androidx.camera.video.FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)))
                 .build()
-            videoCapture = VideoCapture.withOutput(recorder)
+            videoCapture = if (photoOnly) null else VideoCapture.withOutput(recorder)
             val selector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
             try {
                 p.unbindAll()
@@ -192,6 +203,7 @@ class CameraActivity : ComponentActivity() {
                 } catch (e2: Exception) { toast("Couldn't open the camera"); finish() }
             }
             imageCapture?.screenFlash = preview.screenFlash   // front camera flash = the screen
+            if (photoOnly) hint.text = "Tap for a photo\nDouble-tap the screen to flip the camera"
             applyFlash()
         }, ContextCompat.getMainExecutor(this))
     }
@@ -257,11 +269,12 @@ class CameraActivity : ComponentActivity() {
     }
 
     private fun refreshControls() {
-        fun style(b: TextView, on: Boolean) {
+        fun style(b: View, on: Boolean) {
             b.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (on) 0xFFFFD60A.toInt() else 0x66000000) }
-            b.setTextColor(if (on) Color.BLACK else Color.WHITE)
+            (b as? TextView)?.setTextColor(if (on) Color.BLACK else Color.WHITE)
         }
         style(flashBtn, flashOn)
+        flashBtn.setColorFilter(if (flashOn) Color.BLACK else Color.WHITE)   // black bolt on the yellow fill, so it never disappears into it
         style(timerBtn, timerSecs > 0)
         timerBtn.text = if (timerSecs > 0) "${timerSecs}s" else "⏱"
         timerBtn.textSize = if (timerSecs > 0) 15f else 22f
@@ -402,9 +415,9 @@ class CameraActivity : ComponentActivity() {
         }
         stage.setOnClickListener { if (cap.isFocused) doneTyping() else typing() }
 
-        layer.addView(iconButton("✕") {
-            doneTyping(); rootView.removeView(layer); editLayer = null
-            file.delete(); shutter.isEnabled = true
+        layer.addView(iconImage(R.drawable.ic_close) {
+            doneTyping(); rootView.removeView(layer); editLayer = null; editFile = null
+            file.delete(); resetShutter()   // back to a ready camera: white button, no red timer
         }, FrameLayout.LayoutParams(d(48), d(48), Gravity.TOP or Gravity.START).apply { leftMargin = d(12); topMargin = d(20) })
         layer.addView(TextView(this).apply {
             text = "Send  ➤"; setTextColor(Color.parseColor("#111111")); textSize = 17f; gravity = Gravity.CENTER
@@ -425,7 +438,7 @@ class CameraActivity : ComponentActivity() {
             }
         }, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { rightMargin = d(18); bottomMargin = d(28) })
         rootView.addView(layer, FrameLayout.LayoutParams(-1, -1))
-        editLayer = layer
+        editLayer = layer; editFile = file
     }
 
     /** Photo decoded the right way up, no bigger than [maxSide]. */
@@ -463,7 +476,7 @@ class CameraActivity : ComponentActivity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         val l = editLayer
-        if (l != null) { rootView.removeView(l); editLayer = null; shutter.isEnabled = true } else @Suppress("DEPRECATION") super.onBackPressed()
+        if (l != null) { rootView.removeView(l); editLayer = null; editFile?.delete(); editFile = null; resetShutter() } else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     private fun handBack(file: File, isPhoto: Boolean, caption: String = "") {

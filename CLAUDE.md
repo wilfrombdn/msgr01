@@ -23,8 +23,9 @@
   without asking the owner first.
 - Server backups run nightly from the owner's PC (accounts only, encrypted; see `SERVER-SETUP.md`). Keep the server holding as little as possible.
 
-## Waiting for the next release (since 9.0)
-- Nothing yet. 9.0 is the security release (audit 2026-11-04): TLS certificate-name check, Argon2id passwords (old accounts upgrade on next login; new passwords 12+ chars and checked), Direct mode warning + the server must prove its identity key (`Messenger.SERVER_ID`), group invites ask first, QR codes carry a key fingerprint, wake-up pings opt-in, picture decode safety, notification text off by default, v3 signing. Not yet tested on a real phone: Argon2 speed on old phones, the new Direct warning screens, Tor onion proof-of-work under load.
+## Waiting for the next release (since 9.1)
+- Nothing yet. 9.1 = camera fixes (cancel resets the red button/timer, centred ✕, visible flash bolt), camera in the texting attach menu, Direct listed above Tor in Settings.
+- 9.0 is the security release (audit 2026-11-04): TLS certificate-name check, Argon2id passwords (old accounts upgrade on next login; new passwords 12+ chars and checked), Direct mode warning + the server must prove its identity key (`Messenger.SERVER_ID`), group invites ask first, QR codes carry a key fingerprint, wake-up pings opt-in, picture decode safety, notification text off by default, v3 signing. Not yet tested on a real phone: Argon2 speed on old phones, the new Direct warning screens, Tor onion proof-of-work under load.
 - Before 9.0: nothing waiting (7.8 shipped the pencil/phone/plus round button with hold-to-big-camera). 7.5 (Snap, Saved Messages), 7.6 (full-screen camera, flash/timer, cleanup into feature files) and 7.7 (hold-and-release camera button, bottom Tellem|Phone switch) and 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) have not been tested on a real phone, so expect fixes.
 
 ## Checking a refactor
