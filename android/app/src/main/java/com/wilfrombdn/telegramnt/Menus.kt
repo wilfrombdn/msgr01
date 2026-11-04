@@ -146,7 +146,7 @@ internal fun MainActivity.chatMenu(c: Contact, anchor: View) {
         (if (c.ttl == 0) "Disappearing messages" else "Disappearing: on") to { timerMenu(c) },
         "Rename" to {
             val box = field("Name", c.name)
-            popup("Rename", null, box, "Cancel" to dim, "Save" to white) { i ->
+            popup("Rename", null, box, "Cancel" to dim, "Save" to white, icon = R.drawable.ic_edit) { i ->
                 if (i == 1) box.text.toString().trim().take(60).takeIf { it.isNotEmpty() }?.let { c.name = it; Messenger.save(); fillChat() }
             }
         },

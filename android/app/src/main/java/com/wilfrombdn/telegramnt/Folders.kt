@@ -43,7 +43,7 @@ internal fun MainActivity.folderMenu(f: Folder) {
     longPressMenu(null, null, listOf(
         "Rename folder" to {
             val box = field("Folder name", f.name)
-            popup("Rename folder", null, box, "Cancel" to dim, "Save" to white) { i ->
+            popup("Rename folder", null, box, "Cancel" to dim, "Save" to white, icon = R.drawable.ic_edit) { i ->
                 if (i == 1) box.text.toString().trim().take(40).takeIf { it.isNotEmpty() }?.let { f.name = it; Messenger.settingsChanged(); showChats() }
             }
         },

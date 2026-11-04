@@ -537,7 +537,7 @@ internal fun MainActivity.textPicture(a: Texts.Attachment): View {
 internal fun MainActivity.textAttachMenu(anchor: View) {
     val panel = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = round(menuBg, 10)
+        background = round(menuBg, 4)
         elevation = dp(10).toFloat()
         setPadding(0, dp(6), 0, dp(6))
     }

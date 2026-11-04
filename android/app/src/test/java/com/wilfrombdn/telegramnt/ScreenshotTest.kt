@@ -269,6 +269,47 @@ class ScreenshotTest {
         }
     }
 
+    /** Draws the latest pop-up (dialog) to build/shots/<name>.png at phone width. */
+    private fun shootDialog(name: String) {
+        shadowOf(Looper.getMainLooper()).idle()
+        org.robolectric.shadows.ShadowDialog.getLatestDialog()?.window?.decorView?.let { v -> shootView(v, name, 1000) }
+    }
+
+    private fun shootView(v: android.view.View, name: String, w: Int) {
+        v.measure(android.view.View.MeasureSpec.makeMeasureSpec(w, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED))
+        v.layout(0, 0, v.measuredWidth, v.measuredHeight)
+        val bmp = Bitmap.createBitmap(v.measuredWidth, maxOf(1, v.measuredHeight), Bitmap.Config.ARGB_8888)
+        Canvas(bmp).drawColor(android.graphics.Color.parseColor("#0A0A0A")); v.draw(Canvas(bmp))
+        File("build/shots").mkdirs()
+        FileOutputStream(File("build/shots", "$name.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    /** The B2 pop-ups: contact card (saved and unsaved), update, Tor details, and an opened call in the call log. */
+    @Test fun b2Popups() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        a.contactCard(Phone.Person(7L, "Sam Rivera", listOf("(902) 555-0148" to "Mobile", "(902) 555-0192" to "Work"), company = "Harbour Freight Ltd.", emails = listOf("sam.rivera@mail.com")))
+        shootDialog("b2-contact")
+        a.contactCard(Phone.Person(0L, "(902) 555-0177", listOf("(902) 555-0177" to "")), edit = false)
+        shootDialog("b2-contact-unsaved")
+        a.updatePrompt(Updater.Update(97, "10.4", listOf("Cleaner pop-ups with a shaded top", "Contacts: tighter card with a pencil to edit", "Calls open with tidy tiles"), "/x.apk", "0"))
+        shootDialog("b2-update")
+        a.torDetails()
+        shootDialog("b2-tor")
+        a.popup("Rename folder", null, a.field("Folder name", "Work"), "Cancel" to a.dim, "Save" to a.white, icon = R.drawable.ic_edit)
+        shootDialog("b2-rename")
+        val t = System.currentTimeMillis() - 3_600_000L
+        a.openCallAt = t
+        val list = android.widget.LinearLayout(a).apply {
+            orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(android.graphics.Color.parseColor("#141414"))
+            addView(a.callRow(Phone.Call(t, false, false, 221, number = "(902) 555-0148")))
+            addView(a.callRow(Phone.Call(t - 9_000_000L, true, true, 0, friend = "sam_r")))
+            addView(a.callRow(Phone.Call(t - 90_000_000L, true, false, 52, number = "(902) 555-0177")))
+        }
+        shootView(list, "b2-calls", 1080)
+    }
+
     @Test fun storage() {
         Messenger.initForPreview(fakeCore(signedIn = true))
         Messenger.core.blobSize = { 3_400_000L }

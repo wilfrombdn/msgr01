@@ -49,6 +49,9 @@ class MainActivity : Activity() {
     internal val divider get() = pick("#262626", "#E0E4E9")
     internal val faint get() = pick("#5A5A5A", "#B5BAC2")
     internal val panel2 get() = pick("#2A2A2A", "#E7EAEF")
+    internal val soft get() = pick("#C7C7CC", "#4A505A")      // body text in pop-ups (between white and dim)
+    internal val sunk get() = pick("#161616", "#FFFFFF")      // inside text boxes, the opened call, the Tor log
+    internal val chip get() = pick("#303133", "#E3E6EB")      // small squared button tiles
     internal val red = Color.parseColor("#E5534B")
     internal val amber get() = pick("#E8C24A", "#9A6B00")   // gentle yellow for the Tor "first connection is slow" note
     internal val avatarColors = listOf("#E17076", "#FAA774", "#A695E7", "#7BC862", "#6EC9CB", "#65AADD", "#EE7AAE")

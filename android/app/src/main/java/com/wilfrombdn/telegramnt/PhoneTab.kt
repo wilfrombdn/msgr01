@@ -64,6 +64,13 @@ internal fun MainActivity.addCallRows(list: LinearLayout, q: String) {
         .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)) })
 }
 
+/** A call's length in words: "3 min 41 sec", "52 sec", "1 hr 4 min". */
+internal fun lengthWords(sec: Int): String = when {
+    sec >= 3600 -> "${sec / 3600} hr ${sec % 3600 / 60} min"
+    sec >= 60 -> "${sec / 60} min ${sec % 60} sec"
+    else -> "$sec sec"
+}
+
 internal fun MainActivity.callName(k: Phone.Call) = k.friend?.let { Messenger.core.contact(it)?.name ?: "@$it" } ?: Texts.name(this, k.number ?: "")
 
 /** The opened-out part of the call that is open now (only one at a time). */
@@ -83,14 +90,17 @@ internal fun MainActivity.callRow(k: Phone.Call): View {
     val row = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(18), dp(12), dp(16), dp(12))
-        background = pressable()
+        background = if (openCallAt == k.date) android.graphics.drawable.ColorDrawable(menuBg) else pressable()   // the open call gets the shaded band
         setOnClickListener {
             val open = detail.visibility != View.VISIBLE
             (parent as? ViewGroup)?.let { p -> (p.parent as? ViewGroup ?: p).let { root ->
                 if (animationsOn()) android.transition.TransitionManager.beginDelayedTransition(root, android.transition.AutoTransition().setDuration(260).setInterpolator(SMOOTH))
             } }
-            openDetail?.get()?.takeIf { it !== detail }?.visibility = View.GONE   // only one call open at a time
+            openDetail?.get()?.takeIf { it !== detail }?.let { other ->   // only one call open at a time
+                other.visibility = View.GONE; (other.tag as? View)?.background = pressable()
+            }
             detail.visibility = if (open) View.VISIBLE else View.GONE
+            background = if (open) android.graphics.drawable.ColorDrawable(menuBg) else pressable()
             openDetail = if (open) java.lang.ref.WeakReference<View>(detail) else null
             openCallAt = if (open) k.date else 0L
         }
@@ -105,10 +115,8 @@ internal fun MainActivity.callRow(k: Phone.Call): View {
     val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     val l1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
     l1.addView(tv(name, 16f, if (k.missed) red else white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
-    l1.addView(tv(if (k.friend != null) APP_NAME else "Phone", 10.5f, Color.WHITE, true).apply {
-        setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(if (k.friend != null) Color.parseColor("#3A6EA5") else look.sms, 4)
-        setTextColor(if (k.friend != null) Color.WHITE else Look.textOn(look.sms))
-    })
+    // a thin outlined tag: white-ish for Tellem calls, the texting colour for normal phone calls
+    l1.addView(if (k.friend != null) tagChip(APP_NAME.uppercase(), soft, faint, 10f) else tagChip("PHONE", look.sms, (look.sms and 0x00FFFFFF) or (0x8C shl 24), 10f))
     l1.addView(tv(time(k.date), 13f, dim).apply { setPadding(dp(6), 0, 0, 0) })
     mid.addView(l1)
     val what = when {
@@ -119,28 +127,46 @@ internal fun MainActivity.callRow(k: Phone.Call): View {
     mid.addView(tv(what, 14f, if (k.missed) red else dim).apply { setPadding(0, dp(2), 0, 0) })
     row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
 
-    // ---- the part that opens: details, then buttons ----
-    val full = java.text.SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date(k.date))
-    detail.setPadding(dp(18), 0, dp(16), dp(12))
-    detail.addView(tv(full, 13.5f, dim))
-    detail.addView(tv(if (k.seconds > 0) "Lasted ${callDuration(k.seconds)}" else if (k.missed) "Not answered" else "Not connected", 13.5f, dim).apply { setPadding(0, dp(2), 0, 0) })
-    detail.addView(tv(if (k.friend != null) "@${k.friend} · $APP_NAME call, end-to-end encrypted" else "${number ?: ""} · normal phone call, not encrypted", 13.5f, dim).apply { setPadding(0, dp(2), 0, dp(10)) })
-    val buttons = LinearLayout(this)
-    fun button(label: String, go: () -> Unit) = buttons.addView(tv(label, 14.5f, white, true).apply {
-        gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(10)); maxLines = 1
-        background = GradientDrawable().apply { setColor(Color.TRANSPARENT); setStroke(dp(1), raised); cornerRadius = dp(8).toFloat() }
-        setOnClickListener { go() }
+    // ---- the part that opens (B2): short labelled facts, then squared tiles ----
+    detail.tag = row
+    detail.background = android.graphics.drawable.LayerDrawable(arrayOf(
+        android.graphics.drawable.ColorDrawable(divider), android.graphics.drawable.ColorDrawable(sunk))).apply { setLayerInset(1, 0, 1, 0, 1) }
+    detail.setPadding(0, dp(1), 0, dp(1))
+    val facts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(11), dp(16), dp(2)) }
+    fun fact(label: String, value: CharSequence) = facts.addView(LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, dp(2))
+        addView(tv(label.uppercase(), 11f, dim, true).apply { letterSpacing = 0.08f }, LinearLayout.LayoutParams(dp(68), -2))
+        addView(tv("", 14f, white).apply { text = value }, LinearLayout.LayoutParams(0, -2, 1f))
+    })
+    fun faded(main: String, extra: String) = android.text.SpannableString("$main$extra").apply {
+        setSpan(android.text.style.ForegroundColorSpan(dim), main.length, length, 0)
+        setSpan(android.text.style.RelativeSizeSpan(0.93f), main.length, length, 0)
+    }
+    fact("When", java.text.SimpleDateFormat("EEE d MMM, HH:mm", Locale.getDefault()).format(Date(k.date)))
+    fact("Length", if (k.seconds > 0) lengthWords(k.seconds) else if (k.missed) "Not answered" else "Not connected")
+    fact("Type", if (k.friend != null) faded("@${k.friend}", " · end-to-end encrypted") else faded(number ?: "Unknown number", " · not encrypted"))
+    detail.addView(facts)
+    val tiles = LinearLayout(this).apply { setPadding(dp(14), dp(10), dp(14), dp(14)) }
+    fun tile(res: Int, label: String, main: Boolean = false, go: () -> Unit) = tiles.addView(LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+        setPadding(0, dp(8), 0, dp(7)); isClickable = true
+        background = android.graphics.drawable.LayerDrawable(arrayOf(
+            GradientDrawable().apply { setColor(if (main) white else chip); cornerRadius = dp(3).toFloat() }, pressable()))
+        val c = if (main) ink else white
+        addView(android.widget.ImageView(context).apply { setImageResource(res); setColorFilter(c) }, LinearLayout.LayoutParams(dp(19), dp(19)))
+        addView(tv(label, 12.5f, c).apply { setPadding(0, dp(3), 0, 0); maxLines = 1; gravity = Gravity.CENTER })
+        setOnClickListener { tapBuzz(); go() }
     }, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
     if (friend != null) {
-        button("Call") { if (friend.canChat) callFriend(friend) else toast("Can't call them on $APP_NAME") }
-        button("Message") { showChat(friend.user) }
+        tile(R.drawable.ic_call, "Call") { if (friend.canChat) callFriend(friend) else toast("Can't call them on $APP_NAME") }
+        tile(R.drawable.ic_send, "Message", main = true) { showChat(friend.user) }
     } else if (number != null) {
-        button("Call") { PhoneCalls.dial(this, number) }
-        button("Text") { var id = 0L; Messenger.run({ id = Texts.threadFor(this, listOf(number)) }, { showTextThread(id, listOf(number)) }) }
-        button("Contact") { callCard(number) }
-        button("Copy") { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("number", number)); toast("Copied") }
+        tile(R.drawable.ic_call, "Call") { PhoneCalls.dial(this, number) }
+        tile(R.drawable.ic_send, "Text", main = true) { var id = 0L; Messenger.run({ id = Texts.threadFor(this, listOf(number)) }, { showTextThread(id, listOf(number)) }) }
+        tile(R.drawable.ic_person, "Contact") { callCard(number) }
+        tile(R.drawable.ic_copy, "Copy") { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("number", number)); toast("Copied") }
     }
-    detail.addView(buttons)
+    detail.addView(tiles)
 
     outer.addView(row, LinearLayout.LayoutParams(-1, -2))
     outer.addView(detail, LinearLayout.LayoutParams(-1, -2))
@@ -181,7 +207,11 @@ internal fun MainActivity.addContactRows(list: LinearLayout, q: String) {
         while (next < end) {
             val p = people[next++]
             val l = headerOf(p)
-            if (l != letter) { letter = l; list.addView(tv(l, 14f, dim, true).apply { setPadding(dp(20), dp(12), dp(20), dp(4)) }) }
+            if (l != letter) {   // B2 section label: small spaced capitals over a thin line
+                letter = l
+                list.addView(tv(l.uppercase(), 11.5f, dim, true).apply { letterSpacing = 0.08f; setPadding(dp(20), dp(14), dp(20), dp(6)) })
+                list.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { bottomMargin = dp(2) })
+            }
             list.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(14), dp(8), dp(14), dp(8))
@@ -192,7 +222,7 @@ internal fun MainActivity.addContactRows(list: LinearLayout, q: String) {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0)
                     addView(tv(p.name, 16f, white).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
                     // a small second line says what it is sorted or grouped by
-                    val sub = if (byEmail) p.email else if (!group) "" else ""
+                    val sub = if (byEmail) p.email else if (!group) p.company else ""   // grouped by company: the header already says it
                     if (sub.isNotEmpty()) addView(tv(sub, 13.5f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
                 }, LinearLayout.LayoutParams(0, -2, 1f))
             })

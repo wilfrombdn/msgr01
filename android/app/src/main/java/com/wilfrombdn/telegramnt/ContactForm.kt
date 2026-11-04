@@ -1,6 +1,8 @@
 package com.wilfrombdn.telegramnt
 
 import android.Manifest
+import android.graphics.drawable.GradientDrawable
+import android.text.TextUtils
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -176,62 +178,103 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
 }
 
 /**
- * The contact pop-up: a pencil in the top right to edit (only when it's a saved contact and [edit] is true, i.e. opened from the Contacts tab),
+ * The contact pop-up (B2): picture and name in the top band with a pencil to edit (only when it's a saved contact and [edit] is true, i.e. opened from the Contacts tab),
  * then everything saved about them: company, each number (Call, Text; hold a number to copy it) and each email (tap to write
  * to them in an email app of your choice; hold to copy it). A number that isn't saved gets "Add to contacts" instead.
  */
 internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
-    val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     var dialog: android.app.Dialog? = null
     fun copy(what: String, value: String) {
         getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText(what, value)); toast("Copied")
     }
-    // The pencil in the top right corner: edit a saved contact (only from the Contacts tab), or save a number that isn't a contact yet.
-    val pencil = if (p.id == 0L || edit) icon(R.drawable.ic_edit, white, 22) {
+    fun addOrEdit() {
         dialog?.dismiss()
         if (p.id != 0L) showEditContact(p) { showChats() } else showAddContact(p.numbers.firstOrNull()?.first) { showChats() }
-    }.apply { background = pressable(); contentDescription = if (p.id != 0L) "Edit contact" else "Add to contacts" } else null
-    if (p.company.isNotEmpty()) col.addView(LinearLayout(this).apply {
-        gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(6))
-        setOnLongClickListener { copy("company", p.company); true }
-        addView(icon(R.drawable.ic_company, dim, 22, 0))
-        addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0)
-            addView(tv(p.company, 16f, white)); addView(tv("Company", 13f, dim))
-        })
-    })
-    for ((n, label) in p.numbers) col.addView(LinearLayout(this).apply {
+    }
+    val col = popupPanel()
+
+    // top band: picture, name, company (or "Not in your contacts"), and the corner icon: pencil (from Contacts), add-person (unsaved), none (call log)
+    val corner = when {
+        p.id == 0L -> icon(R.drawable.ic_person_add, white, 22, 9) { addOrEdit() }.apply { contentDescription = "Add to contacts" }
+        edit -> icon(R.drawable.ic_edit, white, 22, 9) { addOrEdit() }.apply { contentDescription = "Edit contact" }
+        else -> null
+    }?.apply { background = pressable() }
+    col.addView(LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, dp(6), 0, dp(6))
+        setBackgroundColor(menuBg)
+        setPadding(dp(14), dp(10), if (corner != null) dp(4) else dp(14), dp(10))
+        addView(contactAvatar(p.name, p.photoUri, 40, p.numbers.firstOrNull()?.first?.let { numberSeed(it) } ?: "sms:n${p.name}"))
         addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(tv(n, 16f, white))
-            if (label.isNotEmpty()) addView(tv(label, 13f, dim))
+            orientation = LinearLayout.VERTICAL; setPadding(dp(11), 0, dp(4), 0)
+            addView(tv(p.name, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+            val sub = if (p.id == 0L) "Not in your contacts" else p.company
+            if (sub.isNotEmpty()) addView(tv(sub, 12.5f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        corner?.let { addView(it) }
+    }, LinearLayout.LayoutParams(-1, -2))
+
+    fun label(s: String) = col.addView(tv(s.uppercase(), 11f, dim, true).apply { letterSpacing = 0.08f; setPadding(dp(14), dp(9), dp(14), dp(2)) })
+    fun line() = col.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(14) })
+    /** A small squared button tile; [main] = white with dark icon (the text button). */
+    fun tile(res: Int, main: Boolean, desc: String, go: () -> Unit) = icon(res, if (main) ink else white, 18, 8) { go() }.apply {
+        contentDescription = desc
+        background = GradientDrawable().apply { setColor(if (main) white else chip); cornerRadius = dp(3).toFloat() }
+        layoutParams = LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginStart = dp(6) }
+    }
+
+    if (p.numbers.isNotEmpty()) label("Phone")
+    p.numbers.forEachIndexed { i, (n, kind) ->
+        if (i > 0) line()
+        col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(5), dp(10), dp(5))
             background = pressable(); isLongClickable = true
             setOnLongClickListener { copy("number", n); true }   // hold the number to copy it
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(icon(R.drawable.ic_call, white, 22) { PhoneCalls.dial(this@contactCard, n) })
-        addView(icon(R.drawable.ic_send, smsGreen, 22) {
-            var id = 0L
-            Messenger.run({ id = Texts.threadFor(this@contactCard, listOf(n)) }, { showTextThread(id, listOf(n)) })
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(tv(n, 15.5f, white).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                if (kind.isNotEmpty()) addView(tv(kind, 12f, dim))
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(tile(R.drawable.ic_call, false, "Call") { PhoneCalls.dial(this@contactCard, n) })
+            addView(tile(R.drawable.ic_send, true, "Text") {
+                var id = 0L
+                Messenger.run({ id = Texts.threadFor(this@contactCard, listOf(n)) }, { showTextThread(id, listOf(n)) })
+            })
         })
-    })
-    for (m in p.emails) col.addView(LinearLayout(this).apply {
+    }
+    if (p.emails.isNotEmpty()) label("Email")
+    p.emails.forEachIndexed { i, m ->
+        if (i > 0) line()
+        col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(5), dp(10), dp(5)); background = pressable(); isClickable = true
+            addView(tv(m, 15.5f, white).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(icon(R.drawable.ic_mail, dim, 20, 7).apply { layoutParams = LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginStart = dp(6) } })
+            setOnClickListener {   // asks which email app to use, then starts a new message to them
+                val it2 = android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:" + android.net.Uri.encode(m)))
+                runCatching { startActivity(android.content.Intent.createChooser(it2, "Email $m with")) }.onFailure { toast("No email app found") }
+            }
+            setOnLongClickListener { copy("email", m); true }
+        })
+    }
+    if (p.id == 0L) col.addView(LinearLayout(this).apply {   // an unsaved number: one clear way to save it
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, dp(6), 0, dp(6)); background = pressable(); isClickable = true
-        addView(icon(R.drawable.ic_mail, dim, 22, 0))
-        addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0)
-            addView(tv(m, 16f, blue).apply { paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG })   // a link
-            addView(tv("Email", 13f, dim))
-        })
-        setOnClickListener {   // asks which email app to use, then starts a new message to them
-            val i = android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:" + android.net.Uri.encode(m)))
-            runCatching { startActivity(android.content.Intent.createChooser(i, "Email $m with")) }.onFailure { toast("No email app found") }
-        }
-        setOnLongClickListener { copy("email", m); true }
+        setPadding(dp(10), dp(8), dp(10), dp(8)); isClickable = true
+        background = android.graphics.drawable.LayerDrawable(arrayOf(
+            GradientDrawable().apply { setStroke(dp(1), raised); cornerRadius = dp(3).toFloat() }, pressable()))
+        setOnClickListener { addOrEdit() }
+        addView(icon(R.drawable.ic_person_add, white, 20, 0))
+        addView(tv("Add to contacts", 14.5f, white).apply { setPadding(dp(10), 0, 0, 0) })
+    }, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(10), dp(8), dp(10), 0) })
+
+    val what = if (p.emails.isNotEmpty()) "a number or email" else if (p.numbers.size > 1) "a number" else "the number"
+    col.addView(tv("Hold $what to copy it. Calls and texts go through your carrier, not private.", 12f, dim).apply {
+        setLineSpacing(0f, 1.1f); setPadding(dp(14), dp(9), dp(14), 0)
     })
-    popup(p.name, "Hold a number or email to copy it. Calls and texts go through your carrier, not private.", col, "Close" to dim, dialogOut = { dialog = it }, titleAction = pencil)
+    val d = showPanel(col, scroll = true)
+    dialog = d
+    col.addView(popupButtons(d, arrayOf("Close" to white)) {}, LinearLayout.LayoutParams(-1, -2))
+    presentDialog(d, col)
 }
 
 /** Tapping a phone call in the Calls list: the contact's numbers with Call and Text (no editing here), or the bare number with "Add to contacts". */

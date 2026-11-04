@@ -15,7 +15,7 @@ internal fun MainActivity.attachMenu(anchor: View) {   // target already set in 
     sendOnce = false   // only the "View once photo" row turns it on, for the photo picked right after
     val panel = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = round(menuBg, 10)
+        background = round(menuBg, 4)
         elevation = dp(10).toFloat()
         setPadding(0, dp(6), 0, dp(6))
     }

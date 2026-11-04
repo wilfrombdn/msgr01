@@ -38,43 +38,48 @@ internal fun MainActivity.checkUpdateNow() {
 /** "Update available — Yes/No"; Yes opens what's new and an Update button with a progress bar. */
 internal fun MainActivity.updatePrompt(u: Updater.Update) {
     if (updateDialogOpen) return   // one update pop-up at a time
-    val d = android.app.Dialog(this)
-    d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
-    val col = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(20), dp(16), dp(12), dp(4))
-        background = round(bar, 4)
-        layoutTransition = android.animation.LayoutTransition()   // the panel grows smoothly when it expands
-    }
-    col.addView(tv("Update available", 17.5f, white, true).apply { setPadding(0, 0, dp(8), dp(6)) })
-    col.addView(tv("$APP_NAME ${u.name} is ready. Update now?", 14.5f, dim).apply { setPadding(0, 0, dp(8), dp(4)) })
+    val col = popupPanel().apply { layoutTransition = android.animation.LayoutTransition() }   // the panel grows smoothly when it expands
+    col.addView(popupHeader("Update available", popupIcon(R.drawable.ic_download), tagChip(u.name)), LinearLayout.LayoutParams(-1, -2))
+    val question = tv("A new version of $APP_NAME is ready. Update now?", 14.5f, soft).apply { setPadding(dp(14), dp(12), dp(14), 0) }
+    col.addView(question)
+    val d = showPanel(col, scroll = true)
     fun buttons(vararg b: Pair<Pair<String, Int>, () -> Unit>) = LinearLayout(this).apply {
-        gravity = Gravity.END; setPadding(0, dp(4), 0, 0)
-        b.forEach { (lc, act) -> addView(tv(lc.first.uppercase(), 14f, lc.second, true).apply { setPadding(dp(12), dp(10), dp(12), dp(10)); setOnClickListener { act() } }) }
+        gravity = Gravity.END; setPadding(dp(4), dp(6), dp(4), dp(4))
+        b.forEachIndexed { i, (lc, act) ->
+            addView(tv(lc.first, 15f, lc.second, i == b.size - 1).apply {
+                setPadding(dp(12), dp(10), dp(12), dp(10)); background = pressable(); setOnClickListener { tapBuzz(); act() }
+            })
+        }
     }
-    val status = tv("", 13.5f, dim).apply { setPadding(0, dp(6), dp(8), 0); visibility = View.GONE }
+    // progress: a thin bar, then what's happening on the left and the percent on the right
+    val status = tv("", 12.5f, dim)
+    val pct = tv("", 12.5f, white, true)
+    val statusRow = LinearLayout(this).apply {
+        setPadding(dp(14), dp(6), dp(14), 0); visibility = View.GONE
+        addView(status, LinearLayout.LayoutParams(0, -2, 1f)); addView(pct)
+    }
     val fill = View(this).apply { setBackgroundColor(white); pivotX = 0f; scaleX = 0f }
     val track = FrameLayout(this).apply {
-        setBackgroundColor(panel2); visibility = View.GONE
+        setBackgroundColor(chip); visibility = View.GONE
         addView(fill, FrameLayout.LayoutParams(-1, -1))
     }
     lateinit var ask: View
     lateinit var go: View
     lateinit var updateBtn: TextView
     fun startUpdate() {
-        go.visibility = View.GONE; track.visibility = View.VISIBLE; status.visibility = View.VISIBLE
+        go.visibility = View.GONE; track.visibility = View.VISIBLE; statusRow.visibility = View.VISIBLE
         val resuming = Updater.hasPartial(this, u)
-        status.text = if (resuming) "Picking up where it left off…" else "Downloading… 0%"
+        status.text = if (resuming) "Picking up where it left off" else "Downloading"; pct.text = "0%"
         d.setCancelable(false)
         Updater.onStatus = { err -> runOnUiThread {
-            if (err != null) { status.text = "Couldn't update: $err"; go.visibility = View.VISIBLE; d.setCancelable(true) }
+            if (err != null) { status.text = "Couldn't update: $err"; pct.text = ""; go.visibility = View.VISIBLE; d.setCancelable(true) }
         } }
         var apk: File? = null
         Messenger.run({
-            apk = Updater.download(this, u, { p -> runOnUiThread { fill.scaleX = p; status.text = "Downloading… ${(p * 100).toInt()}%" } },
-                { msg -> runOnUiThread { status.text = msg } })
+            apk = Updater.download(this, u, { p -> runOnUiThread { fill.scaleX = p; status.text = "Downloading"; pct.text = "${(p * 100).toInt()}%" } },
+                { msg -> runOnUiThread { status.text = msg; pct.text = "" } })
         }, {
-            fill.scaleX = 1f
+            fill.scaleX = 1f; pct.text = ""
             status.text = "Installing… $APP_NAME will close and reopen."
             val f = apk!!
             if (!packageManager.canRequestPackageInstalls()) {
@@ -90,30 +95,32 @@ internal fun MainActivity.updatePrompt(u: Updater.Update) {
                 else if (Updater.hasPartial(this, u)) "The connection keeps dropping. Tap Continue to carry on from ${if (at > 0) "$at%" else "where it stopped"} — nothing downloaded is lost."
                 else "Couldn't reach the update (${e.message}). Tap Continue to try again."
             } else errorText(e)
-            updateBtn.text = "CONTINUE"
+            pct.text = ""
+            updateBtn.text = "Continue"
             go.visibility = View.VISIBLE; d.setCancelable(true)
         }
     }
     go = buttons(("Not now" to dim) to { d.dismiss() }, ((if (Updater.hasPartial(this, u)) "Continue" else "Update") to white) to { startUpdate() })
     updateBtn = (go as LinearLayout).getChildAt(1) as TextView
     ask = buttons(("No" to dim) to { d.dismiss() }, ("Yes" to white) to {
-        col.removeView(ask)
-        col.addView(tv("What's new", 15f, white, true).apply { setPadding(0, dp(8), dp(8), dp(4)) })
-        (u.notes.ifEmpty { listOf("Fixes and improvements") }).forEach { n ->
-            col.addView(tv("•  $n", 14f, dim).apply { setLineSpacing(0f, 1.06f); setPadding(0, dp(2), dp(8), dp(2)) })
+        col.removeView(ask); col.removeView(question)
+        col.addView(tv("WHAT'S NEW", 11f, dim, true).apply { letterSpacing = 0.08f; setPadding(dp(14), dp(12), dp(14), dp(4)) })
+        (u.notes.ifEmpty { listOf("Fixes and improvements") }).forEachIndexed { i, n ->
+            if (i > 0) col.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, 1).apply { setMargins(dp(14), 0, dp(14), 0) })
+            col.addView(LinearLayout(this).apply {   // a small square bullet, then the note
+                setPadding(dp(14), dp(6), dp(14), dp(6))
+                addView(View(context).apply { setBackgroundColor(dim) }, LinearLayout.LayoutParams(dp(5), dp(5)).apply { topMargin = dp(8); marginEnd = dp(9) })
+                addView(tv(n, 14f, soft).apply { setLineSpacing(0f, 1.1f) }, LinearLayout.LayoutParams(0, -2, 1f))
+            })
         }
-        col.addView(gap(10))
-        col.addView(track, LinearLayout.LayoutParams(-1, dp(5)).apply { rightMargin = dp(8) })
-        col.addView(status)
+        col.addView(track, LinearLayout.LayoutParams(-1, dp(4)).apply { setMargins(dp(14), dp(12), dp(14), 0) })
+        col.addView(statusRow)
         col.addView(go)
     })
     col.addView(ask)
-    d.setContentView(ScrollView(this).apply { addView(col) })
-    d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-    d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.86).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
     updateDialogOpen = true; updateShown = maxOf(updateShown, u.code.toLong())
     d.setOnDismissListener { updateDialogOpen = false }
-    d.show()
+    presentDialog(d, col)
 }
 
 /**

@@ -189,10 +189,34 @@ internal fun MainActivity.torTitle() = android.text.SpannableString("$APP_NAME T
     setSpan(android.text.style.RelativeSizeSpan(0.5f), APP_NAME.length, length, 0)
 }
 
-/** Tor's latest messages in a pop-up, with Copy, so a stuck connection can be sent to whoever is fixing it. */
+/** Tor's latest messages in a pop-up (B2): the state as a tag in the top band, then the log in its own box, with Copy. */
 internal fun MainActivity.torDetails() {
-    val text = (listOf(Tor.status()) + Tor.log()).joinToString("\n")
-    popup("Tor details", text, null, "Close" to dim, "Copy" to white) { i ->
+    val state = Tor.status()
+    val text = (listOf(state) + Tor.log()).joinToString("\n")
+    val ready = Tor.socksPort() != null
+    val tag = tagChip(if (Messenger.direct) "Direct" else if (ready) "Connected" else "Connecting", if (ready || Messenger.direct) white else dim, faint)
+    val body = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        fun fact(label: String, value: String) = addView(LinearLayout(context).apply {
+            setPadding(0, dp(2), 0, dp(2))
+            addView(tv(label.uppercase(), 11f, dim, true).apply { letterSpacing = 0.08f; setPadding(0, dp(2), 0, 0) }, LinearLayout.LayoutParams(dp(64), -2))
+            addView(tv(value, 14f, white), LinearLayout.LayoutParams(0, -2, 1f))
+        })
+        fact("Status", state)
+        fact("Mode", if (Messenger.direct) "Direct (faster, not hidden by Tor)" else "Tor (private)")
+        val log = Tor.log()
+        if (log.isNotEmpty()) {
+            val lines = tv(log.joinToString("\n"), 11.5f, soft).apply {
+                typeface = android.graphics.Typeface.MONOSPACE; setLineSpacing(0f, 1.2f); setTextIsSelectable(true)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+            }
+            addView(ScrollView(context).apply {   // the log scrolls inside its own box when it's long
+                background = android.graphics.drawable.GradientDrawable().apply { setColor(sunk); setStroke(dp(1), divider); cornerRadius = dp(3).toFloat() }
+                addView(lines)
+            }, LinearLayout.LayoutParams(-1, if (log.size > 8) dp(170) else -2).apply { topMargin = dp(8) })
+        }
+    }
+    popup("Tor details", null, body, "Close" to dim, "Copy" to white, icon = R.drawable.ic_onion, tag = tag) { i ->
         if (i == 1) { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("tor", text)); toast("Copied") }
     }
 }

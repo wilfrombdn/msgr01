@@ -160,7 +160,7 @@ internal fun MainActivity.cta(s: String, onClick: () -> Unit) = mainButton(s, on
 internal fun MainActivity.ctaParams() = LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL }
 
 /**
- * The app's text box: a rounded, softly filled box (no thin line edge to edge). Stacked boxes get a small gap from the inset.
+ * The app's text box: a squared, slightly darker box with a thin grey edge (B2). Stacked boxes get a small gap from the inset.
  * [boxed] = false keeps a bare field for places that draw their own background (the search bar).
  */
 internal fun MainActivity.field(hint: String, value: String = "", password: Boolean = false, boxed: Boolean = true) = EditText(this).apply {
@@ -171,12 +171,17 @@ internal fun MainActivity.field(hint: String, value: String = "", password: Bool
     textSize = 17f * look.ui
     if (boxed) {
         backgroundTintList = null
-        background = android.graphics.drawable.InsetDrawable(round(panel2, 12), 0, dp(5), 0, dp(5))
-        setPadding(dp(14), dp(14), dp(14), dp(14))
+        background = android.graphics.drawable.InsetDrawable(GradientDrawable().apply {
+            setColor(sunk); setStroke(dp(1), raised); cornerRadius = dp(3).toFloat()
+        }, 0, dp(5), 0, dp(5))
+        setPadding(dp(12), dp(13), dp(12), dp(13))
     } else backgroundTintList = android.content.res.ColorStateList.valueOf(white)
     inputType = if (password) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
     else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
     typeface = Typeface.DEFAULT // password fields default to monospace
+    // no blue anywhere: a white cursor and a soft grey selection instead of Android's accent colour
+    highlightColor = (white and 0x00FFFFFF) or (0x40 shl 24)
+    if (android.os.Build.VERSION.SDK_INT >= 29) textCursorDrawable = GradientDrawable().apply { setColor(white); setSize(dp(2), 1) }
 }
 
 internal fun MainActivity.usernameField(hint: String) = field(hint).apply {
@@ -288,14 +293,12 @@ internal fun MainActivity.errorText(e: Exception) = when (e) {
 internal fun MainActivity.pickList(title: String, sub: String?, items: Array<String>, onPick: (Int) -> Unit) {
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     items.forEachIndexed { i, label ->
-        col.addView(tv(label, 15.5f, white).apply { setPadding(dp(24), dp(13), dp(24), dp(13)); background = pressable(); setOnClickListener { tapBuzz(); listDialog?.dismiss(); onPick(i) } })
+        col.addView(tv(label, 15.5f, white).apply { setPadding(dp(14), dp(12), dp(14), dp(12)); background = pressable(); setOnClickListener { tapBuzz(); listDialog?.dismiss(); onPick(i) } })
     }
-    val wrap = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        background = panelBackground()
-        setPadding(0, dp(22), 0, dp(12))
-        addView(tv(title, 19f, white, true).apply { setPadding(dp(24), 0, dp(24), if (sub == null) dp(8) else dp(2)) })
-        sub?.let { addView(tv(it, 14.5f, dim).apply { setPadding(dp(24), 0, dp(24), dp(8)) }) }
+    val wrap = popupPanel().apply {
+        setPadding(0, 0, 0, dp(6))
+        addView(popupHeader(title), LinearLayout.LayoutParams(-1, -2))
+        sub?.let { addView(tv(it, 14f, dim).apply { setPadding(dp(14), dp(10), dp(14), dp(2)) }) }
         addView(gap(4))
     }
     wrap.addView(col)
@@ -341,47 +344,87 @@ internal fun MainActivity.presentDialog(d: android.app.Dialog, panel: View) {
     d.show()
 }
 
+/** The small round icon at the left of a pop-up's top band (red for deleting / leaving). */
+internal fun MainActivity.popupIcon(res: Int, red: Boolean = false) = ImageView(this).apply {
+    setImageResource(res)
+    setColorFilter(if (red) this@popupIcon.red else white)
+    setPadding(dp(6), dp(6), dp(6), dp(6))
+    background = circle(if (red) (this@popupIcon.red and 0x00FFFFFF) or (0x29 shl 24) else (white and 0x00FFFFFF) or (0x14 shl 24))
+    layoutParams = LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginEnd = dp(12) }
+}
+
+/** A small squared tag with a thin edge, for the top band (a version number, "Connected") and the call log ("Tellem"). */
+internal fun MainActivity.tagChip(text: String, color: Int = soft, edge: Int = faint, size: Float = 11.5f) = tv(text, size, color, true).apply {
+    setPadding(dp(6), dp(1), dp(6), dp(2)); maxLines = 1
+    background = GradientDrawable().apply { setStroke(dp(1), edge); cornerRadius = dp(2).toFloat() }
+}
+
 /**
- * The app's own pop-up (instead of Android's), laid out like Telegram's: title (with an optional small [titleAction] icon at its
- * top right), optional text or [content], and the buttons as plain words in the bottom right. The main action (white) is bold,
- * red stays red, anything else is quiet. [onButton] gets the index of the button tapped.
+ * The shaded top band of every B2 pop-up: optional round [icon], the title, an optional small [tag] after it and an optional
+ * [action] icon in the top right corner (the contact card's pencil).
  */
-internal fun MainActivity.popup(title: String, message: String?, content: View?, vararg buttons: Pair<String, Int>, dialogOut: ((android.app.Dialog) -> Unit)? = null, titleAction: View? = null, onButton: (Int) -> Unit = {}) {
-    val d = android.app.Dialog(this)
-    d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
-    val col = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(24), dp(22), dp(24), dp(10))
-        background = panelBackground()
-        elevation = dp(10).toFloat()
-    }
-    if (titleAction == null) col.addView(tv(title, 19f, white, true).apply { setPadding(0, 0, 0, dp(8)) })
-    else col.addView(LinearLayout(this).apply {   // title on the left, the small icon tucked into the top right corner
-        gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(8))
-        addView(tv(title, 19f, white, true), LinearLayout.LayoutParams(0, -2, 1f))
-        addView(titleAction, (titleAction.layoutParams as? LinearLayout.LayoutParams ?: LinearLayout.LayoutParams(-2, -2)).apply { topMargin = -dp(10); bottomMargin = -dp(10); marginEnd = -dp(12) })
-    }, LinearLayout.LayoutParams(-1, -2))
-    message?.let { col.addView(tv(it, 15f, dim).apply { setLineSpacing(0f, 1.18f); setPadding(0, 0, 0, dp(6)) }) }
-    content?.let { col.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+internal fun MainActivity.popupHeader(title: CharSequence, icon: View? = null, tag: View? = null, action: View? = null) = LinearLayout(this).apply {
+    gravity = Gravity.CENTER_VERTICAL
+    setBackgroundColor(menuBg)
+    setPadding(dp(14), dp(11), if (action != null) dp(4) else dp(14), dp(11))
+    minimumHeight = dp(52)
+    icon?.let { addView(it) }
+    addView(tv("", 16.5f, white, true).apply { text = title; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+    tag?.let { addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }) }
+    action?.let { addView(it) }
+}
+
+/** The panel every B2 pop-up is built on: squared, hairline edge, the top band clipped to its corners. */
+internal fun MainActivity.popupPanel() = LinearLayout(this).apply {
+    orientation = LinearLayout.VERTICAL
+    background = panelBackground()
+    clipToOutline = true
+    elevation = dp(10).toFloat()
+}
+
+/** Plain-word buttons in the bottom right (Telegram's layout). The main action (white) and red ones are bold. */
+internal fun MainActivity.popupButtons(d: android.app.Dialog, buttons: Array<out Pair<String, Int>>, onButton: (Int) -> Unit) = LinearLayout(this).apply {
     val stacked = buttons.size > 2
-    val row = LinearLayout(this).apply {
-        orientation = if (stacked) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
-        gravity = Gravity.END                                        // buttons sit in the bottom right, like Telegram
-        setPadding(0, dp(10), 0, 0)
-    }
+    orientation = if (stacked) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+    gravity = Gravity.END
+    setPadding(dp(4), dp(6), dp(4), dp(4))
     buttons.forEachIndexed { i, (label, color) ->
-        val main = color == white && i == buttons.size - 1          // the action you came here to do
-        row.addView(tv(label, 15.5f, color, main || color == red).apply {
+        val main = color == white && i == buttons.size - 1
+        addView(tv(label, 15f, color, main || color == red).apply {
             gravity = Gravity.CENTER_VERTICAL or Gravity.END; maxLines = 1
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
             background = pressable()
             setOnClickListener { tapBuzz(); d.dismiss(); onButton(i) }
-        }, LinearLayout.LayoutParams(-2, -2).apply { if (!stacked && i > 0) leftMargin = dp(4) })
+        }, LinearLayout.LayoutParams(-2, -2))
     }
-    col.addView(row, LinearLayout.LayoutParams(-1, -2).apply { marginEnd = -dp(12) })
-    d.setContentView(col)
+}
+
+/** Puts a built [panel] on screen as a pop-up (dimmed behind, eased in) and returns the dialog. */
+internal fun MainActivity.showPanel(panel: View, scroll: Boolean = false): android.app.Dialog {
+    val d = android.app.Dialog(this)
+    d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+    d.setContentView(if (scroll) ScrollView(this).apply { addView(panel) } else panel)
     d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-    d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.88).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
+    d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.88).toInt(), dp(380)), ViewGroup.LayoutParams.WRAP_CONTENT)
+    return d
+}
+
+/**
+ * The app's own pop-up in the B2 style: a shaded top band with the title (and an optional round [icon], small [tag] and a
+ * [titleAction] icon in the top right corner), then the text or [content], then the buttons as plain words in the bottom right.
+ * A pop-up whose red button deletes or removes something gets a red bin icon unless it has its own. [onButton] gets the index of the button tapped.
+ */
+internal fun MainActivity.popup(title: String, message: String?, content: View?, vararg buttons: Pair<String, Int>, dialogOut: ((android.app.Dialog) -> Unit)? = null,
+                                titleAction: View? = null, icon: Int? = null, tag: View? = null, onButton: (Int) -> Unit = {}) {
+    val col = popupPanel()
+    val ic = icon?.let { popupIcon(it, buttons.any { b -> b.second == red }) }
+        ?: if (buttons.any { it.second == red && Regex("delete|remove|clear|erase", RegexOption.IGNORE_CASE).containsMatchIn(it.first) }) popupIcon(R.drawable.ic_trash, true) else null
+    col.addView(popupHeader(title, ic, tag, titleAction), LinearLayout.LayoutParams(-1, -2))
+    message?.let { col.addView(tv(it, 14.5f, soft).apply { setLineSpacing(0f, 1.15f); setPadding(dp(14), dp(12), dp(14), 0) }) }
+    content?.let { col.addView(it, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(14), dp(8), dp(14), 0) }) }
+    lateinit var d: android.app.Dialog
+    d = showPanel(col, scroll = true)
+    col.addView(popupButtons(d, buttons, onButton), LinearLayout.LayoutParams(-1, -2))
     dialogOut?.invoke(d)
     presentDialog(d, col)
 }
