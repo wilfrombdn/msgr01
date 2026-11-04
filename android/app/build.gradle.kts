@@ -70,7 +70,7 @@ android {
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("com.google.crypto.tink:tink-android:1.24.0")
-    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1") // Argon2id for passwords (only its Argon2 classes survive shrinking)
+    implementation("org.bouncycastle:bcprov-jdk18on:1.86") // Argon2id for passwords (only its Argon2 classes survive shrinking)
     implementation("androidx.core:core:1.15.0")
     implementation("androidx.drawerlayout:drawerlayout:1.2.0") // Telegram-style slide-out side menu
     implementation("androidx.activity:activity:1.9.3") // ComponentActivity (LifecycleOwner) for the camera
