@@ -69,7 +69,7 @@ internal fun MainActivity.showProfile() {
         gravity = Gravity.CENTER_VERTICAL
         setBackgroundColor(bar)
         setPadding(dp(20), dp(16), dp(20), dp(22))
-        addView(avatar(me.name, 72, me.avatar).apply { setOnClickListener { v -> photoMenu(v) } })
+        addView(avatar(me.name, 72, me.avatar, avatarSeed(me.user)).apply { setOnClickListener { v -> photoMenu(v) } })
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), 0, 0, 0)

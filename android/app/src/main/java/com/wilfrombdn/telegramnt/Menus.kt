@@ -175,7 +175,7 @@ internal fun MainActivity.drawerPanel(d: DrawerLayout): View {
         gravity = Gravity.CENTER_VERTICAL
         background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(panel2, bar))
         setPadding(dp(20), dp(24), dp(16), dp(20))
-        addView(avatar(me?.name ?: "", 58, me?.avatar))
+        addView(avatar(me?.name ?: "", 58, me?.avatar, me?.let { avatarSeed(it.user) }))
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), 0, 0, 0)

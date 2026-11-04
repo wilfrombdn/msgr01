@@ -273,7 +273,7 @@ internal fun MainActivity.chatRow(c: Contact, key: String? = null, bg: Int = lis
         setPadding(dp(10), dp(8), dp(14), dp(8))
         setOnClickListener { showChat(c.user) }
     }
-    row.addView(if (c.status == Contact.SAVED) savedAvatar(54) else avatar(c.name, 54, c.avatar))
+    row.addView(if (c.status == Contact.SAVED) savedAvatar(54) else avatar(c.name, 54, c.avatar, avatarSeed(c.user)))
     val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
     val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
     line1.addView(tv(c.name, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))

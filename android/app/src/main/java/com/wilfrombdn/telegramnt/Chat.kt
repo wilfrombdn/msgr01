@@ -130,7 +130,7 @@ internal fun MainActivity.fillChat() {
     val left = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         addView(icon(R.drawable.ic_back) { showChats() })
-        addView(if (c.status == Contact.SAVED) savedAvatar(40) else avatar(c.name, 40, c.avatar))
+        addView(if (c.status == Contact.SAVED) savedAvatar(40) else avatar(c.name, 40, c.avatar, avatarSeed(c.user)))
     }
     val more = icon(R.drawable.ic_more).also { v -> v.setOnClickListener { chatMenu(c, v) } }
     chatTop?.addView(if (c.status == Contact.SAVED) topBar(c.name, head, left, more) else topBar(c.name, head, left,
@@ -257,7 +257,15 @@ internal fun MainActivity.toBottom(s: ScrollView) = s.scrollTo(0, maxOf(0, (s.ge
 
 /** The message scroller: follows the bottom when you're there (new messages, photos loading, the
  *  keyboard opening), and otherwise stays exactly where you scrolled to. */
-internal fun MainActivity.chatScroller(list: LinearLayout) = ScrollView(this).apply {
+internal fun MainActivity.chatScroller(list: LinearLayout): ScrollView = PinchScroll(this, { f ->
+    val next = (look.msg * f).coerceIn(12f, 28f)
+    if (next != look.msg) {
+        val sc = list.parent as? ScrollView
+        if (sc != null && !stick) restoreTo = anchorOf(sc, list)   // keep the message you're reading in place while it grows
+        look.msg = next
+        setMessageTextSize(list, next)
+    }
+}, { look.msg = Math.round(look.msg * 2) / 2f; Messenger.settingsChanged() }).apply {
     addView(list); isFillViewport = true
     val s = this
     setOnScrollChangeListener { _, _, _, _, _ -> if (restoreTo == null) stick = atBottom(s) }
@@ -380,7 +388,7 @@ internal fun MainActivity.addReactions(b: LinearLayout, m: Msg, toggle: (String)
 internal fun MainActivity.msgText(m: Msg, ink: Int, people: Set<String>, onLong: () -> Unit): TextView {
     val me = Messenger.core.me?.user ?: ""
     return tv("", 16f, ink).apply {
-        textSize = look.msg
+        textSize = look.msg; markMessageText()
         text = Format.render(m.text, ink, blue, people + me, m.id in shownSpoilers) {
             shownSpoilers.add(m.id); if (screen == Screen.GROUP) fillGroup() else fillChat()
         }
@@ -462,7 +470,7 @@ internal fun MainActivity.mentionPicker(box: EditText, g: Group): LinearLayout {
         col.visibility = if (hits.isEmpty()) View.GONE else View.VISIBLE
         for (u in hits) col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(6), dp(14), dp(6)); background = pressable()
-            addView(avatar(displayName(u), 32, Messenger.core.contact(u)?.avatar))
+            addView(avatar(displayName(u), 32, Messenger.core.contact(u)?.avatar, avatarSeed(u)))
             addView(tv(displayName(u), 15f, white, true).apply { setPadding(dp(12), 0, dp(8), 0) })
             addView(tv("@$u", 14f, dim))
             setOnClickListener {

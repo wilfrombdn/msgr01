@@ -115,7 +115,7 @@ internal fun MainActivity.icon(res: Int, color: Int = white, size: Int = 24, pad
 }
 
 /** Profile photo if there is one, otherwise coloured initials like Telegram. */
-internal fun MainActivity.avatar(name: String, sizeDp: Int, photo: ByteArray? = null): View {
+internal fun MainActivity.avatar(name: String, sizeDp: Int, photo: ByteArray? = null, seed: String? = null): View {
     val bmp = photo?.let { p ->
         val key = p.contentHashCode()
         photoCache[key] ?: safeBitmap(p, 512)?.also { photoCache[key] = it }
@@ -123,6 +123,14 @@ internal fun MainActivity.avatar(name: String, sizeDp: Int, photo: ByteArray? = 
     if (bmp != null) return ImageView(this).apply {
         setImageBitmap(bmp)
         scaleType = ImageView.ScaleType.CENTER_CROP
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) = o.setOval(0, 0, v.width, v.height)
+        }
+        clipToOutline = true
+        layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+    }
+    if (seed != null) return View(this).apply {
+        background = BlobAvatar(seed)
         outlineProvider = object : android.view.ViewOutlineProvider() {
             override fun getOutline(v: View, o: android.graphics.Outline) = o.setOval(0, 0, v.width, v.height)
         }
@@ -350,13 +358,19 @@ internal fun MainActivity.popup(title: String, message: String?, content: View?,
 // ---------- settings ----------
 
 /** A tappable settings/profile row: title + optional subtitle, with press feedback. */
-internal fun MainActivity.settingRow(title: String, sub: String? = null, color: Int = white, onClick: (View) -> Unit) = LinearLayout(this).apply {
-    orientation = LinearLayout.VERTICAL
+internal fun MainActivity.settingRow(title: String, sub: String? = null, color: Int = white, arrow: Boolean = false, onClick: (View) -> Unit) = LinearLayout(this).apply {
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER_VERTICAL
     setPadding(dp(20), dp(14), dp(20), dp(14))
     background = pressable()
     isClickable = true
-    addView(tv(title, 16f, color))
-    sub?.let { addView(tv(it, 13.5f, dim)) }
+    addView(LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(tv(title, 16f, color))
+        sub?.let { addView(tv(it, 13.5f, dim)) }
+    }, LinearLayout.LayoutParams(0, -2, 1f))
+    // a soft arrow on rows that open something, so they read as buttons and not as headings
+    if (arrow) addView(tv("›", 24f, dim).apply { setPadding(dp(12), 0, 0, 0); alpha = 0.7f })
     setOnClickListener { v -> onClick(v) }
 }
 
@@ -373,3 +387,8 @@ internal fun MainActivity.settingSwitch(label: String, on: Boolean, change: (Boo
 }
 
 internal fun MainActivity.settingNote(text: String) = tv(text, 13.5f, dim).apply { setPadding(dp(20), 0, dp(20), dp(10)) }
+
+/** What a person's picture is drawn from when they have no photo: their username, or for a normal text their phone number. */
+internal fun avatarSeed(user: String) =
+    if (user.startsWith("sms:")) "sms:" + user.drop(4).filter { it.isDigit() }.takeLast(10) else "u:$user"
+internal fun numberSeed(number: String) = "sms:" + number.filter { it.isDigit() }.takeLast(10)

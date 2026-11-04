@@ -66,7 +66,7 @@ internal fun MainActivity.chatPicker(title: String, pick: (Any) -> Unit) {
     val d = android.app.Dialog(this)
     for ((name, _, t) in targets) col.addView(LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)); background = pressable()
-        addView(avatar(name, 40, (t as? Contact)?.avatar))
+        addView(avatar(name, 40, (t as? Contact)?.avatar, (t as? Contact)?.let { avatarSeed(it.user) } ?: (t as? Group)?.let { "g:${it.id}" }))
         addView(tv(name, 16f, white).apply { setPadding(dp(14), 0, 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         setOnClickListener { d.dismiss(); pick(t) }
     })

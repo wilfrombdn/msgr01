@@ -2,4 +2,6 @@
 <resources>
     <!-- the camera view on the QR scan screen -->
     <item name="qr_preview" type="id" />
+    <!-- a message's text, so a pinch can resize it -->
+    <item name="msg_text" type="id" />
 </resources>

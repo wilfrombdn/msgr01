@@ -23,7 +23,7 @@ internal fun MainActivity.groupRow(g: Group, key: String? = null, bg: Int = list
     }
     // group avatar: initials on a ring so groups read differently from people
     row.addView(FrameLayout(this).apply {
-        addView(avatar(g.name, 54))
+        addView(avatar(g.name, 54, null, "g:${g.id}"))
         addView(icon(R.drawable.ic_more, white, 12, 0).apply {
             background = circle(raised); setPadding(dp(2), dp(2), dp(2), dp(2))
         }, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.BOTTOM or Gravity.END))
@@ -105,7 +105,7 @@ internal fun MainActivity.showNewGroup() {
             setPadding(0, dp(8), 0, dp(8))
             background = pressable()
             val check = tv("○", 20f, dim)
-            addView(avatar(c.name, 38, c.avatar))
+            addView(avatar(c.name, 38, c.avatar, avatarSeed(c.user)))
             addView(tv(c.name, 16f, white).apply { setPadding(dp(12), 0, 0, 0) }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(check)
             setOnClickListener {
@@ -213,7 +213,7 @@ internal fun MainActivity.fillGroup() {
     val typing = groupTyping(g)
     val info = "${g.members.size} member" + (if (g.members.size != 1) "s" else "") + (if (g.public) " · public" else "") + if (g.readOnly) " · read-only" else ""
     groupTop?.addView(topBar(g.name, typing?.let { android.text.SpannableString(it).apply { setSpan(android.text.style.ForegroundColorSpan(blue), 0, it.length, 0) } } ?: info,
-        LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; addView(icon(R.drawable.ic_back) { showChats() }); addView(avatar(g.name, 40)) },
+        LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; addView(icon(R.drawable.ic_back) { showChats() }); addView(avatar(g.name, 40, null, "g:${g.id}")) },
         icon(R.drawable.ic_more) { groupMenu(g) }), LinearLayout.LayoutParams(-1, -2))
     pinnedBar(g.pinned, g.msgs, groupBubbles, groupScroller, Messenger.core.canPin(g)) { Messenger.run({ Messenger.core.pinGroupMessage(g, null) }) { e -> toast(errorText(e)) } }?.let { groupTop?.addView(it) }
     val list = groupBubbles ?: return

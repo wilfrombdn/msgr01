@@ -125,7 +125,7 @@ internal fun MainActivity.textRow(t: Texts.Thread, pins: Set<Long> = Texts.pins(
             (if (t.archived) "Unarchive" else "Archive") to { Texts.setArchived(this@textRow, t.id, !t.archived); toast(if (t.archived) "Moved back to your texts" else "Archived") },
             (if (t.spam) "Not spam" else "Move to spam") to { Texts.markSpam(this@textRow, t.id, !t.spam); toast(if (t.spam) "Moved back to your texts" else "Moved to spam") }); true }
     }
-    row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54))   // a bare number gets "#", not "+5"
+    row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54, null, numberSeed(t.addresses.joinToString(","))))   // a bare number gets "#", not "+5"
     val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
     val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
     line1.addView(tv(title, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -460,6 +460,7 @@ internal fun MainActivity.textBubble(t: Texts.Text, group: Boolean): View {
         setOnClickListener { Texts.retryDownload(this@textBubble, t.id); toast("Downloading…") }
     })
     if (t.body.isNotEmpty()) b.addView(tv(t.body, look.msg, ink).apply {
+        markMessageText()
         android.text.util.Linkify.addLinks(this, android.text.util.Linkify.WEB_URLS or android.text.util.Linkify.PHONE_NUMBERS)
         setLinkTextColor(ink)
         setOnLongClickListener { textMenu(t); true }

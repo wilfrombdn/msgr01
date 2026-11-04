@@ -68,7 +68,7 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
         armed = true; fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         fab.setImageResource(R.drawable.ic_camera)
         sizeTo(big, 320, android.view.animation.OvershootInterpolator(3.2f))
-        ui.postDelayed(launch, 280)   // long enough to see it pop
+        ui.postDelayed(launch, 100)   // long enough to see it pop
     }
     fun cancelArmed() { armed = false; fab.setImageResource(res); deflate() }
     fun outside(v: View, e: MotionEvent): Boolean {
@@ -80,8 +80,8 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
             MotionEvent.ACTION_DOWN -> {
                 v.parent?.requestDisallowInterceptTouchEvent(true)
                 sx = e.rawX; sy = e.rawY; armed = false; cancelled = false; launched = false
-                v.isPressed = true; ui.postDelayed(arm, 380)
-                sizeTo(swell, 380, android.view.animation.AccelerateInterpolator(1.3f))   // starts filling right away
+                v.isPressed = true; ui.postDelayed(arm, 200)
+                sizeTo(swell, 200, android.view.animation.AccelerateInterpolator(1.3f))   // starts filling right away
             }
             MotionEvent.ACTION_MOVE ->
                 if (!cancelled && !launched) {

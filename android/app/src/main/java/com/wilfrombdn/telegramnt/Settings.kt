@@ -41,25 +41,36 @@ internal fun MainActivity.showSettings() {
     col.addView(settingNote("Skips Tor and goes through a Cloudflare tunnel. Cloudflare and the server can see your phone's internet address. Messages stay end-to-end encrypted. Only use it if Tor is blocked on your network."))
     choice("Tor (most private)", if (on) "✓ active" else Tor.status(), !direct) { if (direct) { Messenger.useDirect(false); showSettings() } }
     col.addView(settingNote("Everything goes through the Tor network, so no one, not even the server, ever sees your phone's internet address."))
-    col.addView(settingRow("Tor details", "What Tor is doing, to copy and send if it won't connect") { torDetails() })
+    col.addView(settingRow("Tor details", "What Tor is doing, to copy and send if it won't connect", arrow = true) { torDetails() })
     if (Messenger.core.unreadable > 0) col.addView(tv("⚠ ${Messenger.core.unreadable} message(s) arrived but couldn't be decrypted — the two accounts' keys are out of sync (usually from reinstalling/restoring). Fresh accounts fix this.", 13.5f, amber).apply { setPadding(dp(20), dp(2), dp(20), dp(10)) })
     if (Messenger.core.lastDrop.isNotEmpty()) col.addView(tv("diag · last fetched message: ${Messenger.core.lastDrop}", 12.5f, dim).apply { setPadding(dp(20), 0, dp(20), dp(10)) })
-    col.addView(gap(8))
-    col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged(); showSettings() })
-    col.addView(tv("Privacy", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+    fun header(t: String) = col.addView(tv(t, 14f, dim, true).apply { setPadding(dp(20), dp(22), dp(20), dp(6)) })
+    // ---- Privacy: what others can see, and locking ----
+    header("Privacy")
     col.addView(settingSwitch("Allow screenshots", shotsAllowed()) { on -> UiPrefs.setScreenshots(this, on); applyShotPolicy() })
     col.addView(settingNote("Lets you screenshot and screen-record the chat screens (they also show in the recent-apps preview). Calls, camera and QR codes stay blocked."))
-    col.addView(settingRow("App lock", if (Messenger.appLock) "On: asks for your fingerprint, face or PIN after ${when (Messenger.lockAfterMin) { 1 -> "1 minute"; 60 -> "1 hour"; else -> "${Messenger.lockAfterMin} minutes" }} away" else "Off") { appLockMenu() })
+    col.addView(settingRow("App lock", if (Messenger.appLock) "On: asks for your fingerprint, face or PIN after ${when (Messenger.lockAfterMin) { 1 -> "1 minute"; 60 -> "1 hour"; else -> "${Messenger.lockAfterMin} minutes" }} away" else "Off", arrow = true) { appLockMenu() })
     val sd = Destruct.hours(this)
-    col.addView(settingRow("Self-destruct", if (sd == 0) "Off" else "On: everything in $APP_NAME on this phone is wiped if it isn't opened for ${destructLabel(sd)}", if (sd == 0) white else red) { selfDestructMenu() })
+    col.addView(settingRow("Self-destruct", if (sd == 0) "Off" else "On: everything in $APP_NAME on this phone is wiped if it isn't opened for ${destructLabel(sd)}", if (sd == 0) white else red, arrow = true) { selfDestructMenu() })
+    col.addView(settingSwitch("Read receipts", Messenger.core.readReceipts) { on -> Messenger.core.readReceipts = on; Messenger.settingsChanged() })
+    col.addView(settingNote("When on, friends see when you've read their messages, and you see when they've read yours."))
+    col.addView(settingSwitch("Show when I'm typing", Messenger.core.showTyping) { on -> Messenger.core.showTyping = on; Messenger.settingsChanged() })
+    col.addView(settingNote("When on, a friend sees \"typing…\" while you write to them."))
+    col.addView(settingSwitch("Show when I'm online", Messenger.core.showSeen) { on -> Messenger.setShowSeen(on) })
+    col.addView(settingNote("When on, friends see \"online\" while you have $APP_NAME open, and \"last seen\" after."))
+    // ---- Notifications ----
+    header("Notifications")
     col.addView(settingSwitch("Show names in notifications", Messenger.notifyNames) { on -> Messenger.notifyNames = on; Messenger.settingsChanged() })
     col.addView(settingSwitch("Show message text in notifications", Messenger.notifyText) { on -> Messenger.notifyText = on; Messenger.settingsChanged() })
+    col.addView(settingNote("Like a normal text: who wrote and what they said (not while app lock is on). On the lock screen your phone's own setting decides how much shows. " +
+        "Turn names off to just see \"$APP_NAME · New message\"."))
     col.addView(settingSwitch("Reply from the lock screen without unlocking", ReplyReceiver.lockReply(this)) { on -> UiPrefs.setLockReply(this, on) })
     col.addView(settingNote("When off, replying to a notification asks for your phone passcode first. Always asked while app lock is on."))
+    // ---- Phone calls ----
     if (Build.VERSION.SDK_INT >= 29 || packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) {
-        col.addView(tv("Phone calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+        header("Phone calls")
         val calling = PhoneCalls.isDefaultDialer(this)
-        col.addView(settingRow("Use $APP_NAME for phone calls", if (calling) "On: $APP_NAME answers and places normal phone calls" else "Off: calls use your usual phone app") {
+        col.addView(settingRow("Use $APP_NAME for phone calls", if (calling) "On: $APP_NAME answers and places normal phone calls" else "Off: calls use your usual phone app", arrow = true) {
             if (!calling) askCallRole()
             else popup("Switch calling apps?", "Pick a different phone app in your phone's Default apps settings.", null, "Cancel" to dim, "Open settings" to white) { b ->
                 if (b == 1) runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
@@ -67,9 +78,10 @@ internal fun MainActivity.showSettings() {
         })
         col.addView(settingNote("Normal phone calls go through your carrier, not Tor, and aren't encrypted. $APP_NAME's own calls with friends are separate and stay private."))
     }
-    col.addView(tv("Texting", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+    // ---- Texting ----
+    header("Texting")
     val texting = Texts.isDefault(this)
-    col.addView(settingRow("Use $APP_NAME for normal texts", if (texting) "On: $APP_NAME is this phone's texting app" else "Off: texts stay in your usual texting app") {
+    col.addView(settingRow("Use $APP_NAME for normal texts", if (texting) "On: $APP_NAME is this phone's texting app" else "Off: texts stay in your usual texting app", arrow = true) {
         if (!texting) askTextRole()
         else popup("Switch texting apps?", "Pick a different texting app in your phone's Default apps settings. Your texts stay on the phone either way.",
             null, "Cancel" to dim, "Open settings" to white) { b -> if (b == 1) runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) } }
@@ -79,17 +91,17 @@ internal fun MainActivity.showSettings() {
     col.addView(settingNote("Saved Messages appears after you save your first message. Off: it also shows in the Phone window's texts."))
     if (Texts.canRead(this)) {
         val places = listOf("top" to "Top of your texts", "bottom" to "Bottom of your texts", "menu" to "In the side menu", "tab" to "Their own Folders tab")
-        col.addView(settingRow("Archive, Codes and Spam folders", "Shown: " + places.first { it.first == folderPlace() }.second.replaceFirstChar { it.lowercase() }) {
+        col.addView(settingRow("Archive, Codes and Spam folders", "Shown: " + places.first { it.first == folderPlace() }.second.replaceFirstChar { it.lowercase() }, arrow = true) {
             pickList("Where should these folders go?", "Archive, Codes and Spam & blocked", places.map { it.second }.toTypedArray()) { i ->
                 UiPrefs.setFolderPlace(this, places[i].first); showSettings()
             }
         })
     }
     col.addView(settingNote("Normal texts go through your phone carrier, not Tor, and aren't encrypted: the carrier can read them. They're kept in the phone's own text storage, so self-destruct doesn't erase them. In $APP_NAME they always have green bubbles and an SMS tag."))
-    col.addView(settingNote("Like a normal text: who wrote and what they said (not while app lock is on). On the lock screen your phone's own setting decides how much shows. " +
-        "Turn names off to just see \"$APP_NAME · New message\"."))
-    // Calls when closed: each missing phone setting, tap to fix
-    col.addView(tv("Calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
+    // ---- Background: messages and ringing while the app is closed ----
+    header("When the app is closed")
+    col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged(); showSettings() })
+    col.addView(settingNote("Keeps a small \"connected\" notification. No Google push service is used."))
     col.addView(settingSwitch("Wake-up pings (uses Google)", Messenger.pushOn) { on ->
         if (!on) { setWakeUpPings(false); return@settingSwitch }
         popup("Turn on wake-up pings?",
@@ -105,15 +117,8 @@ internal fun MainActivity.showSettings() {
     if (fixes.isEmpty()) col.addView(tv("✓ Calls will ring this phone even when $APP_NAME is closed", 15f, green).apply { setPadding(dp(20), dp(6), dp(20), dp(6)) })
     else {
         col.addView(settingNote("To ring like a normal phone call when $APP_NAME is closed, tap each one:"))
-        for ((what, why, fix) in fixes) col.addView(settingRow("⚠  $what", why) { fix() })
+        for ((what, why, fix) in fixes) col.addView(settingRow("⚠  $what", why, arrow = true) { fix() })
     }
-    col.addView(settingNote("Keeps a small \"connected\" notification. No Google push service is used."))
-    col.addView(settingSwitch("Read receipts", Messenger.core.readReceipts) { on -> Messenger.core.readReceipts = on; Messenger.settingsChanged() })
-    col.addView(settingNote("When on, friends see when you've read their messages, and you see when they've read yours."))
-    col.addView(settingSwitch("Show when I'm typing", Messenger.core.showTyping) { on -> Messenger.core.showTyping = on; Messenger.settingsChanged() })
-    col.addView(settingNote("When on, a friend sees \"typing…\" while you write to them."))
-    col.addView(settingSwitch("Show when I'm online", Messenger.core.showSeen) { on -> Messenger.setShowSeen(on) })
-    col.addView(settingNote("When on, friends see \"online\" while you have $APP_NAME open, and \"last seen\" after."))
     col.addView(gap(20))
     col.addView(tv("$APP_NAME ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
         13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })
@@ -173,7 +178,7 @@ internal fun MainActivity.showStorage() {
     withMedia.forEach { it ->
         col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(10)); background = pressable(); isClickable = true
-            addView(avatar(it.name, 40, it.avatar))
+            addView(avatar(it.name, 40, it.avatar, null))
             addView(tv(it.name, 16f, white).apply { setPadding(dp(14), 0, 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(tv(mb(it.bytes), 15f, dim))
             setOnClickListener { _ ->

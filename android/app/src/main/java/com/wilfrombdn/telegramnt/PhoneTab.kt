@@ -82,7 +82,7 @@ internal fun MainActivity.callRow(k: Phone.Call): View {
         }
     }
     val friend = k.friend?.let { Messenger.core.contact(it) }
-    row.addView(avatar(if (name.any(Char::isLetter)) name else "#", 48, friend?.avatar))
+    row.addView(avatar(if (name.any(Char::isLetter)) name else "#", 48, friend?.avatar, friend?.let { avatarSeed(it.user) } ?: k.number?.let { numberSeed(it) }))
     val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
     val l1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
     l1.addView(tv(name, 16f, if (k.missed) red else white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
