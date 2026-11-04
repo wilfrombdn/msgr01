@@ -411,7 +411,7 @@ class CameraActivity : ComponentActivity() {
         android.graphics.BitmapFactory.decodeFile(file.path, b)
         val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = maxOf(1, maxOf(b.outWidth, b.outHeight) / maxSide) }
         val raw = android.graphics.BitmapFactory.decodeFile(file.path, o) ?: return null
-        val deg = when (runCatching { androidx.exifinterface.media.ExifInterface(file.path).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, 1) }.getOrDefault(1)) {
+        val deg = when (runCatching { android.media.ExifInterface(file.path).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1) }.getOrDefault(1)) {
             6 -> 90f; 3 -> 180f; 8 -> 270f; else -> 0f
         }
         if (deg == 0f) return raw
