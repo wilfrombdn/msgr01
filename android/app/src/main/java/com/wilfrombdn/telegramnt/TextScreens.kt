@@ -231,6 +231,18 @@ internal fun MainActivity.textThreadMenu(anchor: View) {
         items += "Add to contacts" to { val back = textThread; showAddContact(n) { showTextThread(back, people) } }
 
     }
+    // someone already in your contacts: change their name, numbers, email or photo (the same screen as the Contacts tab)
+    people.singleOrNull()?.takeIf { Texts.contact(this, it) != null }?.let { n ->
+        items += "Edit contact" to {
+            val back = textThread
+            var match: Phone.Person? = null
+            Messenger.run({
+                match = Phone.people(this).firstOrNull { p -> p.numbers.any { android.telephony.PhoneNumberUtils.compare(it.first, n) } }
+            }, {
+                match?.let { p -> showEditContact(p) { showTextThread(back, people) } } ?: toast("Couldn't find that contact")
+            }) { toast("Couldn't find that contact") }
+        }
+    }
     if (people.size > 1) items += "Name this group" to {
         val box = field("Group name", Texts.groupName(this, id).orEmpty())
         popup("Name this group", "Only you see this name. Normal group texts can't share one with the others.", box, "Cancel" to dim, "Save" to white) { b ->

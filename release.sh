@@ -22,7 +22,10 @@ grep -q "8a1362da10d38afa" <<< "$SIGN" || { echo "WRONG SIGNING KEY, stopping"; 
 BADGE=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK")
 grep -q "versionCode='$CODE' versionName='$NAME'" <<< "$BADGE" || { echo "APK version mismatch, stopping"; exit 1; }
 echo "== publishing"
-cd "$SITE" && git pull --rebase -q && cd "$PUB"
+# one step per line: with set -e a failed pull (no internet) must stop the release, not carry on in the wrong folder
+cd "$SITE"
+git pull --rebase -q
+cd "$PUB"
 cp "$REPO/android/$APK" msgr01.apk && cp msgr01.apk "tellem-$NAME.apk"
 for f in msngr-*.apk tellem-*.apk; do [ "$f" = "tellem-$NAME.apk" ] || git rm -q -f "$f" 2>/dev/null || true; done
 SHA=$(sha256sum "tellem-$NAME.apk" | cut -d' ' -f1)
