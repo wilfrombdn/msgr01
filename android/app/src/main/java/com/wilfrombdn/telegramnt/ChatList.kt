@@ -87,7 +87,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     // with "show texts together with chats", text threads sit among the chats (never in pins or folders)
     val loose: List<Pair<Long, () -> View>> = rows.filter { it.first !in inFolder }.map { t -> t.second to { rowFor(t) } } +
         (if (mixed) Texts.threads.filter { !it.spam && ((!it.code && !it.archived) || q.isNotEmpty()) && textMatches(it, q) }.map { t -> t.date to { textRow(t) } } else emptyList())
-    for ((_, make) in loose.sortedByDescending { it.first }) list.addView(make())
+    addBatched(list, loose.sortedByDescending { it.first }, 72, q.isNotEmpty() || (mixed && folderPlace() == "bottom") || showArchive) { it.second() }
     if (mixed && q.isEmpty() && folderPlace() == "bottom") folderRows(list)
     }
     if (q.length >= 2 && !phoneOnly) messageResults(list, q)
@@ -121,21 +121,15 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
 
     val top = if (showArchive && search.isEmpty() && !screenSearch) topBar("Archived chats", null, icon(R.drawable.ic_back) { showArchive = false; showChats() })
     else if (search.isNotEmpty() || screenSearch) searchBar() else {
-        // the name at the top flips between Tellem (chats) and Phone; the other side's unread count rides along
+        // the name at the top shows Tellem (chats) or Phone; the bottom-left switch changes between them
         val flip = android.text.SpannableStringBuilder()
         if (textsTab) flip.append("Phone")
         else flip.append(if (!Messenger.connected) "Connecting…" else if (Messenger.direct) APP_NAME else torTitle())
-        // small, dim, on the right: the screen a tap switches to (⇄ = swap)
-        val tail = "  ⇄ " + if (textsTab) APP_NAME else "Phone"
-        val at = flip.length
-        flip.append(tail)
-        flip.setSpan(android.text.style.RelativeSizeSpan(0.6f), at, flip.length, 0)
-        flip.setSpan(android.text.style.ForegroundColorSpan(dim), at, flip.length, 0)
         topBar(flip,
             if (textsTab) null else if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
             icon(R.drawable.ic_search) { screenSearch = true; showChats() },
-        ).also { b -> b.getChildAt(1)?.setOnClickListener { switchWindow() } }
+        )
     }
     // Content + a left slide-out drawer (opens by tapping the lines or swiping from the edge).
     val keepOpen = refreshing && drawer?.isDrawerOpen(GravityCompat.START) == true   // refreshes rebuild the screen; don't snap the menu shut
@@ -327,7 +321,7 @@ internal fun MainActivity.messageResults(list: LinearLayout, q: String) {
     })
 }
 
-/** Flip between the Tellem window and the Phone window (the top title and the bottom switch both do this). */
+/** Flip between the Tellem window and the Phone window (the bottom-left switch does this). */
 internal fun MainActivity.switchWindow() {
     textsTab = !textsTab; chatsScrollY = 0; flipAnim = true; showChats()
 }
@@ -340,18 +334,19 @@ internal fun MainActivity.windowSwitch(tellemUnread: Int, phoneUnread: Int): Vie
     gravity = Gravity.CENTER_VERTICAL
     background = round(menuBg, 28); elevation = dp(6).toFloat()
     setPadding(dp(5), dp(5), dp(5), dp(5))
+    // a tap anywhere on the pill (either side) switches window
+    isClickable = true
+    contentDescription = "Switch between $APP_NAME and Phone"
+    setOnClickListener { switchWindow() }
     fun seg(label: String, unread: Int, on: Boolean) = addView(LinearLayout(context).apply {
         gravity = Gravity.CENTER
         setPadding(dp(16), 0, dp(16), 0)
-        background = if (on) round(white, 23) else pressable()
-        isClickable = true
-        contentDescription = if (on) "$label window, showing" else "Switch to the $label window"
+        background = if (on) round(white, 23) else null
         addView(tv(label, 15f, if (on) ink else dim, true))
         if (!on && unread > 0) addView(tv(if (unread > 99) "99+" else "$unread", 11.5f, android.graphics.Color.WHITE, true).apply {
             gravity = Gravity.CENTER; minWidth = dp(20); setPadding(dp(5), dp(1), dp(5), dp(1))
             background = round(if (label == "Phone") smsGreen else blue, 10)
         }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(6) })
-        setOnClickListener { if (!on) switchWindow() }
     }, LinearLayout.LayoutParams(-2, -1))
     seg(APP_NAME, tellemUnread, !textsTab)
     seg("Phone", phoneUnread, textsTab)

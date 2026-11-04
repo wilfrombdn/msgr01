@@ -51,7 +51,7 @@ internal fun MainActivity.addCallRows(list: LinearLayout, q: String) {
     val all = (tellem + (phoneCalls ?: emptyList())).sortedByDescending { it.date }.filter { k ->
         q.isEmpty() || callName(k).lowercase().contains(q) || k.number?.contains(q) == true
     }.take(300)
-    for (k in all) list.addView(callRow(k))
+    addBatched(list, all, 66, q.isNotEmpty()) { k -> callRow(k) }
     if (all.isEmpty() && Phone.canReadCalls(this)) list.addView(tv(if (q.isEmpty()) "No calls yet" else "No calls match \"$search\"", 15.5f, dim)
         .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)) })
 }
@@ -192,4 +192,28 @@ internal fun MainActivity.contactCard(p: Phone.Person) {
         })
     })
     popup(p.name, "Call or text (through your carrier, not private)", col, "Close" to dim)
+}
+
+/**
+ * Fills [list] with one row per item, but only builds the first screenful (plus enough to reach where the list was scrolled to)
+ * right away; the rest follows in small batches. Building hundreds of rows in one go on the main thread is what made switching
+ * to Phone, opening Texts and backing out of a text chat feel slow. A search, or [all] = true, still builds everything at once.
+ */
+internal fun <T> MainActivity.addBatched(list: LinearLayout, items: List<T>, rowDp: Int, all: Boolean, make: (T) -> View) {
+    var next = 0
+    fun addUpTo(count: Int) {
+        val end = minOf(items.size, next + count)
+        while (next < end) list.addView(make(items[next++]))
+    }
+    addUpTo(if (all) items.size else maxOf(16, (chatsScrollY + resources.displayMetrics.heightPixels) / dp(rowDp) + 8))
+    if (next < items.size) {
+        val rest = object : Runnable {
+            override fun run() {
+                if (!list.isAttachedToWindow || (screen != Screen.CHATS && screen != Screen.TEXT_LIST)) return   // the screen was rebuilt or left
+                addUpTo(25)
+                if (next < items.size) list.post(this)
+            }
+        }
+        list.post(rest)
+    }
 }

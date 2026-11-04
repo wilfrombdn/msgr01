@@ -107,7 +107,7 @@ internal fun MainActivity.addTextRows(list: LinearLayout, q: String) {
     val ts = Texts.threads.filter { !it.spam && ((!it.code && !it.archived) || q.isNotEmpty()) && textMatches(it, q) }.sortedByDescending { it.id in pins }   // pinned first, then newest (list is already newest first)
     if (q.isEmpty() && folderPlace() == "top") folderRows(list)
     if (!savedTellemOnly() && !Texts.mixed(this)) savedWithMessages()?.takeIf { q.isEmpty() || "saved messages".contains(q) }?.let { list.addView(chatRow(it)) }
-    for (t in ts) list.addView(textRow(t, pins))
+    addBatched(list, ts, 72, q.isNotEmpty() || folderPlace() == "bottom") { t -> textRow(t, pins) }
     if (q.isEmpty() && folderPlace() == "bottom") folderRows(list)
     if (ts.isEmpty()) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
         .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })

@@ -21,9 +21,9 @@ import android.widget.ScrollView
  */
 internal fun MainActivity.fab(res: Int, onTap: () -> Unit) = ImageView(this).apply {
     setImageResource(res)
-    setColorFilter(if (dark) Color.WHITE else Color.BLACK)   // white in dark mode, black in light mode
+    setColorFilter(ink)            // icon: black in dark mode's white button, white in light mode's black button
     setPadding(dp(16), dp(16), dp(16), dp(16))
-    background = circle(blue)
+    background = circle(white)     // the button: white in dark mode, black in light mode
     elevation = dp(6).toFloat()
     setOnClickListener { onTap() }
     snapHold(this, res)
@@ -33,14 +33,30 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
     val ui = android.os.Handler(android.os.Looper.getMainLooper())
     var armed = false; var cancelled = false
     var sx = 0f; var sy = 0f
-    // held long enough: the icon turns into a camera and the button grows by two thirds
+    var grow: android.animation.ValueAnimator? = null
+    // Held long enough: the icon turns into a camera and the button grows by two thirds. It grows by really resizing (not by
+    // stretching a picture of itself), so the circle and the icon stay sharp the whole way. Quick: about a tenth of a second.
     fun morph(on: Boolean) {
         fab.setImageResource(if (on) R.drawable.ic_camera else res)
-        fab.pivotX = fab.width.toFloat(); fab.pivotY = fab.height.toFloat()   // grows up and left, stays on screen
-        val s = if (on) 5f / 3f else 1f
-        fab.animate().scaleX(s).scaleY(s).setDuration(150).start()
+        val lp = fab.layoutParams ?: return
+        grow?.cancel()
+        grow = android.animation.ValueAnimator.ofFloat(lp.width.toFloat(), dp(if (on) 93 else 56).toFloat()).apply {
+            duration = 110
+            addUpdateListener { a ->
+                val s = (a.animatedValue as Float).toInt()
+                lp.width = s; lp.height = s
+                val p = s * 16 / 56
+                fab.setPadding(p, p, p, p)
+                fab.layoutParams = lp
+            }
+            start()
+        }
     }
     val arm = Runnable { armed = true; fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); morph(true) }
+    fun outside(v: View, e: MotionEvent): Boolean {
+        val m = dp(8)   // a little slack so a shaky thumb doesn't cancel
+        return e.x < -m || e.y < -m || e.x > v.width + m || e.y > v.height + m
+    }
     fab.setOnTouchListener { v, e ->
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -49,14 +65,19 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
                 v.isPressed = true; ui.postDelayed(arm, 380)
             }
             MotionEvent.ACTION_MOVE ->
-                if (!armed && !cancelled && Math.hypot((e.rawX - sx).toDouble(), (e.rawY - sy).toDouble()) > dp(12)) {
-                    cancelled = true; ui.removeCallbacks(arm); v.isPressed = false; if (armed) morph(false)   // dragged off before it buzzed: neither a tap nor a snap
+                if (!cancelled) {
+                    if (armed) {
+                        // dragged off the button after it turned into a camera: back to normal, no snap
+                        if (outside(v, e)) { cancelled = true; armed = false; v.isPressed = false; morph(false) }
+                    } else if (Math.hypot((e.rawX - sx).toDouble(), (e.rawY - sy).toDouble()) > dp(12)) {
+                        cancelled = true; ui.removeCallbacks(arm); v.isPressed = false   // dragged off before it buzzed: neither a tap nor a snap
+                    }
                 }
             MotionEvent.ACTION_UP -> {
                 ui.removeCallbacks(arm); v.isPressed = false
-                if (armed) { morph(false); startSnap() } else if (!cancelled) v.performClick()
+                if (armed) { armed = false; morph(false); startSnap() } else if (!cancelled) v.performClick()
             }
-            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false; if (armed) morph(false) }
+            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false; if (armed) { armed = false; morph(false) } }
         }
         true
     }
