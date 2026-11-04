@@ -17,7 +17,7 @@ import android.provider.ContactsContract.Data as Dt
 object Phone {
     /** One row of call history: a normal phone call ([number]) or a Tellem call ([friend]). */
     class Call(val date: Long, val incoming: Boolean, val missed: Boolean, val seconds: Int, val number: String? = null, val friend: String? = null)
-    class Person(val id: Long, val name: String, val numbers: List<Pair<String, String>>, val photoUri: String? = null, val company: String = "", val email: String = "")   // numbers: (number, "Mobile"/"Home"…)
+    class Person(val id: Long, val name: String, val numbers: List<Pair<String, String>>, val photoUri: String? = null, val company: String = "", val email: String = "", val emails: List<String> = emptyList())   // numbers: (number, "Mobile"/"Home"…)
 
     fun canReadCalls(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
     fun canReadContacts(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
@@ -61,17 +61,17 @@ object Phone {
             }
         }
         // each contact's first email and company, for sorting and grouping
-        val emails = HashMap<Long, String>(); val companies = HashMap<Long, String>()
+        val emails = HashMap<Long, MutableList<String>>(); val companies = HashMap<Long, String>()
         runCatching {
             ctx.contentResolver.query(Dt.CONTENT_URI, arrayOf(Dt.CONTACT_ID, Dt.MIMETYPE, Dt.DATA1), "${Dt.MIMETYPE} IN (?,?)",
                 arrayOf(Email.CONTENT_ITEM_TYPE, Organization.CONTENT_ITEM_TYPE), null)?.use { c ->
                 while (c.moveToNext()) {
                     val v = c.getString(2)?.trim().orEmpty(); if (v.isEmpty()) continue
-                    if (c.getString(1) == Email.CONTENT_ITEM_TYPE) emails.putIfAbsent(c.getLong(0), v) else companies.putIfAbsent(c.getLong(0), v)
+                    if (c.getString(1) == Email.CONTENT_ITEM_TYPE) emails.getOrPut(c.getLong(0)) { ArrayList() }.let { if (v !in it) it += v } else companies.putIfAbsent(c.getLong(0), v)
                 }
             }
         }
-        return byId.map { (id, e) -> Person(id, e.first, e.second, photos[id], companies[id].orEmpty(), emails[id].orEmpty()) }
+        return byId.map { (id, e) -> Person(id, e.first, e.second, photos[id], companies[id].orEmpty(), emails[id]?.firstOrNull().orEmpty(), emails[id].orEmpty()) }
     }
 
     fun canWriteContacts(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.WRITE_CONTACTS) == PackageManager.PERMISSION_GRANTED

@@ -6,6 +6,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -55,42 +56,55 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
     fun small(s: String, color: Int, onClick: () -> Unit) = tv(s, 14f, color, true).apply {
         setPadding(dp(10), dp(8), dp(10), dp(8)); background = pressable(); setOnClickListener { onClick() }
     }
+    // Every box is the same width: the label and remove button sit inside the box, on its right.
+    fun shell() = LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        background = android.graphics.drawable.InsetDrawable(round(panel2, 12), 0, dp(5), 0, dp(5))
+    }
+    fun inside(f: EditText) { f.background = null; f.setPadding(dp(14), dp(14), dp(4), dp(14)) }
+    fun leadIcon(res: Int, show: Boolean) = icon(res, dim, 22, 9).apply { if (!show) visibility = View.INVISIBLE }
     lateinit var redraw: () -> Unit
     redraw = {
         phoneBox.removeAllViews()
         phones.forEachIndexed { i, e ->
-            (e.field.parent as? LinearLayout)?.removeView(e.field)
+            (e.field.parent as? ViewGroup)?.removeView(e.field)
+            inside(e.field)
             phoneBox.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(icon(R.drawable.ic_call, if (i == 0) dim else android.graphics.Color.TRANSPARENT, 22, 9))
-                addView(e.field, LinearLayout.LayoutParams(0, -2, 1f))
-                addView(small(labelOf(e.type), blue) {
-                    val at = PHONE_LABELS.indexOfFirst { it.first == e.type }
-                    e.type = PHONE_LABELS[(at + 1) % PHONE_LABELS.size].first; redraw()   // Mobile, Home, Work, Other, then round again
-                })
-                addView(icon(R.drawable.ic_close, dim, 18, 8) { if (phones.size > 1) phones.remove(e) else e.field.setText(""); redraw() })
+                addView(leadIcon(R.drawable.ic_call, i == 0))
+                addView(shell().apply {
+                    addView(e.field, LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(small(labelOf(e.type), blue) {
+                        val at = PHONE_LABELS.indexOfFirst { it.first == e.type }
+                        e.type = PHONE_LABELS[(at + 1) % PHONE_LABELS.size].first; redraw()   // Mobile, Home, Work, Other, then round again
+                    })
+                    addView(icon(R.drawable.ic_close, dim, 18, 8) { if (phones.size > 1) phones.remove(e) else e.field.setText(""); redraw() })
+                }, LinearLayout.LayoutParams(0, -2, 1f))
             }, LinearLayout.LayoutParams(-1, -2))
         }
         emailBox.removeAllViews()
         emails.forEachIndexed { i, f ->
-            (f.parent as? LinearLayout)?.removeView(f)
+            (f.parent as? ViewGroup)?.removeView(f)
+            inside(f)
             emailBox.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(icon(R.drawable.ic_mail, if (i == 0) dim else android.graphics.Color.TRANSPARENT, 22, 9))
-                addView(f, LinearLayout.LayoutParams(0, -2, 1f))
-                addView(icon(R.drawable.ic_close, dim, 18, 8) { if (emails.size > 1) emails.remove(f) else f.setText(""); redraw() })
+                addView(leadIcon(R.drawable.ic_mail, i == 0))
+                addView(shell().apply {
+                    addView(f, LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(icon(R.drawable.ic_close, dim, 18, 8) { if (emails.size > 1) emails.remove(f) else f.setText(""); redraw() })
+                }, LinearLayout.LayoutParams(0, -2, 1f))
             }, LinearLayout.LayoutParams(-1, -2))
         }
     }
     redraw()
 
     // the big circle at the top: their photo if they have one (tap to choose another), else the initials as you type the name
-    val avatarHolder = FrameLayout(this)
+    val avatarHolder = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
     fun refreshAvatar() {
         val name = "${first.text} ${last.text}".trim()
         avatarHolder.removeAllViews()
-        avatarHolder.addView(avatar(name.ifEmpty { "?" }, 96, newPhoto ?: detail?.photo), FrameLayout.LayoutParams(dp(96), dp(96), Gravity.CENTER))
-        avatarHolder.addView(tv("Tap to add a photo", 12.5f, blue, true).apply { gravity = Gravity.CENTER }, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+        avatarHolder.addView(avatar(name.ifEmpty { "?" }, 96, newPhoto ?: detail?.photo))
+        avatarHolder.addView(tv("Tap to add a photo", 13.5f, blue, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) }, LinearLayout.LayoutParams(-2, -2))
     }
     avatarHolder.setOnClickListener {
         contactPhotoDone = { jpeg -> newPhoto = jpeg; refreshAvatar() }
@@ -141,14 +155,14 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
         addView(icon(R.drawable.ic_company, dim, 22, 9).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(4) })
         addView(company, LinearLayout.LayoutParams(0, -2, 1f))
     }
-    val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(24)) }
-    col.addView(avatarHolder, LinearLayout.LayoutParams(-1, dp(116)))
+    val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(8), dp(14), dp(24)) }
+    col.addView(avatarHolder, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8); bottomMargin = dp(14) })
     col.addView(nameRow())
-    col.addView(companyRow())
-    col.addView(phoneBox)
-    col.addView(small("+  Add phone", blue) { newPhone("", P.TYPE_MOBILE); redraw() }.apply { setPadding(dp(56), dp(8), dp(10), dp(12)) })
-    col.addView(emailBox)
-    col.addView(small("+  Add email", blue) { newEmail(""); redraw() }.apply { setPadding(dp(56), dp(8), dp(10), dp(12)) })
+    col.addView(companyRow(), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+    col.addView(phoneBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+    col.addView(small("+  Add phone", blue) { newPhone("", P.TYPE_MOBILE); redraw() }.apply { setPadding(dp(54), dp(8), dp(10), dp(8)) })
+    col.addView(emailBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+    col.addView(small("+  Add email", blue) { newEmail(""); redraw() }.apply { setPadding(dp(54), dp(8), dp(10), dp(8)) })
     val saveBtn = tv("SAVE", 15f, white, true).apply {
         setPadding(dp(18), dp(10), dp(18), dp(10)); background = round(panel2, 20); setOnClickListener { save() }
     }
@@ -163,11 +177,15 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
 
 /**
  * The contact pop-up: Edit contact first (only when it's a saved contact and [edit] is true, i.e. opened from the Contacts tab),
- * then each number with Call and Text. A number that isn't saved gets "Add to contacts" instead.
+ * then everything saved about them: company, each number (Call, Text; hold a number to copy it) and each email (tap to write
+ * to them in an email app of your choice; hold to copy it). A number that isn't saved gets "Add to contacts" instead.
  */
 internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     var dialog: android.app.Dialog? = null
+    fun copy(what: String, value: String) {
+        getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText(what, value)); toast("Copied")
+    }
     if (p.id == 0L || edit) col.addView(LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(0, dp(8), 0, dp(10)); background = pressable(); isClickable = true
@@ -178,6 +196,15 @@ internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
             if (p.id != 0L) showEditContact(p) { showChats() } else showAddContact(p.numbers.firstOrNull()?.first) { showChats() }
         }
     })
+    if (p.company.isNotEmpty()) col.addView(LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(6))
+        setOnLongClickListener { copy("company", p.company); true }
+        addView(icon(R.drawable.ic_company, dim, 22, 0))
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0)
+            addView(tv(p.company, 16f, white)); addView(tv("Company", 13f, dim))
+        })
+    })
     for ((n, label) in p.numbers) col.addView(LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(0, dp(6), 0, dp(6))
@@ -185,6 +212,8 @@ internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
             orientation = LinearLayout.VERTICAL
             addView(tv(n, 16f, white))
             if (label.isNotEmpty()) addView(tv(label, 13f, dim))
+            background = pressable(); isLongClickable = true
+            setOnLongClickListener { copy("number", n); true }   // hold the number to copy it
         }, LinearLayout.LayoutParams(0, -2, 1f))
         addView(icon(R.drawable.ic_call, white, 22) { PhoneCalls.dial(this@contactCard, n) })
         addView(icon(R.drawable.ic_send, smsGreen, 22) {
@@ -192,7 +221,22 @@ internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
             Messenger.run({ id = Texts.threadFor(this@contactCard, listOf(n)) }, { showTextThread(id, listOf(n)) })
         })
     })
-    popup(p.name, "Call or text (through your carrier, not private)", col, "Close" to dim, dialogOut = { dialog = it })
+    for (m in p.emails) col.addView(LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, dp(6), 0, dp(6)); background = pressable(); isClickable = true
+        addView(icon(R.drawable.ic_mail, dim, 22, 0))
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0)
+            addView(tv(m, 16f, blue).apply { paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG })   // a link
+            addView(tv("Email", 13f, dim))
+        })
+        setOnClickListener {   // asks which email app to use, then starts a new message to them
+            val i = android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:" + android.net.Uri.encode(m)))
+            runCatching { startActivity(android.content.Intent.createChooser(i, "Email $m with")) }.onFailure { toast("No email app found") }
+        }
+        setOnLongClickListener { copy("email", m); true }
+    })
+    popup(p.name, "Hold a number or email to copy it. Calls and texts go through your carrier, not private.", col, "Close" to dim, dialogOut = { dialog = it })
 }
 
 /** Tapping a phone call in the Calls list: the contact's numbers with Call and Text (no editing here), or the bare number with "Add to contacts". */

@@ -173,6 +173,10 @@ class ScreenshotTest {
         Texts.setMixed(app, false)
         call(a, "showSettings"); shoot(a, "t4-settings")
         call(a, "showNewText"); shoot(a, "t5-new-text")
+        call(a, "showAddContact", "", { }); shoot(a, "t8-add-contact")
+        val detail = Phone.Detail(1, 1, "Jordan", "Kim", "Jordan Kim", 1, "Acme Co", null,
+            listOf(Phone.PhoneRow(1, "(555) 123-4567", 2), Phone.PhoneRow(2, "(555) 987-6543", 3)), listOf(Phone.EmailRow(1, "jordan@acme.com")))
+        call(a, "showContactForm", detail, "", { }); shoot(a, "t9-edit-contact")
         Texts.threads = Texts.threads + listOf(
             Texts.Thread(13, listOf("+15553334444"), "USPS: package could not be delivered, update at usps-redeliver.top", now - 60_000, 1, spam = true),
             Texts.Thread(14, listOf("+15556667777"), "hi", now - 9_000_000, 0, spam = true, blocked = true),

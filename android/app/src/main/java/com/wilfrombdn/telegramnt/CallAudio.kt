@@ -62,6 +62,22 @@ object CallAudio {
         } else am.isSpeakerphoneOn = on
     }
 
+    /**
+     * Puts the phone into call-audio mode early, while the call is still ringing, so the Speaker button already moves the ringing
+     * tone to the loudspeaker (before, Speaker only took effect once the other person answered). [release] undoes it.
+     */
+    fun prepare(ctx: Context) {
+        val am = ctx.getSystemService(AudioManager::class.java)
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
+        setSpeaker(ctx, speaker)
+    }
+
+    fun release(ctx: Context) {
+        val am = ctx.getSystemService(AudioManager::class.java)
+        runCatching { am.mode = AudioManager.MODE_NORMAL; speakerOff(am) }
+        speaker = false
+    }
+
     private fun run(ctx: Context, k: Core.Call) {
         val core = Messenger.core
         val am = ctx.getSystemService(AudioManager::class.java)

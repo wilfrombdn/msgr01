@@ -55,10 +55,20 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
     // Like a balloon: it slowly fills while you hold, then pops out to full size with a bounce and the camera appears.
     // Let go early or drag away and the air goes back out.
     val deflate = { sizeTo(base, 140, android.view.animation.DecelerateInterpolator()) }
+    // When the hold completes and it pops into a camera, Snap opens by itself a moment later (no need to let go).
+    var launched = false
+    val launch = Runnable {
+        if (armed && !cancelled) {
+            launched = true; armed = false; fab.isPressed = false
+            startSnap()
+            ui.postDelayed({ fab.setImageResource(res); deflate() }, 450)   // the camera covers the screen; the button goes back to normal behind it
+        }
+    }
     val arm = Runnable {
         armed = true; fab.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         fab.setImageResource(R.drawable.ic_camera)
         sizeTo(big, 320, android.view.animation.OvershootInterpolator(3.2f))
+        ui.postDelayed(launch, 280)   // long enough to see it pop
     }
     fun cancelArmed() { armed = false; fab.setImageResource(res); deflate() }
     fun outside(v: View, e: MotionEvent): Boolean {
@@ -69,24 +79,26 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 v.parent?.requestDisallowInterceptTouchEvent(true)
-                sx = e.rawX; sy = e.rawY; armed = false; cancelled = false
+                sx = e.rawX; sy = e.rawY; armed = false; cancelled = false; launched = false
                 v.isPressed = true; ui.postDelayed(arm, 380)
                 sizeTo(swell, 380, android.view.animation.AccelerateInterpolator(1.3f))   // starts filling right away
             }
             MotionEvent.ACTION_MOVE ->
-                if (!cancelled) {
+                if (!cancelled && !launched) {
                     if (armed) {
                         // dragged off the button after it turned into a camera: back to normal, no snap
-                        if (outside(v, e)) { cancelled = true; v.isPressed = false; cancelArmed() }
+                        if (outside(v, e)) { cancelled = true; ui.removeCallbacks(launch); v.isPressed = false; cancelArmed() }
                     } else if (Math.hypot((e.rawX - sx).toDouble(), (e.rawY - sy).toDouble()) > dp(12)) {
                         cancelled = true; ui.removeCallbacks(arm); v.isPressed = false; deflate()   // dragged off before it popped: neither a tap nor a snap
                     }
                 }
             MotionEvent.ACTION_UP -> {
                 ui.removeCallbacks(arm); v.isPressed = false
-                if (armed) { cancelArmed(); startSnap() } else { if (!cancelled) deflate(); if (!cancelled) v.performClick() }
+                if (launched) { /* the camera is already open */ }
+                else if (armed) { ui.removeCallbacks(launch); cancelArmed(); startSnap() }   // let go just before it opened by itself
+                else { if (!cancelled) deflate(); if (!cancelled) v.performClick() }
             }
-            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false; if (armed) cancelArmed() else deflate() }
+            MotionEvent.ACTION_CANCEL -> { ui.removeCallbacks(arm); v.isPressed = false; if (!launched) { ui.removeCallbacks(launch); if (armed) cancelArmed() else deflate() } }
         }
         true
     }

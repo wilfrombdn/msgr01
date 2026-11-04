@@ -21,9 +21,7 @@ internal fun MainActivity.showSettings() {
     connLabel = null
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     col.addView(gap(8))
-    col.addView(settingRow("Appearance", "Bubble colours, text size, corners") { showAppearance() })
-    col.addView(settingSwitch("Animations", UiPrefs.animations(this)) { on -> UiPrefs.setAnimations(this, on) })
-    col.addView(settingNote("Sliding between screens and tabs, and the round button growing into a camera. Off: everything changes instantly."))
+    col.addView(settingRow("Appearance", "Bubble colours, text size, corners, animations") { showAppearance() })
     col.addView(settingRow("Storage", "Photos, videos and files on this phone") { showStorage() })
     val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("")
     col.addView(settingRow("Check for updates", "You have $APP_NAME $ver") { checkUpdateNow() })
@@ -199,6 +197,8 @@ internal fun MainActivity.showAppearance() {
     preview.addView(bubble(demo, Msg("a", false, "Hey! Did you pick a colour yet?", now - 120_000, Msg.RECEIVED)))
     preview.addView(bubble(demo, Msg("b", true, "Trying a few now", now, Msg.SENT)))
     col.addView(preview)
+    col.addView(settingSwitch("Animations", UiPrefs.animations(this)) { on -> UiPrefs.setAnimations(this, on) })
+    col.addView(settingNote("Sliding between screens and tabs, and the round button growing into a camera. Off: everything changes instantly."))
 
     fun section(t: String) = col.addView(tv(t, 14f, dim, true).apply { setPadding(dp(20), dp(20), dp(20), dp(8)) })
     fun chips(vararg items: Pair<String, Boolean>, onPick: (Int) -> Unit) = col.addView(LinearLayout(this).apply {

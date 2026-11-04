@@ -298,11 +298,14 @@ object Messenger {
         if (k.phase != Core.Call.INCOMING) nm.cancel(INCOMING_NOTE)
         // the caller hears a ringing tone until they answer
         if (k.outgoing && k.phase == Core.Call.RINGING) {
-            if (ringback == null) ringback = runCatching { android.media.ToneGenerator(android.media.AudioManager.STREAM_VOICE_CALL, 70).apply { startTone(android.media.ToneGenerator.TONE_SUP_RINGTONE) } }.getOrNull()
+            if (ringback == null) {
+                runCatching { CallAudio.prepare(app) }   // so the Speaker button works while it is still ringing
+                ringback = runCatching { android.media.ToneGenerator(android.media.AudioManager.STREAM_VOICE_CALL, 100).apply { startTone(android.media.ToneGenerator.TONE_SUP_RINGTONE) } }.getOrNull()
+            }
         } else { ringback?.release(); ringback = null }
         if (k.phase == Core.Call.ENDED) {
             if (!locked) Destruct.touch(app)   // a call (even with the app in the background) is the phone in use
-            CallAudio.stop()
+            CallAudio.stop(); CallAudio.release(app)
             app.stopService(Intent(app, CallService::class.java))
         }
         callListeners.forEach { it(k) }
