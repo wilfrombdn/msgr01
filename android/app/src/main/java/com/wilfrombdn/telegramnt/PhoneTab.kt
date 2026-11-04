@@ -144,7 +144,7 @@ internal fun MainActivity.addContactRows(list: LinearLayout, q: String) {
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 background = pressable()
                 setOnClickListener { contactCard(p) }
-                addView(contactAvatar(p.name, p.photoUri, 44))
+                addView(contactAvatar(p.name, p.photoUri, 44, p.numbers.firstOrNull()?.first?.let { numberSeed(it) } ?: "sms:n${p.name}"))
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0)
                     addView(tv(p.name, 16f, white).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })

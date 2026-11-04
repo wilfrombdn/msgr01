@@ -36,4 +36,10 @@ cd "$SITE" && git add telegramnt && git commit -q -m "Tellem $NAME" && git push 
 cd "$REPO" && git add -A && git commit -q -m "$NAME" && git push -q
 echo "== live check"
 until curl -s https://wilfrombdn.github.io/telegramnt/update.json | grep -q "\"$NAME\""; do sleep 5; done
-cd android && UPDATE_CHECK=1 bash ./gradlew testDebugUnitTest --tests '*CryptoTest.publishedUpdateIsConsistent' -q && echo "== $NAME is live and verified"
+# Fast live check (replaces compiling the debug app just to run one test): the live update.json must name this version, and the
+# APK it points to must download and match its sha256 and the file we just built.
+LIVE=$(curl -s https://wilfrombdn.github.io/telegramnt/update.json)
+grep -q "\"code\": $CODE" <<< "$LIVE" || { echo "LIVE CHECK FAILED: update.json has the wrong version"; exit 1; }
+GOT=$(curl -s "https://wilfrombdn.github.io/telegramnt/tellem-$NAME.apk" | sha256sum | cut -d' ' -f1)
+[ "$GOT" = "$SHA" ] && grep -q "\"sha256\": \"$SHA\"" <<< "$LIVE" || { echo "LIVE CHECK FAILED: the published APK doesn't match"; exit 1; }
+echo "== $NAME is live and verified"

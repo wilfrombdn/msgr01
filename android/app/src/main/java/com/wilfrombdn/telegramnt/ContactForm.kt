@@ -264,8 +264,8 @@ internal fun MainActivity.restoreContactForm() {
  * A phone contact's picture for the lists: their photo if they have one (loaded in the background, the initials show meanwhile),
  * else the initials circle. Tellem friends keep using their Tellem profile picture everywhere else; this is only for phone contacts.
  */
-internal fun MainActivity.contactAvatar(name: String, photoUri: String?, sizeDp: Int): View {
-    if (photoUri == null) return avatar(name, sizeDp)
+internal fun MainActivity.contactAvatar(name: String, photoUri: String?, sizeDp: Int, seed: String? = null): View {
+    if (photoUri == null) return avatar(name, sizeDp, null, seed)
     fun round(b: android.graphics.Bitmap) = android.widget.ImageView(this).apply {
         setImageBitmap(b); scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
         outlineProvider = object : android.view.ViewOutlineProvider() {
@@ -273,8 +273,8 @@ internal fun MainActivity.contactAvatar(name: String, photoUri: String?, sizeDp:
         }
         clipToOutline = true
     }
-    if (contactThumbs.containsKey(photoUri)) return contactThumbs[photoUri]?.let { round(it) }?.apply { layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp)) } ?: avatar(name, sizeDp)
-    val holder = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp)); addView(avatar(name, sizeDp)) }
+    if (contactThumbs.containsKey(photoUri)) return contactThumbs[photoUri]?.let { round(it) }?.apply { layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp)) } ?: avatar(name, sizeDp, null, seed)
+    val holder = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp)); addView(avatar(name, sizeDp, null, seed)) }
     var loaded: android.graphics.Bitmap? = null
     Messenger.run({
         loaded = runCatching { contentResolver.openInputStream(android.net.Uri.parse(photoUri))?.use { android.graphics.BitmapFactory.decodeStream(it) } }.getOrNull()
