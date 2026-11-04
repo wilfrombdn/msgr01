@@ -98,10 +98,35 @@ class PhoneFormatWatcher : android.text.TextWatcher {
             val out = e.toString().split(',').mapIndexed { i, part ->
                 val p = part.trim()
                 val digits = p.filter { it.isDigit() || it == '+' }
-                val shown = if (digits.length < 4 || p.any { it.isLetter() }) p else (android.telephony.PhoneNumberUtils.formatNumber(digits, country) ?: p)
+                val shown = if (digits.isEmpty() || p.any { it.isLetter() }) p else PhoneFormat.pretty(digits, country)
                 if (i == 0) shown else " $shown"
             }.joinToString(",")
             if (out != e.toString()) { e.replace(0, e.length, out) }
         } finally { busy = false }
     }
+}
+
+/** How typed phone numbers look: +1 (555) 123-4567 for US/Canada numbers; other countries use the phone's own style. */
+object PhoneFormat {
+    /** [raw] = digits (and a leading +) as typed. Partial numbers format as far as they go: "+1 (555) 12". */
+    fun pretty(raw: String, country: String = java.util.Locale.getDefault().country): String {
+        val plus = raw.trim().startsWith("+")
+        val d = raw.filter { it.isDigit() }
+        if (d.isEmpty()) return if (plus) "+" else ""
+        val nanp = when {
+            plus -> d.startsWith("1")
+            d.length > 10 && d.startsWith("1") -> true
+            else -> country == "US" || country == "CA"
+        }
+        if (!nanp) return if (d.length < 4) raw.trim() else (android.telephony.PhoneNumberUtils.formatNumber(if (plus) "+$d" else d, country) ?: raw.trim())
+        val nat = when { plus -> d.drop(1); d.length > 10 && d.startsWith("1") -> d.drop(1); else -> d }.take(10)
+        if (!plus && nat.length < 4 && d.length <= 10) return nat       // 911, 411, 211 and the first digits: leave alone
+        if (nat.isEmpty()) return "+1"
+        val a = nat.take(3); val b = nat.drop(3).take(3); val c = nat.drop(6)
+        val body = when { nat.length <= 3 -> "($a"; nat.length <= 6 -> "($a) $b"; else -> "($a) $b-$c" }
+        return "+1 $body"
+    }
+
+    /** What to dial: digits, and a + if there was one. */
+    fun dialable(shown: String): String = shown.trim().let { s -> (if (s.startsWith("+")) "+" else "") + s.filter { it.isDigit() } }
 }

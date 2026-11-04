@@ -242,6 +242,7 @@ class MainActivity : Activity() {
     private fun handle(i: Intent?) {
         if (i?.data?.scheme in setOf("sms", "smsto", "mms", "mmsto")) return openTextIntent(i!!)
         i?.getLongExtra("textThread", 0L)?.takeIf { it > 0 }?.let { return showTextThread(it) }
+        i?.getStringExtra("addContact")?.let { n -> return showAddContact(n) { showChats() } }
         if (i?.action == Intent.ACTION_SEND || i?.action == Intent.ACTION_SEND_MULTIPLE) return shared(i)
         i?.getStringExtra("chat")?.let { u -> if (Messenger.core.contact(u) != null) showChat(u) }
         i?.getStringExtra("group")?.let { g -> if (Messenger.core.group(g) != null) showGroup(g) }
@@ -416,7 +417,7 @@ class MainActivity : Activity() {
         if (screen == "textlist") return showTextList()
         if (screen == "textspam") return showTextSection(textSectionKind)
         if (!Messenger.signedIn) {
-            if (screen != "welcome" && screen != "signup" && screen != "login" && screen != "newtext") showWelcome()
+            if (screen != "welcome" && screen != "signup" && screen != "login" && screen != "newtext" && screen != "addcontact") showWelcome()
             return
         }
         when (screen) {
@@ -1447,7 +1448,8 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(8), dp(14), dp(8))
             setOnClickListener { showTextThread(t.id) }
             setOnLongClickListener { v -> dropdown(v, Gravity.END, (if (pinned) "Unpin" else "Pin to top") to { Texts.setPinned(this@MainActivity, t.id, !pinned) },
-                (if (t.archived) "Unarchive" else "Archive") to { Texts.setArchived(this@MainActivity, t.id, !t.archived); toast(if (t.archived) "Moved back to your texts" else "Archived") }); true }
+                (if (t.archived) "Unarchive" else "Archive") to { Texts.setArchived(this@MainActivity, t.id, !t.archived); toast(if (t.archived) "Moved back to your texts" else "Archived") },
+                (if (t.spam) "Not spam" else "Move to spam") to { Texts.markSpam(this@MainActivity, t.id, !t.spam); toast(if (t.spam) "Moved back to your texts" else "Moved to spam") }); true }
         }
         row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54))   // a bare number gets "#", not "+5"
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
@@ -1469,8 +1471,10 @@ class MainActivity : Activity() {
                 if (i == 1) Texts.deleteThread(this, t.id) else redraw()
             }
         }, onPin = {
-            if (t.spam) { Texts.markSpam(this, t.id, false); toast("Moved back to your texts") } else { Texts.markSpam(this, t.id, true); toast("Moved to spam") }
-        }, pinLabel = if (t.spam) "Not spam" else "Spam", directRight = true)
+            when { t.spam -> { Texts.markSpam(this, t.id, false); toast("Moved back to your texts") }
+                t.archived -> { Texts.setArchived(this, t.id, false); toast("Moved back to your texts") }
+                else -> { Texts.setArchived(this, t.id, true); toast("Archived") } }
+        }, pinLabel = if (t.spam) "Not spam" else if (t.archived) "Unarchive" else "Archive", directRight = true)
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(swipe, LinearLayout.LayoutParams(-1, -2))

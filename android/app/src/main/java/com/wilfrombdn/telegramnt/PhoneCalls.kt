@@ -260,7 +260,7 @@ class PhoneCallActivity : Activity() {
             return
         }
         if (keypad) {
-            root.addView(keypad(62, 8) { k -> c.playDtmfTone(k[0]); root.postDelayed({ c.stopDtmfTone() }, 160) })
+            root.addView(keypad(62, 8, { k -> c.playDtmfTone(k[0]); root.postDelayed({ c.stopDtmfTone() }, 160) }))
         } else {
             root.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER
@@ -296,40 +296,64 @@ class PhoneCallActivity : Activity() {
 
 /** The dial pad. Android opens it for "dial this number" links, and Tellem's Phone tab opens it. */
 class DialerActivity : Activity() {
-    private val digits = StringBuilder()
+    private val digits = StringBuilder()   // what was pressed: digits and a leading +
     private lateinit var shown: TextView
+    private lateinit var actions: View
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.TRANSPARENT
-        intent?.data?.takeIf { it.scheme == "tel" }?.schemeSpecificPart?.let { digits.append(it) }
+        intent?.data?.takeIf { it.scheme == "tel" }?.schemeSpecificPart?.let { digits.append(PhoneFormat.dialable(it)) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; fitsSystemWindows = true
             setBackgroundColor(0xFF141414.toInt())
         }
-        shown = TextView(this).apply { textSize = 36f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; maxLines = 1; minHeight = dp(72); setPadding(dp(16), dp(8), dp(16), dp(8)) }
+        root.addView(android.widget.ImageView(this).apply {
+            setImageResource(R.drawable.ic_back); setColorFilter(Color.WHITE); setPadding(dp(14), dp(14), dp(14), dp(14))
+            setOnClickListener { finish() }
+        }, LinearLayout.LayoutParams(dp(52), dp(52)).apply { gravity = Gravity.START; topMargin = dp(4); leftMargin = dp(4) })
         root.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+        shown = TextView(this).apply { setTextColor(Color.WHITE); gravity = Gravity.CENTER; maxLines = 1; minHeight = dp(64); setPadding(dp(16), dp(4), dp(16), dp(4)) }
         root.addView(shown, LinearLayout.LayoutParams(-1, -2))
-        root.addView(keypad(74, 9) { k -> digits.append(k); refresh() })
+        // appear once there is a number: save it as a contact, or text it
+        actions = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            fun chip(label: String, go: () -> Unit) = addView(TextView(context).apply {
+                text = label; setTextColor(Color.WHITE); textSize = 14f; gravity = Gravity.CENTER
+                setPadding(dp(16), dp(10), dp(16), dp(10))
+                background = GradientDrawable().apply { setColor(0x14FFFFFF); setStroke(dp(1), 0x40FFFFFF); cornerRadius = dp(22).toFloat() }
+                setOnClickListener { go() }
+            }, LinearLayout.LayoutParams(-2, -2).apply { setMargins(dp(6), 0, dp(6), 0) })
+            chip("＋  Create contact") {
+                startActivity(Intent(this@DialerActivity, MainActivity::class.java).putExtra("addContact", PhoneFormat.pretty(digits.toString())))
+            }
+            chip("💬  Send message") {
+                startActivity(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", PhoneFormat.dialable(digits.toString()), null)).setPackage(packageName))
+            }
+        }
+        root.addView(actions, LinearLayout.LayoutParams(-2, dp(48)).apply { bottomMargin = dp(12) })
+        root.addView(keypad(74, 8, { k -> digits.append(k); refresh() }) { digits.append("+"); refresh() })
+        // call button centred under the keypad; backspace on its right (a same-size gap keeps the call button in the middle)
         root.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            addView(View(context), LinearLayout.LayoutParams(dp(72), 1))
-            addView(circle("✆", 76, 0xFF2EAD5B.toInt()) { call() }, LinearLayout.LayoutParams(dp(76), dp(76)).apply { setMargins(dp(24), dp(12), dp(24), dp(12)) })
+            addView(View(context), LinearLayout.LayoutParams(dp(74), dp(74)).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
+            addView(circle("✆", 74, 0xFF2EAD5B.toInt()) { call() }, LinearLayout.LayoutParams(dp(74), dp(74)).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
             addView(TextView(context).apply {
-                text = "⌫"; textSize = 26f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                text = "⌫"; textSize = 26f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER
                 setOnClickListener { if (digits.isNotEmpty()) digits.setLength(digits.length - 1); refresh() }
                 setOnLongClickListener { digits.setLength(0); refresh(); true }
-            }, LinearLayout.LayoutParams(dp(72), dp(72)))
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(32) })
-        root.addView(View(this), LinearLayout.LayoutParams(1, 0, 0.3f))
+            }, LinearLayout.LayoutParams(dp(74), dp(74)).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
+        }, LinearLayout.LayoutParams(-1, -2))
+        root.addView(View(this), LinearLayout.LayoutParams(1, 0, 0.8f))
         setContentView(root)
         refresh()
     }
 
     private fun refresh() {
         val raw = digits.toString()
-        shown.text = if (raw.length >= 4 && raw.all { it.isDigit() || it == '+' }) (android.telephony.PhoneNumberUtils.formatNumber(raw, java.util.Locale.getDefault().country) ?: raw) else raw
-        shown.textSize = if (raw.length > 14) 24f else if (raw.length > 10) 30f else 36f
+        shown.text = PhoneFormat.pretty(raw)
+        shown.textSize = if (shown.text.length > 17) 26f else if (shown.text.length > 14) 30f else 34f
+        actions.visibility = if (raw.isEmpty()) View.INVISIBLE else View.VISIBLE
     }
 
     private fun call() {
@@ -353,7 +377,7 @@ class DialerActivity : Activity() {
 private val KEY_LETTERS = mapOf("2" to "ABC", "3" to "DEF", "4" to "GHI", "5" to "JKL", "6" to "MNO", "7" to "PQRS", "8" to "TUV", "9" to "WXYZ", "0" to "+")
 
 /** A phone keypad: four rows of three round keys with letters under the digits. [size] and [gap] are in dp. */
-private fun Activity.keypad(size: Int, gap: Int, onKey: (String) -> Unit): LinearLayout = LinearLayout(this).apply {
+private fun Activity.keypad(size: Int, gap: Int, onKey: (String) -> Unit, onPlus: (() -> Unit)? = null): LinearLayout = LinearLayout(this).apply {
     orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
     for (row in listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("*", "0", "#"))) {
         addView(LinearLayout(context).apply {
@@ -364,6 +388,7 @@ private fun Activity.keypad(size: Int, gap: Int, onKey: (String) -> Unit): Linea
                 addView(TextView(context).apply { text = k; setTextColor(Color.WHITE); textSize = if (size >= 70) 30f else 24f; gravity = Gravity.CENTER; includeFontPadding = false })
                 if (k in KEY_LETTERS) addView(TextView(context).apply { text = KEY_LETTERS[k]; setTextColor(0x99FFFFFF.toInt()); textSize = 9f; letterSpacing = 0.15f; gravity = Gravity.CENTER; includeFontPadding = false })
                 setOnClickListener { onKey(k) }
+                if (k == "0" && onPlus != null) setOnLongClickListener { onPlus(); true }   // hold 0 for +
             }, LinearLayout.LayoutParams(dp(size), dp(size)).apply { setMargins(dp(gap), dp(gap), dp(gap), dp(gap)) })
         })
     }
