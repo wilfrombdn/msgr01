@@ -312,7 +312,7 @@ internal fun MainActivity.dropdown(anchor: View, side: Int, vararg items: Pair<S
  * The app's own pop-up (instead of Android's): title, optional text or [content],
  * and buttons on the right. [onButton] gets the index of the button tapped.
  */
-internal fun MainActivity.popup(title: String, message: String?, content: View?, vararg buttons: Pair<String, Int>, onButton: (Int) -> Unit = {}) {
+internal fun MainActivity.popup(title: String, message: String?, content: View?, vararg buttons: Pair<String, Int>, dialogOut: ((android.app.Dialog) -> Unit)? = null, onButton: (Int) -> Unit = {}) {
     val d = android.app.Dialog(this)
     d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
     val col = LinearLayout(this).apply {
@@ -334,6 +334,7 @@ internal fun MainActivity.popup(title: String, message: String?, content: View?,
     d.setContentView(col)
     d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
     d.window?.setLayout(minOf((resources.displayMetrics.widthPixels * 0.86).toInt(), dp(400)), ViewGroup.LayoutParams.WRAP_CONTENT)
+    dialogOut?.invoke(d)
     d.show()
 }
 

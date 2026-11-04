@@ -70,7 +70,7 @@ internal fun MainActivity.callRow(k: Phone.Call): View {
         background = pressable()
         setOnClickListener {
             k.friend?.let { u -> Messenger.core.contact(u)?.takeIf { it.canChat }?.let { callFriend(it) } ?: toast("Can't call them on $APP_NAME") }
-                ?: k.number?.let { PhoneCalls.dial(this@callRow, it) }
+                ?: k.number?.let { callCard(it) }
         }
         setOnLongClickListener {
             val n = k.number
@@ -147,13 +147,23 @@ internal fun MainActivity.addContactRows(list: LinearLayout, q: String) {
 }
 
 /** New contact, made right here (name, number, email) and saved to the phone's contacts. [number] pre-fills it. */
-internal fun MainActivity.showAddContact(number: String?, back: () -> Unit) {
+internal fun MainActivity.showAddContact(number: String?, back: () -> Unit) = showContactForm(null, null, number, back)
+
+/** Edit a contact in the same screen as "New contact", filled in; Save changes it on the phone, Cancel leaves it as it was. */
+internal fun MainActivity.showEditContact(p: Phone.Person, back: () -> Unit) {
+    var d: Phone.Detail? = null
+    Messenger.run({ d = Phone.detail(this, p.id) }, { d?.let { showContactForm(p, it, null, back) } ?: toast("Couldn't open that contact") }) { toast("Couldn't open that contact") }
+}
+
+private fun MainActivity.showContactForm(editing: Phone.Person?, detail: Phone.Detail?, number: String?, back: () -> Unit) {
     screen = Screen.ADD_CONTACT
     addContactBack = back
-    val first = field("First name").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
-    val last = field("Last name").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
-    val phone = field("Phone number", number.orEmpty()).apply { inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher()) }
-    val mail = field("Email (optional)").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
+    val given = detail?.let { if (it.given.isBlank() && it.family.isBlank()) it.display else it.given }.orEmpty()
+    val first = field("First name", given).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
+    val last = field("Last name", detail?.family.orEmpty()).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
+    val phone = field(if (detail != null) "Phone number(s), separated by commas" else "Phone number",
+        detail?.phones?.joinToString(", ") { it.number } ?: number.orEmpty()).apply { inputType = InputType.TYPE_CLASS_PHONE; addTextChangedListener(PhoneFormatWatcher()) }
+    val mail = field("Email (optional)", detail?.email.orEmpty()).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
     fun save() {
         if (first.text.isBlank() && last.text.isBlank()) return toast("Add a name")
         if (phone.text.isBlank() && mail.text.isBlank()) return toast("Add a phone number or email")
@@ -162,7 +172,11 @@ internal fun MainActivity.showAddContact(number: String?, back: () -> Unit) {
             return requestPermissions(arrayOf(Manifest.permission.WRITE_CONTACTS), ADD_CONTACT_PERM)
         }
         var ok = false
-        Messenger.run({ ok = Phone.addContact(this, first.text.toString().trim(), last.text.toString().trim(), phone.text.toString(), mail.text.toString()) }, {
+        Messenger.run({
+            ok = if (detail != null) Phone.updateContact(this, detail, first.text.toString().trim(), last.text.toString().trim(),
+                phone.text.toString().split(',').map { it.trim() }.filter { it.isNotEmpty() }, mail.text.toString())
+            else Phone.addContact(this, first.text.toString().trim(), last.text.toString().trim(), phone.text.toString(), mail.text.toString())
+        }, {
             if (ok) {
                 toast("Contact saved")
                 Texts.forgetNames(); phoneLoaded = 0; phoneCalls = null
@@ -172,22 +186,35 @@ internal fun MainActivity.showAddContact(number: String?, back: () -> Unit) {
     }
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16)) }
     listOf(first, last, phone, mail).forEach { col.addView(it, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }) }
-    col.addView(cta("Save contact") { save() })
-    setContentView(page(topBar("New contact", null, icon(R.drawable.ic_back) { back() }), ScrollView(this).apply { addView(col) }))
-    first.post { first.requestFocus(); getSystemService(InputMethodManager::class.java).showSoftInput(first, 0) }
+    col.addView(cta(if (detail != null) "Save" else "Save contact") { save() }, ctaParams())
+    col.addView(tv("Cancel", 16f, dim, true).apply {
+        gravity = Gravity.CENTER; setPadding(dp(40), dp(14), dp(40), dp(14)); background = pressable(); setOnClickListener { back() }
+    }, ctaParams().apply { topMargin = dp(6) })
+    setContentView(page(topBar(if (detail != null) "Edit contact" else "New contact", null, icon(R.drawable.ic_back) { back() }), ScrollView(this).apply { addView(col) }))
+    if (detail == null) first.post { first.requestFocus(); getSystemService(InputMethodManager::class.java).showSoftInput(first, 0) }
 }
 
-/** Name, each number, and Call / Text for each. */
+/** Name, Edit contact (or Add to contacts for a number that isn't saved), then each number with Call and Text. */
 internal fun MainActivity.contactCard(p: Phone.Person) {
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     var dialog: android.app.Dialog? = null
+    col.addView(LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, dp(8), 0, dp(10)); background = pressable(); isClickable = true
+        addView(icon(R.drawable.ic_edit, white, 22, 0))
+        addView(tv(if (p.id != 0L) "Edit contact" else "Add to contacts", 16f, white, true).apply { setPadding(dp(14), 0, 0, 0) })
+        setOnClickListener {
+            dialog?.dismiss()
+            if (p.id != 0L) showEditContact(p) { showChats() } else showAddContact(p.numbers.firstOrNull()?.first) { showChats() }
+        }
+    })
     for ((n, label) in p.numbers) col.addView(LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(0, dp(6), 0, dp(6))
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             addView(tv(n, 16f, white))
-            addView(tv(label, 13f, dim))
+            if (label.isNotEmpty()) addView(tv(label, 13f, dim))
         }, LinearLayout.LayoutParams(0, -2, 1f))
         addView(icon(R.drawable.ic_call, white, 22) { PhoneCalls.dial(this@contactCard, n) })
         addView(icon(R.drawable.ic_send, smsGreen, 22) {
@@ -195,7 +222,13 @@ internal fun MainActivity.contactCard(p: Phone.Person) {
             Messenger.run({ id = Texts.threadFor(this@contactCard, listOf(n)) }, { showTextThread(id, listOf(n)) })
         })
     })
-    popup(p.name, "Call or text (through your carrier, not private)", col, "Close" to dim)
+    popup(p.name, "Call or text (through your carrier, not private)", col, "Close" to dim, dialogOut = { dialog = it })
+}
+
+/** Tapping a phone call in the Calls list: the same card as a contact (their numbers, Call or Text), or the bare number with "Add to contacts". */
+internal fun MainActivity.callCard(number: String) {
+    val person = phonePeople?.firstOrNull { p -> p.numbers.any { android.telephony.PhoneNumberUtils.compare(it.first, number) } }
+    contactCard(person ?: Phone.Person(0L, Texts.name(this, number), listOf(number to "")))
 }
 
 /**
