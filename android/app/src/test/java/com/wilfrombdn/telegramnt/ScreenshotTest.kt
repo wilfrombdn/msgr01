@@ -330,6 +330,28 @@ class ScreenshotTest {
     }
 
     /** "typing…" / "online" / "last seen" under the name and in the chat list; the two privacy switches. */
+    /** A big address book appears in batches (first screenful at once), and every contact still ends up in the list. */
+    @Test fun bigContactListFillsInBatches() {
+        Messenger.initForPreview(fakeCore(signedIn = true))
+        val app = org.robolectric.RuntimeEnvironment.getApplication()
+        shadowOf(app).grantPermissions(android.Manifest.permission.READ_SMS, android.Manifest.permission.READ_CONTACTS)
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        Thread.sleep(300); shadowOf(Looper.getMainLooper()).idle()
+        val f = MainActivity::class.java
+        f.getDeclaredField("textsTab").apply { isAccessible = true }.setBoolean(a, true)
+        f.getDeclaredField("phoneSub").apply { isAccessible = true }.set(a, "contacts")
+        f.getDeclaredField("phonePeople").apply { isAccessible = true }.set(a, (1..400).map { Phone.Person(it.toLong(), "Person %03d".format(it), listOf("+1555000%04d".format(it) to "Mobile")) })
+        f.getDeclaredField("phoneCalls").apply { isAccessible = true }.set(a, emptyList<Phone.Call>())
+        f.getDeclaredField("phoneLoaded").apply { isAccessible = true }.setLong(a, System.currentTimeMillis())
+        fun people(v: android.view.View): Int =
+            (if (v is android.widget.TextView && v.text.startsWith("Person ")) 1 else 0) + ((v as? android.view.ViewGroup)?.let { g -> (0 until g.childCount).sumOf { people(g.getChildAt(it)) } } ?: 0)
+        call(a, "showChats")
+        val first = people(a.window.decorView)
+        assert(first in 1 until 400) { "expected only the first batch right away, got $first" }
+        repeat(20) { shadowOf(Looper.getMainLooper()).idle() }   // the follow-up batches
+        assert(people(a.window.decorView) == 400) { "every contact should end up in the list, got ${people(a.window.decorView)}" }
+    }
+
     @Test fun presence() {
         Messenger.initForPreview(fakeCore(signedIn = true))
         val sam = Messenger.core.contact("sam_r")!!

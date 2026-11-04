@@ -50,6 +50,16 @@ internal fun MainActivity.applyBars() {
         View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 }
 
+/**
+ * Redraw once for a burst of change notifications. Every message, delivery tick, typing and online event used to rebuild the whole
+ * screen on its own; now the ones that arrive together share a single rebuild (no delay: it runs as soon as the screen is free).
+ */
+internal fun MainActivity.redrawSoon() {
+    if (redrawQueued) return
+    redrawQueued = true
+    callTicker.post { redrawQueued = false; redraw() }
+}
+
 internal fun MainActivity.redraw() {
     if (Messenger.locked && Messenger.signedIn) { if (screen != Screen.LOCK) showLock(); return }
     maybeCheckUpdate()

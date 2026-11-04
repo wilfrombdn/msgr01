@@ -107,15 +107,15 @@ internal fun MainActivity.addTextRows(list: LinearLayout, q: String) {
     val ts = Texts.threads.filter { !it.spam && ((!it.code && !it.archived) || q.isNotEmpty()) && textMatches(it, q) }.sortedByDescending { it.id in pins }   // pinned first, then newest (list is already newest first)
     if (q.isEmpty() && folderPlace() == "top") folderRows(list)
     if (!savedTellemOnly() && !Texts.mixed(this)) savedWithMessages()?.takeIf { q.isEmpty() || "saved messages".contains(q) }?.let { list.addView(chatRow(it)) }
-    for (t in ts) list.addView(textRow(t))
+    for (t in ts) list.addView(textRow(t, pins))
     if (q.isEmpty() && folderPlace() == "bottom") folderRows(list)
     if (ts.isEmpty()) list.addView(tv(if (q.isNotEmpty()) "No texts match \"$search\"" else "No texts yet.\n\nTap the pencil to text a phone number.", 15.5f, dim)
         .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)); setLineSpacing(0f, 1.2f) })
 }
 
-internal fun MainActivity.textRow(t: Texts.Thread): View {
+internal fun MainActivity.textRow(t: Texts.Thread, pins: Set<Long> = Texts.pins(this)): View {
     val title = Texts.threadTitle(this, t.id, t.addresses)
-    val pinned = t.id in Texts.pins(this)
+    val pinned = t.id in pins
     val row = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         setBackgroundColor(listBg)

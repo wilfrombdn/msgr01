@@ -168,7 +168,12 @@ class CameraActivity : ComponentActivity() {
             val p = future.get()
             provider = p
             val prev = Preview.Builder().build().also { it.surfaceProvider = preview.surfaceProvider }
-            imageCapture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build()   // full resolution, not the reduced fast-shutter size
+            // fast shutter, but still the sensor's biggest picture (the quality mode made the shutter feel slow)
+            imageCapture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .setResolutionSelector(androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+                    .setResolutionStrategy(androidx.camera.core.resolutionselector.ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .setAspectRatioStrategy(androidx.camera.core.resolutionselector.AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build())
+                .build()
             val recorder = Recorder.Builder()
                 .setQualitySelector(QualitySelector.from(Quality.HD, androidx.camera.video.FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)))
                 .build()
@@ -215,6 +220,7 @@ class CameraActivity : ComponentActivity() {
     private fun onShutterTouch(e: MotionEvent) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                shutter.animate().scaleX(0.88f).scaleY(0.88f).setDuration(70).start()   // the button gives under your finger at once
                 pressStart = SystemClock.uptimeMillis()
                 pressY = e.rawY
                 zoomAtPress = camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f
@@ -230,6 +236,7 @@ class CameraActivity : ComponentActivity() {
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                shutter.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
                 holding = false
                 ui.removeCallbacks(startVideo)
                 if (recording != null) stopVideo()
@@ -283,13 +290,26 @@ class CameraActivity : ComponentActivity() {
         countdown.visibility = View.GONE
     }
 
+    /** Instant "got it": a quick white blink and a tick, before the camera has even finished saving. */
+    private fun shutterFeedback() {
+        shutter.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 30) android.view.HapticFeedbackConstants.CONFIRM else android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+        val blink = View(this).apply { setBackgroundColor(Color.WHITE); alpha = 0.55f; isClickable = false }
+        rootView.addView(blink, FrameLayout.LayoutParams(-1, -1))
+        blink.animate().alpha(0f).setDuration(140).withEndAction { rootView.removeView(blink) }.start()
+    }
+
     private fun takePhoto() {
         val ic = imageCapture ?: return
+        shutterFeedback()
+        val tapped = SystemClock.uptimeMillis()
         val file = File(cacheDir, "camera/photo_${System.currentTimeMillis()}.jpg")
         shutter.isEnabled = false
         ic.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(r: ImageCapture.OutputFileResults) = if (snap) showEdit(file, true) else handBack(file, true)
+                override fun onImageSaved(r: ImageCapture.OutputFileResults) {
+                    android.util.Log.d("TellemPerf", "photo saved " + (SystemClock.uptimeMillis() - tapped) + " ms after the tap")
+                    if (snap) showEdit(file, true) else handBack(file, true)
+                }
                 override fun onError(e: ImageCaptureException) { shutter.isEnabled = true; toast("Couldn't take the photo") }
             })
     }
@@ -343,10 +363,13 @@ class CameraActivity : ComponentActivity() {
         val layer = FrameLayout(this).apply { setBackgroundColor(Color.BLACK); isClickable = true }
         val stage = FrameLayout(this)
         layer.addView(stage, FrameLayout.LayoutParams(-1, -1))
-        var shot: android.graphics.Bitmap? = null
         if (isPhoto) {
-            shot = decodeUpright(file, 2560)
-            stage.addView(ImageView(this).apply { setImageBitmap(shot); scaleType = ImageView.ScaleType.FIT_CENTER }, FrameLayout.LayoutParams(-1, -1))
+            val view = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+            stage.addView(view, FrameLayout.LayoutParams(-1, -1))
+            Thread {   // decoding a 12-megapixel photo on the main thread froze the screen right after the shot
+                val bmp = decodeUpright(file, 1600)
+                runOnUiThread { if (editLayer === layer) view.setImageBitmap(bmp) }
+            }.start()
         } else {
             val vv = android.widget.VideoView(this)
             vv.setVideoURI(android.net.Uri.fromFile(file))
@@ -390,13 +413,13 @@ class CameraActivity : ComponentActivity() {
             setOnClickListener {
                 doneTyping(); isEnabled = false
                 val text = cap.text.toString().trim()
-                if (!isPhoto || text.isEmpty() || shot == null) return@setOnClickListener handBack(file, isPhoto, text)
+                if (!isPhoto || text.isEmpty()) return@setOnClickListener handBack(file, isPhoto, text)
                 // photos: the caption is burned into the picture, like Snapchat
                 val stageW = stage.width; val stageH = stage.height
                 val centerY = cap.top + cap.translationY + cap.height / 2f
                 val textPx = cap.textSize; val padPx = cap.paddingTop.toFloat()
                 Thread {
-                    runCatching { bake(file, shot!!, text, stageW, stageH, centerY, textPx, padPx) }
+                    runCatching { decodeUpright(file, 2560)?.let { bake(file, it, text, stageW, stageH, centerY, textPx, padPx) } }
                     runOnUiThread { handBack(file, true, text) }
                 }.start()
             }

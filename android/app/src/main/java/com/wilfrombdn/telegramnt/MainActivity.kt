@@ -61,7 +61,8 @@ class MainActivity : Activity() {
     internal var screen = Screen.CHATS
     internal var chatUser: String? = null
     internal var search = ""
-    internal val refresh: () -> Unit = { redraw() }
+    internal val refresh: () -> Unit = { redrawSoon() }
+    internal var redrawQueued = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -248,7 +249,7 @@ class MainActivity : Activity() {
     internal var textImageBar: TextView? = null
     internal var textDraft: String? = null
     internal val textPics = android.util.LruCache<String, android.graphics.Bitmap>(24)
-    internal val textsChanged: () -> Unit = { redraw() }
+    internal val textsChanged: () -> Unit = { redrawSoon() }
 
     internal var phoneSub = "texts"
     internal var phoneCalls: List<Phone.Call>? = null

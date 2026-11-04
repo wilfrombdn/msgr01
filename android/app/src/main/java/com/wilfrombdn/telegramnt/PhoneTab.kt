@@ -108,17 +108,36 @@ internal fun MainActivity.addContactRows(list: LinearLayout, q: String) {
     if (!Phone.canReadContacts(this)) return list.addView(permissionNote("Tap to show your phone's contacts here. They're read on this phone only and never sent anywhere.", Manifest.permission.READ_CONTACTS, CONTACTS_PERM))
     val people = (phonePeople ?: emptyList()).filter { p -> q.isEmpty() || p.name.lowercase().contains(q) || p.numbers.any { it.first.contains(q) } }
     var letter = ""
-    for (p in people) {
-        val l = p.name.take(1).uppercase().let { if (it.firstOrNull()?.isLetter() == true) it else "#" }
-        if (l != letter) { letter = l; list.addView(tv(l, 14f, dim, true).apply { setPadding(dp(20), dp(12), dp(20), dp(4)) }) }
-        list.addView(LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-            background = pressable()
-            setOnClickListener { contactCard(p) }
-            addView(avatar(p.name, 44))
-            addView(tv(p.name, 16f, white).apply { setPadding(dp(14), 0, 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
-        })
+    var next = 0
+    fun addUpTo(count: Int) {
+        val end = minOf(people.size, next + count)
+        while (next < end) {
+            val p = people[next++]
+            val l = p.name.take(1).uppercase().let { if (it.firstOrNull()?.isLetter() == true) it else "#" }
+            if (l != letter) { letter = l; list.addView(tv(l, 14f, dim, true).apply { setPadding(dp(20), dp(12), dp(20), dp(4)) }) }
+            list.addView(LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                background = pressable()
+                setOnClickListener { contactCard(p) }
+                addView(avatar(p.name, 44))
+                addView(tv(p.name, 16f, white).apply { setPadding(dp(14), 0, 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+            })
+        }
+    }
+    // A big address book used to be turned into thousands of rows before anything showed. Now the first screenful (plus enough to
+    // reach where you were scrolled to) appears at once and the rest follows in small batches. A search still builds everything.
+    val firstBatch = if (q.isEmpty()) maxOf(40, (chatsScrollY + resources.displayMetrics.heightPixels) / dp(61) + 20) else people.size
+    addUpTo(firstBatch)
+    if (next < people.size) {
+        val rest = object : Runnable {
+            override fun run() {
+                if (!list.isAttachedToWindow || screen != Screen.CHATS || !textsTab) return   // the screen was rebuilt or left
+                addUpTo(60)
+                if (next < people.size) list.post(this)
+            }
+        }
+        list.post(rest)
     }
     if (people.isEmpty() && phonePeople != null) list.addView(tv(if (q.isEmpty()) "No contacts with phone numbers" else "No contacts match \"$search\"", 15.5f, dim)
         .apply { gravity = Gravity.CENTER; setPadding(dp(32), dp(64), dp(32), dp(32)) })

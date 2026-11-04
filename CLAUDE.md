@@ -20,6 +20,7 @@
 ## Checking a refactor
 - Screens live in feature files (see README "Where things live"); `ScreenshotTest` writes a `.tree.txt` (view tree: types, text, sizes, positions) next to each PNG in `app/build/shots/`. Keep a copy before a refactor and diff afterwards: identical trees = same UI. Five call/download screens have live timers and always differ.
 - `RelayFlowTest` is skipped when no server is running (this PC has no Python), so push and let GitHub Actions run it before trusting changes to `Core.kt`, `Relay.kt` or `Messenger.kt`.
+- Camera shutter timing: `adb logcat -s TellemPerf` prints how long each photo took from the tap to saved. Capture mode is MINIMIZE_LATENCY on purpose (MAXIMIZE_QUALITY made the shutter feel slow).
 - `./gradlew lintDebug` should stay at 0 errors. Do not move the launcher icon out of `mipmap-anydpi-v26` (release build breaks).
 
 ## Setting up another computer
