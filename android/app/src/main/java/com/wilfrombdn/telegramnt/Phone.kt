@@ -63,75 +63,69 @@ object Phone {
     fun canWriteContacts(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.WRITE_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
     /** What one contact holds, for editing. [rawId] is the stored entry new rows are added to. */
-    class PhoneRow(val dataId: Long, val number: String)
+    class PhoneRow(val dataId: Long, val number: String, val type: Int)
+    class EmailRow(val dataId: Long, val address: String)
     class Detail(val rawId: Long, val nameId: Long?, val given: String, val family: String, val display: String,
-                 val phones: List<PhoneRow>, val emailId: Long?, val email: String)
+                 val phones: List<PhoneRow>, val emails: List<EmailRow>)
 
-    /** The name, numbers and first email of contact [contactId]. Blocking. */
+    /** The name, numbers (with their labels) and emails of contact [contactId]. Blocking. */
     fun detail(ctx: Context, contactId: Long): Detail? = runCatching {
-        val nameType = StructuredName.CONTENT_ITEM_TYPE
-        val mailType = Email.CONTENT_ITEM_TYPE
         var raw = 0L; var nameId: Long? = null; var given = ""; var family = ""; var display = ""
-        val phones = ArrayList<PhoneRow>(); var emailId: Long? = null; var email = ""
+        val phones = ArrayList<PhoneRow>(); val emails = ArrayList<EmailRow>()
         ctx.contentResolver.query(Dt.CONTENT_URI, arrayOf(Dt._ID, Dt.RAW_CONTACT_ID, Dt.MIMETYPE, Dt.DATA1, Dt.DATA2, Dt.DATA3),
             "${Dt.CONTACT_ID}=?", arrayOf(contactId.toString()), "${Dt.RAW_CONTACT_ID} ASC, ${Dt._ID} ASC")?.use { c ->
             while (c.moveToNext()) {
                 val id = c.getLong(0)
                 if (raw == 0L) raw = c.getLong(1)
                 when (c.getString(2)) {
-                    nameType -> if (nameId == null) { nameId = id; display = c.getString(3) ?: ""; given = c.getString(4) ?: ""; family = c.getString(5) ?: "" }
-                    P.CONTENT_ITEM_TYPE -> phones += PhoneRow(id, c.getString(3) ?: "")
-                    mailType -> if (emailId == null) { emailId = id; email = c.getString(3) ?: "" }
+                    StructuredName.CONTENT_ITEM_TYPE -> if (nameId == null) { nameId = id; display = c.getString(3) ?: ""; given = c.getString(4) ?: ""; family = c.getString(5) ?: "" }
+                    P.CONTENT_ITEM_TYPE -> phones += PhoneRow(id, c.getString(3) ?: "", c.getString(4)?.toIntOrNull() ?: P.TYPE_MOBILE)
+                    Email.CONTENT_ITEM_TYPE -> emails += EmailRow(id, c.getString(3) ?: "")
                 }
             }
         }
-        if (raw == 0L) null else Detail(raw, nameId, given, family, display, phones, emailId, email)
+        if (raw == 0L) null else Detail(raw, nameId, given, family, display, phones, emails)
     }.getOrNull()
 
     /**
-     * Saves the edits: the name, the numbers (kept in order; a changed number keeps its label, extras are added, missing ones removed)
-     * and the first email. Anything else on the contact (photo, address, other emails…) is left alone. Blocking.
+     * Saves the edits: the name, the numbers (kept in order, each with its label) and the emails (kept in order). Rows that changed are
+     * updated, extra ones added, missing ones removed. Anything else on the contact (photo, address…) is left alone. Blocking.
      */
-    fun updateContact(ctx: Context, d: Detail, first: String, last: String, numbers: List<String>, email: String): Boolean = runCatching {
+    fun updateContact(ctx: Context, d: Detail, first: String, last: String, numbers: List<Pair<String, Int>>, emails: List<String>): Boolean = runCatching {
         val ops = ArrayList<android.content.ContentProviderOperation>()
         fun upd(id: Long) = android.content.ContentProviderOperation.newUpdate(Dt.CONTENT_URI).withSelection("${Dt._ID}=?", arrayOf(id.toString()))
         fun del(id: Long) = android.content.ContentProviderOperation.newDelete(Dt.CONTENT_URI).withSelection("${Dt._ID}=?", arrayOf(id.toString())).build()
         fun ins(mime: String) = android.content.ContentProviderOperation.newInsert(Dt.CONTENT_URI).withValue(Dt.RAW_CONTACT_ID, d.rawId).withValue(Dt.MIMETYPE, mime)
         ops += if (d.nameId != null) upd(d.nameId).withValue(StructuredName.GIVEN_NAME, first).withValue(StructuredName.FAMILY_NAME, last).build()
         else ins(StructuredName.CONTENT_ITEM_TYPE).withValue(StructuredName.GIVEN_NAME, first).withValue(StructuredName.FAMILY_NAME, last).build()
-        numbers.forEachIndexed { i, n ->
+        numbers.forEachIndexed { i, (n, type) ->
             val row = d.phones.getOrNull(i)
-            if (row == null) ops += ins(P.CONTENT_ITEM_TYPE).withValue(P.NUMBER, n).withValue(P.TYPE, P.TYPE_MOBILE).build()
-            else if (row.number != n) ops += upd(row.dataId).withValue(P.NUMBER, n).build()
+            if (row == null) ops += ins(P.CONTENT_ITEM_TYPE).withValue(P.NUMBER, n).withValue(P.TYPE, type).build()
+            else if (row.number != n || row.type != type) ops += upd(row.dataId).withValue(P.NUMBER, n).withValue(P.TYPE, type).build()
         }
         d.phones.drop(numbers.size).forEach { ops += del(it.dataId) }
-        val mail = email.trim()
-        if (d.emailId != null) { if (mail.isEmpty()) ops += del(d.emailId) else if (mail != d.email) ops += upd(d.emailId).withValue(Email.ADDRESS, mail).build() }
-        else if (mail.isNotEmpty()) ops += ins(Email.CONTENT_ITEM_TYPE).withValue(Email.ADDRESS, mail).withValue(Email.TYPE, Email.TYPE_HOME).build()
+        emails.forEachIndexed { i, m ->
+            val row = d.emails.getOrNull(i)
+            if (row == null) ops += ins(Email.CONTENT_ITEM_TYPE).withValue(Email.ADDRESS, m).withValue(Email.TYPE, Email.TYPE_HOME).build()
+            else if (row.address != m) ops += upd(row.dataId).withValue(Email.ADDRESS, m).build()
+        }
+        d.emails.drop(emails.size).forEach { ops += del(it.dataId) }
         ctx.contentResolver.applyBatch(android.provider.ContactsContract.AUTHORITY, ops)
         true
     }.getOrDefault(false)
 
     /** Saves a new contact on the phone (in its default account when it has one, so it syncs like any other). Blocking. */
-    fun addContact(ctx: Context, first: String, last: String, number: String, email: String): Boolean = runCatching {
-        val c = android.provider.ContactsContract.Data.CONTENT_URI
+    fun addContact(ctx: Context, first: String, last: String, numbers: List<Pair<String, Int>>, emails: List<String>): Boolean = runCatching {
         val raw = android.provider.ContactsContract.RawContacts.CONTENT_URI
         val acct = if (android.os.Build.VERSION.SDK_INT >= 33) android.provider.ContactsContract.Settings.getDefaultAccount(ctx.contentResolver) else null
         val ops = ArrayList<android.content.ContentProviderOperation>()
         ops += android.content.ContentProviderOperation.newInsert(raw)
             .withValue(android.provider.ContactsContract.RawContacts.ACCOUNT_TYPE, acct?.type)
             .withValue(android.provider.ContactsContract.RawContacts.ACCOUNT_NAME, acct?.name).build()
-        ops += android.content.ContentProviderOperation.newInsert(c).withValueBackReference(android.provider.ContactsContract.Data.RAW_CONTACT_ID, 0)
-            .withValue(android.provider.ContactsContract.Data.MIMETYPE, StructuredName.CONTENT_ITEM_TYPE)
-            .withValue(android.provider.ContactsContract.CommonDataKinds.StructuredName.GIVEN_NAME, first)
-            .withValue(android.provider.ContactsContract.CommonDataKinds.StructuredName.FAMILY_NAME, last).build()
-        if (number.isNotBlank()) ops += android.content.ContentProviderOperation.newInsert(c).withValueBackReference(android.provider.ContactsContract.Data.RAW_CONTACT_ID, 0)
-            .withValue(android.provider.ContactsContract.Data.MIMETYPE, P.CONTENT_ITEM_TYPE)
-            .withValue(P.NUMBER, number.trim()).withValue(P.TYPE, P.TYPE_MOBILE).build()
-        if (email.isNotBlank()) ops += android.content.ContentProviderOperation.newInsert(c).withValueBackReference(android.provider.ContactsContract.Data.RAW_CONTACT_ID, 0)
-            .withValue(android.provider.ContactsContract.Data.MIMETYPE, Email.CONTENT_ITEM_TYPE)
-            .withValue(android.provider.ContactsContract.CommonDataKinds.Email.ADDRESS, email.trim())
-            .withValue(android.provider.ContactsContract.CommonDataKinds.Email.TYPE, android.provider.ContactsContract.CommonDataKinds.Email.TYPE_HOME).build()
+        fun ins(mime: String) = android.content.ContentProviderOperation.newInsert(Dt.CONTENT_URI).withValueBackReference(Dt.RAW_CONTACT_ID, 0).withValue(Dt.MIMETYPE, mime)
+        ops += ins(StructuredName.CONTENT_ITEM_TYPE).withValue(StructuredName.GIVEN_NAME, first).withValue(StructuredName.FAMILY_NAME, last).build()
+        numbers.forEach { (n, type) -> ops += ins(P.CONTENT_ITEM_TYPE).withValue(P.NUMBER, n).withValue(P.TYPE, type).build() }
+        emails.forEach { m -> ops += ins(Email.CONTENT_ITEM_TYPE).withValue(Email.ADDRESS, m).withValue(Email.TYPE, Email.TYPE_HOME).build() }
         ctx.contentResolver.applyBatch(android.provider.ContactsContract.AUTHORITY, ops)
         true
     }.getOrDefault(false)

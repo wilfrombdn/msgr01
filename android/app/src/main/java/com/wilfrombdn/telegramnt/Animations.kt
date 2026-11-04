@@ -53,9 +53,9 @@ internal fun MainActivity.slideScreens(bmp: android.graphics.Bitmap, dir: Int) {
     val w = (content.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels).toFloat()
     new.translationX = dir * w
     new.lift(); pic.lift()
-    Tween(SLIDE_MS, DecelerateInterpolator(1.6f), { f -> new.translationX = dir * w * (1f - f); pic.translationX = -dir * w * f }) {
-        new.translationX = 0f; new.drop(); content.removeView(shield)
-    }.start()
+    val tween = Tween(SLIDE_MS, DecelerateInterpolator(1.6f), { f -> new.translationX = dir * w * (1f - f); pic.translationX = -dir * w * f }) { slideEnd?.invoke() }
+    slideEnd = { tween.cancel(); new.translationX = 0f; new.drop(); content.removeView(shield); pic.setImageDrawable(null); slideEnd = null }
+    tween.start()
 }
 
 /**
@@ -72,9 +72,9 @@ internal fun MainActivity.slideLists(bmp: android.graphics.Bitmap, startX: Float
     pic.translationX = startX
     new.translationX = startX + dir * w
     new.lift(); pic.lift()
-    Tween(SLIDE_MS, DecelerateInterpolator(1.6f), { f -> pic.translationX = startX + (-dir * w - startX) * f; new.translationX = (startX + dir * w) * (1f - f) }) {
-        new.translationX = 0f; new.drop(); frame.removeView(shield)
-    }.start()
+    val tween = Tween(SLIDE_MS, DecelerateInterpolator(1.6f), { f -> pic.translationX = startX + (-dir * w - startX) * f; new.translationX = (startX + dir * w) * (1f - f) }) { slideEnd?.invoke() }
+    slideEnd = { tween.cancel(); new.translationX = 0f; new.drop(); frame.removeView(shield); pic.setImageDrawable(null); slideEnd = null }
+    tween.start()
 }
 
 /** Contacts, Calls, Texts (and Folders when they have their own tab), left to right. */
@@ -90,6 +90,7 @@ internal fun MainActivity.canSwipePhoneTab(dir: Int): Boolean {
 
 /** Show a Phone tab. [dir] 1 = the tab is to the right of this one. [old] is the list to slide away (it may already be dragged part way). */
 internal fun MainActivity.gotoPhoneTab(to: String, dir: Int, old: View? = chatsScroll) {
+    finishSlide()
     val startX = old?.translationX ?: 0f
     val bmp = if (animationsOn()) old?.let { snapshotOf(it) } else null
     old?.drop()
@@ -124,7 +125,7 @@ internal class TabSwipeFrame(
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { x0 = e.x; y0 = e.y; swiping = false; fromEdge = e.x < edge }
+            MotionEvent.ACTION_DOWN -> { x0 = e.x; y0 = e.y; swiping = false; fromEdge = e.x < edge; (context as? MainActivity)?.finishSlide() }
             MotionEvent.ACTION_MOVE -> if (!swiping) {
                 val dx = e.x - x0; val dy = e.y - y0
                 val horizontal = Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy) * 1.5f
@@ -183,3 +184,9 @@ internal class Tween(
         if (f < 1f) android.view.Choreographer.getInstance().postFrameCallback(this) else onEnd()
     }
 }
+
+/**
+ * Finish a slide that is still running, right now. Called before anything that starts another change, so tapping quickly
+ * never stacks slides on top of each other or snapshots a screen that is half way across.
+ */
+internal fun MainActivity.finishSlide() { slideEnd?.invoke() }
