@@ -2131,7 +2131,7 @@ class MainActivity : Activity() {
         private const val CALL_ROLE = 21
         private const val CALL_PERM = 26
         private const val ADD_CONTACT_PERM = 27
-        private const val PICK_CONTACT = 21
+        private const val PICK_CONTACT = 28   // was 21, the same as CALL_ROLE, so a picked contact was handled as a call-role result
         private const val TEXT_IMAGE = 22
         private const val TEXT_PERMS = 23
         private const val CALL_LOG_PERM = 24
