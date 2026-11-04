@@ -143,7 +143,10 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
         topBar(flip,
             if (textsTab) null else if (Messenger.connected) null else if (Messenger.direct) "Direct connection" else Tor.status(),
             icon(R.drawable.ic_menu).also { v -> v.setOnClickListener { drawer?.openDrawer(GravityCompat.START) } },
-            icon(R.drawable.ic_search) { screenSearch = true; showChats() },
+            *listOfNotNull<View>(
+                if (textsTab && phoneSub == "contacts") icon(R.drawable.ic_sort) { showSortMenu() } else null,   // sort button (Contacts tab)
+                icon(R.drawable.ic_search) { screenSearch = true; showChats() },
+            ).toTypedArray(),
         )
     }
     // Content + a left slide-out drawer (opens by tapping the lines or swiping from the edge).
@@ -201,7 +204,7 @@ internal fun MainActivity.archiveRow(unread: Int, count: Int): View = LinearLayo
 }
 
 internal fun MainActivity.searchBar(): View {
-    val box = field("Search", search).apply {
+    val box = field("Search", search, boxed = false).apply {
         background = null
         addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}

@@ -32,14 +32,12 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
     addContactBack = back
     val editing = detail != null
 
-    fun box(hint: String, value: String = "") = field(hint, value).apply {
-        backgroundTintList = null
-        background = round(panel2, 12)
-        setPadding(dp(14), dp(13), dp(14), dp(13))
-    }
+    fun box(hint: String, value: String = "") = field(hint, value)   // the app's rounded text box
+    var newPhoto: ByteArray? = null   // a photo picked here; null = leave the contact's photo as it is
     val given = detail?.let { if (it.given.isBlank() && it.family.isBlank()) it.display else it.given }.orEmpty()
     val first = box("First name", given).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
     val last = box("Last name", detail?.family.orEmpty()).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
+    val company = box("Company", detail?.company.orEmpty()).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
 
     // phone numbers, each with a label you tap to change, and a remove button; emails the same without labels
     val phones = ArrayList<PhoneEntry>()
@@ -71,7 +69,7 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
                     e.type = PHONE_LABELS[(at + 1) % PHONE_LABELS.size].first; redraw()   // Mobile, Home, Work, Other, then round again
                 })
                 addView(icon(R.drawable.ic_close, dim, 18, 8) { if (phones.size > 1) phones.remove(e) else e.field.setText(""); redraw() })
-            }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+            }, LinearLayout.LayoutParams(-1, -2))
         }
         emailBox.removeAllViews()
         emails.forEachIndexed { i, f ->
@@ -81,17 +79,25 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
                 addView(icon(R.drawable.ic_mail, if (i == 0) dim else android.graphics.Color.TRANSPARENT, 22, 9))
                 addView(f, LinearLayout.LayoutParams(0, -2, 1f))
                 addView(icon(R.drawable.ic_close, dim, 18, 8) { if (emails.size > 1) emails.remove(f) else f.setText(""); redraw() })
-            }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+            }, LinearLayout.LayoutParams(-1, -2))
         }
     }
     redraw()
 
-    // the big circle at the top shows the initials as you type the name
+    // the big circle at the top: their photo if they have one (tap to choose another), else the initials as you type the name
     val avatarHolder = FrameLayout(this)
     fun refreshAvatar() {
         val name = "${first.text} ${last.text}".trim()
         avatarHolder.removeAllViews()
-        avatarHolder.addView(avatar(name.ifEmpty { "?" }, 96), FrameLayout.LayoutParams(dp(96), dp(96), Gravity.CENTER))
+        avatarHolder.addView(avatar(name.ifEmpty { "?" }, 96, newPhoto ?: detail?.photo), FrameLayout.LayoutParams(dp(96), dp(96), Gravity.CENTER))
+        avatarHolder.addView(tv("Tap to add a photo", 12.5f, blue, true).apply { gravity = Gravity.CENTER }, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+    }
+    avatarHolder.setOnClickListener {
+        contactPhotoDone = { jpeg -> newPhoto = jpeg; refreshAvatar() }
+        // The system photo picker needs no permissions and only hands over the one photo chosen.
+        val i = if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
+        else android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).setType("image/*")
+        @Suppress("DEPRECATION") startActivityForResult(i, PICK_CONTACT_PHOTO)
     }
     refreshAvatar()
     val watch = object : android.text.TextWatcher {
@@ -110,14 +116,14 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
             addContactSave = { save() }
             return requestPermissions(arrayOf(Manifest.permission.WRITE_CONTACTS), ADD_CONTACT_PERM)
         }
-        val f = first.text.toString().trim(); val l = last.text.toString().trim()
+        val f = first.text.toString().trim(); val l = last.text.toString().trim(); val co = company.text.toString().trim()
         var ok = false
         Messenger.run({
-            ok = if (detail != null) Phone.updateContact(this, detail, f, l, nums, mails) else Phone.addContact(this, f, l, nums, mails)
+            ok = if (detail != null) Phone.updateContact(this, detail, f, l, co, nums, mails, newPhoto) else Phone.addContact(this, f, l, co, nums, mails, newPhoto)
         }, {
             if (ok) {
                 toast("Contact saved")
-                Texts.forgetNames(); phoneLoaded = 0; phoneCalls = null
+                Texts.forgetNames(); phoneLoaded = 0; phoneCalls = null; contactThumbs.clear()
                 Messenger.run({ Texts.threads.forEach { t -> t.addresses.forEach { Texts.name(this, it) } } }, { addContactBack() })
             } else toast("Couldn't save the contact")
         }) { toast("Couldn't save the contact") }
@@ -127,13 +133,18 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
         addView(icon(R.drawable.ic_person, dim, 22, 9).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(4) })
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            addView(first, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-            addView(last, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+            addView(first, LinearLayout.LayoutParams(-1, -2))
+            addView(last, LinearLayout.LayoutParams(-1, -2))
         }, LinearLayout.LayoutParams(0, -2, 1f))
+    }
+    fun companyRow() = LinearLayout(this).apply {
+        addView(icon(R.drawable.ic_company, dim, 22, 9).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(4) })
+        addView(company, LinearLayout.LayoutParams(0, -2, 1f))
     }
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(24)) }
     col.addView(avatarHolder, LinearLayout.LayoutParams(-1, dp(116)))
     col.addView(nameRow())
+    col.addView(companyRow())
     col.addView(phoneBox)
     col.addView(small("+  Add phone", blue) { newPhone("", P.TYPE_MOBILE); redraw() }.apply { setPadding(dp(56), dp(8), dp(10), dp(12)) })
     col.addView(emailBox)
@@ -141,10 +152,12 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
     val saveBtn = tv("SAVE", 15f, white, true).apply {
         setPadding(dp(18), dp(10), dp(18), dp(10)); background = round(panel2, 20); setOnClickListener { save() }
     }
-    setContentView(page(
+    val root = page(
         topBar(if (editing) "Edit contact" else "New contact", null, icon(R.drawable.ic_close) { back() },
             LinearLayout(this).apply { setPadding(0, 0, dp(10), 0); addView(saveBtn) }),
-        ScrollView(this).apply { addView(col) }))
+        ScrollView(this).apply { addView(col) })
+    contactFormView = root
+    setContentView(root)
     if (!editing) first.post { first.requestFocus(); getSystemService(InputMethodManager::class.java).showSoftInput(first, 0) }
 }
 
@@ -186,4 +199,44 @@ internal fun MainActivity.contactCard(p: Phone.Person, edit: Boolean = true) {
 internal fun MainActivity.callCard(number: String) {
     val person = phonePeople?.firstOrNull { p -> p.numbers.any { android.telephony.PhoneNumberUtils.compare(it.first, number) } }
     contactCard(person ?: Phone.Person(0L, Texts.name(this, number), listOf(number to "")), edit = false)
+}
+
+/** A photo was chosen for a contact: crop it, then hand it back to the open contact form (which is put back exactly as it was). */
+internal fun MainActivity.contactPhotoPicked(uri: android.net.Uri) {
+    var bmp: android.graphics.Bitmap? = null
+    Messenger.run({ bmp = loadPhoto(uri) }, {
+        val b = bmp
+        if (b == null) toast("Couldn't open that photo")
+        else showCrop(b, done = { jpeg -> restoreContactForm(); contactPhotoDone?.invoke(jpeg) }, cancel = { restoreContactForm() })
+    }) { toast("Couldn't open that photo") }
+}
+
+internal fun MainActivity.restoreContactForm() {
+    cropCancel = null
+    contactFormView?.let { screen = Screen.ADD_CONTACT; setContentView(it) }
+}
+
+/**
+ * A phone contact's picture for the lists: their photo if they have one (loaded in the background, the initials show meanwhile),
+ * else the initials circle. Tellem friends keep using their Tellem profile picture everywhere else; this is only for phone contacts.
+ */
+internal fun MainActivity.contactAvatar(name: String, photoUri: String?, sizeDp: Int): View {
+    if (photoUri == null) return avatar(name, sizeDp)
+    fun round(b: android.graphics.Bitmap) = android.widget.ImageView(this).apply {
+        setImageBitmap(b); scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) = o.setOval(0, 0, v.width, v.height)
+        }
+        clipToOutline = true
+    }
+    if (contactThumbs.containsKey(photoUri)) return contactThumbs[photoUri]?.let { round(it) }?.apply { layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp)) } ?: avatar(name, sizeDp)
+    val holder = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp)); addView(avatar(name, sizeDp)) }
+    var loaded: android.graphics.Bitmap? = null
+    Messenger.run({
+        loaded = runCatching { contentResolver.openInputStream(android.net.Uri.parse(photoUri))?.use { android.graphics.BitmapFactory.decodeStream(it) } }.getOrNull()
+    }, {
+        contactThumbs[photoUri] = loaded
+        loaded?.let { holder.removeAllViews(); holder.addView(round(it), FrameLayout.LayoutParams(-1, -1)) }
+    })
+    return holder
 }

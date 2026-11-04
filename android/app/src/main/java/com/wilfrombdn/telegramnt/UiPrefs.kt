@@ -22,6 +22,12 @@ object UiPrefs {
     fun animations(ctx: Context) = prefs(ctx).getBoolean("animations", true)
     fun setAnimations(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("animations", on).apply()
 
+    /** Contacts order: "name_az" (default), "name_za", "email_az" or "email_za"; and whether they are grouped by company. */
+    fun contactSort(ctx: Context) = prefs(ctx).getString("contactSort", "name_az") ?: "name_az"
+    fun setContactSort(ctx: Context, sort: String) = prefs(ctx).edit().putString("contactSort", sort).apply()
+    fun groupByCompany(ctx: Context) = prefs(ctx).getBoolean("groupCompany", false)
+    fun setGroupByCompany(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("groupCompany", on).apply()
+
     /** Where the text folders (Archive, Codes, Spam) show: "top", "bottom", "menu" or "tab". */
     fun folderPlace(ctx: Context) = prefs(ctx).getString("folders", "top") ?: "top"
     fun setFolderPlace(ctx: Context, place: String) = prefs(ctx).edit().putString("folders", place).apply()

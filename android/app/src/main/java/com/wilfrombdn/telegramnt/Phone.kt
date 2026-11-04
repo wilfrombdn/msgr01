@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.provider.CallLog
 import android.provider.ContactsContract.CommonDataKinds.Phone as P
 import android.provider.ContactsContract.CommonDataKinds.Email
+import android.provider.ContactsContract.CommonDataKinds.Organization
 import android.provider.ContactsContract.CommonDataKinds.StructuredName
 import android.provider.ContactsContract.Data as Dt
 
@@ -16,7 +17,7 @@ import android.provider.ContactsContract.Data as Dt
 object Phone {
     /** One row of call history: a normal phone call ([number]) or a Tellem call ([friend]). */
     class Call(val date: Long, val incoming: Boolean, val missed: Boolean, val seconds: Int, val number: String? = null, val friend: String? = null)
-    class Person(val id: Long, val name: String, val numbers: List<Pair<String, String>>)   // (number, "Mobile"/"Home"…)
+    class Person(val id: Long, val name: String, val numbers: List<Pair<String, String>>, val photoUri: String? = null, val company: String = "", val email: String = "")   // numbers: (number, "Mobile"/"Home"…)
 
     fun canReadCalls(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
     fun canReadContacts(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
@@ -44,33 +45,54 @@ object Phone {
     fun people(ctx: Context): List<Person> {
         if (!canReadContacts(ctx)) return emptyList()
         val byId = LinkedHashMap<Long, Pair<String, MutableList<Pair<String, String>>>>()
+        val photos = HashMap<Long, String?>()
         runCatching {
-            ctx.contentResolver.query(P.CONTENT_URI, arrayOf(P.CONTACT_ID, P.DISPLAY_NAME, P.NUMBER, P.TYPE, P.LABEL), null, null,
+            ctx.contentResolver.query(P.CONTENT_URI, arrayOf(P.CONTACT_ID, P.DISPLAY_NAME, P.NUMBER, P.TYPE, P.LABEL, P.PHOTO_THUMBNAIL_URI), null, null,
                 "${P.DISPLAY_NAME} COLLATE LOCALIZED ASC")?.use { c ->
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
                     val num = c.getString(2) ?: continue
                     val label = P.getTypeLabel(ctx.resources, c.getInt(3), c.getString(4)).toString()
                     val e = byId.getOrPut(id) { (c.getString(1) ?: num) to ArrayList() }
+                    if (id !in photos) photos[id] = c.getString(5)
                     // the same number saved twice (spaces, +1) shows once
                     if (e.second.none { android.telephony.PhoneNumberUtils.compare(it.first, num) }) e.second += num to label
                 }
             }
         }
-        return byId.map { (id, e) -> Person(id, e.first, e.second) }
+        // each contact's first email and company, for sorting and grouping
+        val emails = HashMap<Long, String>(); val companies = HashMap<Long, String>()
+        runCatching {
+            ctx.contentResolver.query(Dt.CONTENT_URI, arrayOf(Dt.CONTACT_ID, Dt.MIMETYPE, Dt.DATA1), "${Dt.MIMETYPE} IN (?,?)",
+                arrayOf(Email.CONTENT_ITEM_TYPE, Organization.CONTENT_ITEM_TYPE), null)?.use { c ->
+                while (c.moveToNext()) {
+                    val v = c.getString(2)?.trim().orEmpty(); if (v.isEmpty()) continue
+                    if (c.getString(1) == Email.CONTENT_ITEM_TYPE) emails.putIfAbsent(c.getLong(0), v) else companies.putIfAbsent(c.getLong(0), v)
+                }
+            }
+        }
+        return byId.map { (id, e) -> Person(id, e.first, e.second, photos[id], companies[id].orEmpty(), emails[id].orEmpty()) }
     }
 
     fun canWriteContacts(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.WRITE_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
+    /** Writes [jpeg] as the photo of the stored contact entry [rawId] (the phone makes the sizes it needs). Blocking. */
+    fun setPhoto(ctx: Context, rawId: Long, jpeg: ByteArray) {
+        val uri = android.net.Uri.withAppendedPath(android.content.ContentUris.withAppendedId(android.provider.ContactsContract.RawContacts.CONTENT_URI, rawId),
+            android.provider.ContactsContract.RawContacts.DisplayPhoto.CONTENT_DIRECTORY)
+        ctx.contentResolver.openAssetFileDescriptor(uri, "rw")?.use { fd -> fd.createOutputStream().use { it.write(jpeg) } }
+    }
+
     /** What one contact holds, for editing. [rawId] is the stored entry new rows are added to. */
     class PhoneRow(val dataId: Long, val number: String, val type: Int)
     class EmailRow(val dataId: Long, val address: String)
-    class Detail(val rawId: Long, val nameId: Long?, val given: String, val family: String, val display: String,
+    class Detail(val rawId: Long, val nameId: Long?, val given: String, val family: String, val display: String, val orgId: Long?, val company: String, val photo: ByteArray?,
                  val phones: List<PhoneRow>, val emails: List<EmailRow>)
 
     /** The name, numbers (with their labels) and emails of contact [contactId]. Blocking. */
     fun detail(ctx: Context, contactId: Long): Detail? = runCatching {
         var raw = 0L; var nameId: Long? = null; var given = ""; var family = ""; var display = ""
+        var orgId: Long? = null; var company = ""
         val phones = ArrayList<PhoneRow>(); val emails = ArrayList<EmailRow>()
         ctx.contentResolver.query(Dt.CONTENT_URI, arrayOf(Dt._ID, Dt.RAW_CONTACT_ID, Dt.MIMETYPE, Dt.DATA1, Dt.DATA2, Dt.DATA3),
             "${Dt.CONTACT_ID}=?", arrayOf(contactId.toString()), "${Dt.RAW_CONTACT_ID} ASC, ${Dt._ID} ASC")?.use { c ->
@@ -81,17 +103,20 @@ object Phone {
                     StructuredName.CONTENT_ITEM_TYPE -> if (nameId == null) { nameId = id; display = c.getString(3) ?: ""; given = c.getString(4) ?: ""; family = c.getString(5) ?: "" }
                     P.CONTENT_ITEM_TYPE -> phones += PhoneRow(id, c.getString(3) ?: "", c.getString(4)?.toIntOrNull() ?: P.TYPE_MOBILE)
                     Email.CONTENT_ITEM_TYPE -> emails += EmailRow(id, c.getString(3) ?: "")
+                    Organization.CONTENT_ITEM_TYPE -> if (orgId == null) { orgId = id; company = c.getString(3) ?: "" }
                 }
             }
         }
-        if (raw == 0L) null else Detail(raw, nameId, given, family, display, phones, emails)
+        val photo = runCatching { android.provider.ContactsContract.Contacts.openContactPhotoInputStream(ctx.contentResolver,
+            android.content.ContentUris.withAppendedId(android.provider.ContactsContract.Contacts.CONTENT_URI, contactId), true)?.use { it.readBytes() } }.getOrNull()
+        if (raw == 0L) null else Detail(raw, nameId, given, family, display, orgId, company, photo, phones, emails)
     }.getOrNull()
 
     /**
      * Saves the edits: the name, the numbers (kept in order, each with its label) and the emails (kept in order). Rows that changed are
      * updated, extra ones added, missing ones removed. Anything else on the contact (photo, address…) is left alone. Blocking.
      */
-    fun updateContact(ctx: Context, d: Detail, first: String, last: String, numbers: List<Pair<String, Int>>, emails: List<String>): Boolean = runCatching {
+    fun updateContact(ctx: Context, d: Detail, first: String, last: String, company: String, numbers: List<Pair<String, Int>>, emails: List<String>, photo: ByteArray?): Boolean = runCatching {
         val ops = ArrayList<android.content.ContentProviderOperation>()
         fun upd(id: Long) = android.content.ContentProviderOperation.newUpdate(Dt.CONTENT_URI).withSelection("${Dt._ID}=?", arrayOf(id.toString()))
         fun del(id: Long) = android.content.ContentProviderOperation.newDelete(Dt.CONTENT_URI).withSelection("${Dt._ID}=?", arrayOf(id.toString())).build()
@@ -103,6 +128,8 @@ object Phone {
             if (row == null) ops += ins(P.CONTENT_ITEM_TYPE).withValue(P.NUMBER, n).withValue(P.TYPE, type).build()
             else if (row.number != n || row.type != type) ops += upd(row.dataId).withValue(P.NUMBER, n).withValue(P.TYPE, type).build()
         }
+        if (d.orgId != null) { if (company.isEmpty()) ops += del(d.orgId) else if (company != d.company) ops += upd(d.orgId).withValue(Organization.COMPANY, company).build() }
+        else if (company.isNotEmpty()) ops += ins(Organization.CONTENT_ITEM_TYPE).withValue(Organization.COMPANY, company).build()
         d.phones.drop(numbers.size).forEach { ops += del(it.dataId) }
         emails.forEachIndexed { i, m ->
             val row = d.emails.getOrNull(i)
@@ -111,11 +138,12 @@ object Phone {
         }
         d.emails.drop(emails.size).forEach { ops += del(it.dataId) }
         ctx.contentResolver.applyBatch(android.provider.ContactsContract.AUTHORITY, ops)
+        if (photo != null) runCatching { setPhoto(ctx, d.rawId, photo) }
         true
     }.getOrDefault(false)
 
     /** Saves a new contact on the phone (in its default account when it has one, so it syncs like any other). Blocking. */
-    fun addContact(ctx: Context, first: String, last: String, numbers: List<Pair<String, Int>>, emails: List<String>): Boolean = runCatching {
+    fun addContact(ctx: Context, first: String, last: String, company: String, numbers: List<Pair<String, Int>>, emails: List<String>, photo: ByteArray?): Boolean = runCatching {
         val raw = android.provider.ContactsContract.RawContacts.CONTENT_URI
         val acct = if (android.os.Build.VERSION.SDK_INT >= 33) android.provider.ContactsContract.Settings.getDefaultAccount(ctx.contentResolver) else null
         val ops = ArrayList<android.content.ContentProviderOperation>()
@@ -124,9 +152,11 @@ object Phone {
             .withValue(android.provider.ContactsContract.RawContacts.ACCOUNT_NAME, acct?.name).build()
         fun ins(mime: String) = android.content.ContentProviderOperation.newInsert(Dt.CONTENT_URI).withValueBackReference(Dt.RAW_CONTACT_ID, 0).withValue(Dt.MIMETYPE, mime)
         ops += ins(StructuredName.CONTENT_ITEM_TYPE).withValue(StructuredName.GIVEN_NAME, first).withValue(StructuredName.FAMILY_NAME, last).build()
+        if (company.isNotEmpty()) ops += ins(Organization.CONTENT_ITEM_TYPE).withValue(Organization.COMPANY, company).build()
         numbers.forEach { (n, type) -> ops += ins(P.CONTENT_ITEM_TYPE).withValue(P.NUMBER, n).withValue(P.TYPE, type).build() }
         emails.forEach { m -> ops += ins(Email.CONTENT_ITEM_TYPE).withValue(Email.ADDRESS, m).withValue(Email.TYPE, Email.TYPE_HOME).build() }
-        ctx.contentResolver.applyBatch(android.provider.ContactsContract.AUTHORITY, ops)
+        val made = ctx.contentResolver.applyBatch(android.provider.ContactsContract.AUTHORITY, ops)
+        if (photo != null) runCatching { made.firstOrNull()?.uri?.let { setPhoto(ctx, android.content.ContentUris.parseId(it), photo) } }
         true
     }.getOrDefault(false)
 }

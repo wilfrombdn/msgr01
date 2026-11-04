@@ -105,26 +105,53 @@ internal fun MainActivity.callRow(k: Phone.Call): View {
     }
 }
 
-/** The phone's contacts, A to Z; tap for a card with Call and Text. */
+/** The phone's contacts, in the order chosen with the sort button (names A to Z unless changed), optionally grouped by company; tap for a card with Edit, Call and Text. */
 internal fun MainActivity.addContactRows(list: LinearLayout, q: String) {
     loadPhone()
     if (!Phone.canReadContacts(this)) return list.addView(permissionNote("Tap to show your phone's contacts here. They're read on this phone only and never sent anywhere.", Manifest.permission.READ_CONTACTS, CONTACTS_PERM))
-    val people = (phonePeople ?: emptyList()).filter { p -> q.isEmpty() || p.name.lowercase().contains(q) || p.numbers.any { it.first.contains(q) } }
+    val sort = UiPrefs.contactSort(this); val group = UiPrefs.groupByCompany(this)
+    val desc = sort.endsWith("_za"); val byEmail = sort.startsWith("email")
+    val dir = if (desc) -1 else 1
+    val people = (phonePeople ?: emptyList()).filter { p ->
+        q.isEmpty() || p.name.lowercase().contains(q) || p.email.lowercase().contains(q) || p.company.lowercase().contains(q) || p.numbers.any { it.first.contains(q) }
+    }.sortedWith { a, b ->
+        if (group) {   // companies in the chosen direction; people without one come last
+            if (a.company.isEmpty() != b.company.isEmpty()) return@sortedWith if (a.company.isEmpty()) 1 else -1
+            val c = a.company.compareTo(b.company, ignoreCase = true) * dir
+            if (c != 0) return@sortedWith c
+        }
+        val ka = if (byEmail) a.email else a.name; val kb = if (byEmail) b.email else b.name
+        if (byEmail && ka.isEmpty() != kb.isEmpty()) return@sortedWith if (ka.isEmpty()) 1 else -1   // no email: always last
+        val c = ka.compareTo(kb, ignoreCase = true) * dir
+        if (c != 0) c else a.name.compareTo(b.name, ignoreCase = true)
+    }
+    fun letterOf(s: String) = s.take(1).uppercase().let { if (it.firstOrNull()?.isLetter() == true) it else "#" }
+    fun headerOf(p: Phone.Person) = when {
+        group -> p.company.ifEmpty { "No company" }
+        byEmail -> if (p.email.isEmpty()) "No email" else letterOf(p.email)
+        else -> letterOf(p.name)
+    }
     var letter = ""
     var next = 0
     fun addUpTo(count: Int) {
         val end = minOf(people.size, next + count)
         while (next < end) {
             val p = people[next++]
-            val l = p.name.take(1).uppercase().let { if (it.firstOrNull()?.isLetter() == true) it else "#" }
+            val l = headerOf(p)
             if (l != letter) { letter = l; list.addView(tv(l, 14f, dim, true).apply { setPadding(dp(20), dp(12), dp(20), dp(4)) }) }
             list.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 background = pressable()
                 setOnClickListener { contactCard(p) }
-                addView(avatar(p.name, 44))
-                addView(tv(p.name, 16f, white).apply { setPadding(dp(14), 0, 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(contactAvatar(p.name, p.photoUri, 44))
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0)
+                    addView(tv(p.name, 16f, white).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                    // a small second line says what it is sorted or grouped by
+                    val sub = if (byEmail) p.email else if (!group) "" else ""
+                    if (sub.isNotEmpty()) addView(tv(sub, 13.5f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                }, LinearLayout.LayoutParams(0, -2, 1f))
             })
         }
     }

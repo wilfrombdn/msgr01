@@ -149,13 +149,21 @@ internal fun MainActivity.cta(s: String, onClick: () -> Unit) = mainButton(s, on
 
 internal fun MainActivity.ctaParams() = LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL }
 
-internal fun MainActivity.field(hint: String, value: String = "", password: Boolean = false) = EditText(this).apply {
+/**
+ * The app's text box: a rounded, softly filled box (no thin line edge to edge). Stacked boxes get a small gap from the inset.
+ * [boxed] = false keeps a bare field for places that draw their own background (the search bar).
+ */
+internal fun MainActivity.field(hint: String, value: String = "", password: Boolean = false, boxed: Boolean = true) = EditText(this).apply {
     setText(value)
     this.hint = hint
     setHintTextColor(dim)
     setTextColor(white)
     textSize = 17f * look.ui
-    backgroundTintList = android.content.res.ColorStateList.valueOf(white)
+    if (boxed) {
+        backgroundTintList = null
+        background = android.graphics.drawable.InsetDrawable(round(panel2, 12), 0, dp(5), 0, dp(5))
+        setPadding(dp(14), dp(14), dp(14), dp(14))
+    } else backgroundTintList = android.content.res.ColorStateList.valueOf(white)
     inputType = if (password) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
     else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
     typeface = Typeface.DEFAULT // password fields default to monospace

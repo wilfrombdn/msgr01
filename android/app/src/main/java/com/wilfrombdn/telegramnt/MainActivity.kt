@@ -136,6 +136,7 @@ class MainActivity : Activity() {
             emojiPopup != null -> { emojiPopup?.dismiss(); emojiPopup = null }
             (replyTo != null || editing != null) && (screen == Screen.CHAT || screen == Screen.GROUP) -> cancelReply()
             drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
+            screen == Screen.CROP && cropCancel != null -> cropCancel?.invoke()
             screen == Screen.SNAP_SEND -> cancelSnap()
             screen == Screen.TEXT_THREAD || screen == Screen.NEW_TEXT || screen == Screen.TEXT_SPAM -> leaveTexts()
             !Messenger.signedIn && screen != Screen.WELCOME -> showWelcome()
@@ -239,6 +240,10 @@ class MainActivity : Activity() {
     internal var chatsFrame: android.view.ViewGroup? = null   // the list area of the chat screen, and its scrolling list (for slide animations)
     internal var chatsScroll: android.view.View? = null
     internal var slideEnd: (() -> Unit)? = null   // set while a slide animation runs: finishes it on the spot (see finishSlide)
+    internal var cropCancel: (() -> Unit)? = null              // set while the crop screen was opened for a contact photo: what Cancel and Back do
+    internal var contactFormView: android.view.View? = null    // the contact form, kept while a photo is picked and cropped
+    internal var contactPhotoDone: ((ByteArray) -> Unit)? = null
+    internal val contactThumbs = HashMap<String, android.graphics.Bitmap?>()   // phone contacts' small photos, by address
     /** A chat is being dragged: hold off rebuilding the list (that would cancel the drag) until it's dropped. */
     internal var dragging = false
 
@@ -518,6 +523,7 @@ class MainActivity : Activity() {
         if (requestCode == SAVE_IMAGE) return saveImageTo(uri)
         if (requestCode == PICK_ATTACH_PHOTO || requestCode == PICK_ATTACH_FILE) return attachPicked(uri, requestCode == PICK_ATTACH_PHOTO)
         if (requestCode == TAKE_MEDIA) return attachPicked(uri, data?.getBooleanExtra("photo", true) ?: true)
+        if (requestCode == PICK_CONTACT_PHOTO) return contactPhotoPicked(uri)
         if (requestCode == PICK_CONTACT) return contactPicked(uri)
         if (requestCode == TEXT_IMAGE) return textImagePicked(uri)
         if (requestCode != PICK_PHOTO) return

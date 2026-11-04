@@ -47,10 +47,19 @@ object CallAudio {
         sock = null
     }
 
+    /**
+     * Speaker on or off. Android 12 and newer ignore the old speakerphone switch for apps like this one (it needs the
+     * "communication device" instead), which is why the Speaker button did nothing. Older phones still use the old switch.
+     * It only takes effect once the call audio is up (mode set); [run] applies the saved choice at that point.
+     */
+    @Suppress("DEPRECATION")
     fun setSpeaker(ctx: Context, on: Boolean) {
         speaker = on
-        @Suppress("DEPRECATION")
-        ctx.getSystemService(AudioManager::class.java).isSpeakerphoneOn = on
+        val am = ctx.getSystemService(AudioManager::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            if (on) am.availableCommunicationDevices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { am.setCommunicationDevice(it) }
+            else am.clearCommunicationDevice()   // back to the earpiece (or a connected headset)
+        } else am.isSpeakerphoneOn = on
     }
 
     private fun run(ctx: Context, k: Core.Call) {
@@ -181,5 +190,5 @@ object CallAudio {
     internal fun roundTrip(pcm: Int): Int = ULAW[lin2ulaw(pcm).toInt() and 0xFF].toInt()
 
     @Suppress("DEPRECATION")
-    private fun speakerOff(am: AudioManager) { am.isSpeakerphoneOn = false }
+    private fun speakerOff(am: AudioManager) { if (android.os.Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice() else am.isSpeakerphoneOn = false }
 }

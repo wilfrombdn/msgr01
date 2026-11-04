@@ -26,7 +26,9 @@ internal fun MainActivity.pickPhoto() {
     @Suppress("DEPRECATION") startActivityForResult(i, PICK_PHOTO)
 }
 
-internal fun MainActivity.showCrop(photo: android.graphics.Bitmap) {
+/** The crop screen. By default it sets your Tellem profile photo; [done] / [cancel] let another screen (a contact's photo) use it instead. */
+internal fun MainActivity.showCrop(photo: android.graphics.Bitmap, done: ((ByteArray) -> Unit)? = null, cancel: (() -> Unit)? = null) {
+    cropCancel = cancel
     screen = Screen.CROP
     val crop = CropView(this, photo)
     val bottom = LinearLayout(this).apply {
@@ -36,11 +38,12 @@ internal fun MainActivity.showCrop(photo: android.graphics.Bitmap) {
         addView(tv("Cancel", 16f, Color.WHITE, true).apply {
             gravity = Gravity.CENTER
             setPadding(dp(12), dp(14), dp(12), dp(14))
-            setOnClickListener { showProfile() }
+            setOnClickListener { cancel?.invoke() ?: showProfile() }
         }, LinearLayout.LayoutParams(0, -2, 1f))
         addView(mainButton("Done") {
             val jpeg = crop.crop()
-            Messenger.run({ Messenger.core.setAvatar(jpeg) }, { showProfile() }) { e -> toast(errorText(e)); showProfile() }
+            if (done != null) done(jpeg)
+            else Messenger.run({ Messenger.core.setAvatar(jpeg) }, { showProfile() }) { e -> toast(errorText(e)); showProfile() }
         }.apply { background = round(Color.WHITE, 10); setTextColor(Color.parseColor("#111111")) }, LinearLayout.LayoutParams(0, -2, 1f))
     }
     setContentView(LinearLayout(this).apply {

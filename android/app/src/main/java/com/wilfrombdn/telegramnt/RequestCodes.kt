@@ -22,6 +22,7 @@ internal const val CALL_ROLE = 21
 internal const val CALL_PERM = 26
 internal const val ADD_CONTACT_PERM = 27
 internal const val PICK_CONTACT = 28   // was 21, the same as CALL_ROLE, so a picked contact was handled as a call-role result
+internal const val PICK_CONTACT_PHOTO = 29
 internal const val TEXT_IMAGE = 22
 internal const val TEXT_PERMS = 23
 internal const val CALL_LOG_PERM = 24
