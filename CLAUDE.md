@@ -14,10 +14,13 @@
   without asking the owner first.
 - Server backups run nightly from the owner's PC (accounts only, encrypted; see `SERVER-SETUP.md`). Keep the server holding as little as possible.
 
-## Waiting for the next release (since 7.0)
-- Snap mode: hold the pencil, slide onto "Snap", release → camera → tap to caption → pick Tellem friends/groups or texts → back where you were (MainActivity `snapHold`/`showSnapSend`, CameraActivity `snap` extra). Compiles; untested on a phone.
-- Saved Messages: hidden until the first save; "Save" in the long-press menu of Tellem and SMS messages (SMS ones keep "Forwarded from <name> (text)" via `fwd = "sms:<name>"`); setting "Keep saved messages in the Tellem window only" (pref `savedTellemOnly`, default off). Compiles; untested on a phone.
-- 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) has not been tested on a real phone, so expect fixes.
+## Waiting for the next release (since 7.6)
+- Nothing yet. 7.5 (Snap, Saved Messages) and 7.6 (camera button, full-screen camera, flash/timer, cleanup into feature files) and 7.0 (phone calls: InCallService + DialerActivity in PhoneCalls.kt) have not been tested on a real phone, so expect fixes.
+
+## Checking a refactor
+- Screens live in feature files (see README "Where things live"); `ScreenshotTest` writes a `.tree.txt` (view tree: types, text, sizes, positions) next to each PNG in `app/build/shots/`. Keep a copy before a refactor and diff afterwards: identical trees = same UI. Five call/download screens have live timers and always differ.
+- `RelayFlowTest` is skipped when no server is running (this PC has no Python), so push and let GitHub Actions run it before trusting changes to `Core.kt`, `Relay.kt` or `Messenger.kt`.
+- `./gradlew lintDebug` should stay at 0 errors. Do not move the launcher icon out of `mipmap-anydpi-v26` (release build breaks).
 
 ## Setting up another computer
 - Clone this repo and `git@github.com:wilfrombdn/wilfrombdn.github.io.git` to `~/wilfrombdn.github.io` (download page + update.json).

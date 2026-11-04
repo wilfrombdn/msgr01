@@ -13,6 +13,17 @@ name has changed.)
 - `SERVER-SETUP.md`: running the server, what it keeps, and honest limits
 - `RELEASING.md`: how every update is shipped (in-app update + download link)
 
+## Where things live (`android/app/src/main/java/com/wilfrombdn/telegramnt/`)
+
+- **Engine (no Android UI):** `Core.kt` (chat rules, crypto, calls), `Model.kt` (Msg, Contact, Me, Group), `Crypto.kt`,
+  `SignalStore.kt`, `Relay.kt`, `Net.kt`, `Tor.kt`, `Messenger.kt` (the app-wide singleton that owns the Core and the settings).
+- **Texts (SMS/MMS):** `Texts.kt`, `Mms.kt`, `TextReceivers.kt`, `PhoneCalls.kt`, `Phone.kt`.
+- **Screens:** `MainActivity.kt` holds the lifecycle and the state; every screen is its own file of extension functions on it
+  (`ChatList.kt`, `Chat.kt`, `Groups.kt`, `Settings.kt`, `Snap.kt`, `Saved.kt`, `TextScreens.kt`, `PhoneTab.kt`, `Media.kt`, ...).
+  Each file starts with a one-line description. `Screen.kt` is the list of pages, `RequestCodes.kt` the activity-result codes,
+  `UiPrefs.kt` the on/off choices stored on the phone, `Ui.kt` the shared view helpers.
+- **Other activities:** `CameraActivity.kt` (photo, video, snap captions, flash, timer), `CallActivity.kt`, `RoundActivity.kt`, `QrActivity.kt`.
+
 ## Build
 
 ```
