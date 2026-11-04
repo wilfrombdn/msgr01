@@ -41,6 +41,9 @@ internal fun MainActivity.snapHold(fab: ImageView, res: Int) {
         val p = s * 16 / 56
         fab.setPadding(p, p, p, p)
         fab.layoutParams = lp
+        // while it inflates it also rises toward the upper right (a view offset, so the layout margins stay as they are)
+        val rise = (s - base).toFloat() / (big - base)
+        fab.translationX = rise * dp(10); fab.translationY = -rise * dp(26)
     }
     fun sizeTo(target: Int, ms: Long, ease: android.animation.TimeInterpolator) {
         val lp = fab.layoutParams ?: return

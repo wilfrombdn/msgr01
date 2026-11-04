@@ -9,55 +9,72 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ScrollView
 
-// Slide animations between screens and tabs. All of them switch off with Settings → Animations (and with the phone's own
-// "remove animations" setting), and then everything changes instantly.
+// Slide animations between screens and tabs. They switch off with Settings → Animations, and then everything changes instantly.
+//
+// Why they are smooth: the screen that leaves is a flat picture of itself (taken just before the change), not a live copy of
+// all its rows that would have to be laid out again; the moving views are lifted onto the graphics chip for the slide
+// (so moving them costs next to nothing); and the clock never lets one slow frame (building the new screen) jump the motion ahead.
 
 /** Follows only Settings → Animations. (The phone's own animation speed is deliberately ignored: with it at 0 every animation used to be skipped.) */
 internal fun MainActivity.animationsOn() = UiPrefs.animations(this)
 
 internal fun MainActivity.contentRoot(): View? = findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
 
-/** Holds a leaving view while it slides out, and swallows touches so the stale screen can't be tapped. */
+/** A flat picture of [v] as it looks right now (null if it can't be taken: then the change simply happens without a slide). */
+internal fun snapshotOf(v: View): android.graphics.Bitmap? {
+    if (v.width <= 0 || v.height <= 0) return null
+    return runCatching { android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888).also { v.draw(android.graphics.Canvas(it)) } }.getOrNull()
+}
+
+private fun View.lift() = setLayerType(View.LAYER_TYPE_HARDWARE, null)
+private fun View.drop() = setLayerType(View.LAYER_TYPE_NONE, null)
+
+/** Holds the leaving picture while it slides out, and swallows touches so the stale screen can't be tapped. */
 private class Shield(ctx: Context) : FrameLayout(ctx) {
     override fun onInterceptTouchEvent(ev: MotionEvent) = true
 }
 
-private const val SLIDE_MS = 240L
+private const val SLIDE_MS = 230L
+
+private fun MainActivity.pictureView(bmp: android.graphics.Bitmap) = android.widget.ImageView(this).apply {
+    setImageBitmap(bmp); scaleType = android.widget.ImageView.ScaleType.FIT_XY
+}
 
 /**
- * The whole screen slides: [old] (the screen just replaced) leaves one way while the new one arrives from the other.
+ * The whole screen slides: [bmp] (a picture of the screen just replaced) leaves one way while the new one arrives from the other.
  * [dir] 1 = the new screen comes from the right, -1 = from the left.
  */
-internal fun MainActivity.slideScreens(old: View, dir: Int) {
+internal fun MainActivity.slideScreens(bmp: android.graphics.Bitmap, dir: Int) {
     val content = findViewById<ViewGroup>(android.R.id.content)
     val new = content.getChildAt(0) ?: return
-    if (new === old) return
-    (old.parent as? ViewGroup)?.removeView(old)
-    val shield = Shield(this).also { it.addView(old, FrameLayout.LayoutParams(-1, -1)) }
+    val pic = pictureView(bmp)
+    val shield = Shield(this).also { it.addView(pic, FrameLayout.LayoutParams(-1, -1)) }
     content.addView(shield, FrameLayout.LayoutParams(-1, -1))
     val w = (content.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels).toFloat()
-    val ease = DecelerateInterpolator(1.6f)
     new.translationX = dir * w
-    Tween(SLIDE_MS, ease, { f -> new.translationX = dir * w * (1f - f); old.translationX = -dir * w * f }) { new.translationX = 0f; content.removeView(shield) }.start()
+    new.lift(); pic.lift()
+    Tween(SLIDE_MS, DecelerateInterpolator(1.6f), { f -> new.translationX = dir * w * (1f - f); pic.translationX = -dir * w * f }) {
+        new.translationX = 0f; new.drop(); content.removeView(shield)
+    }.start()
 }
 
 /**
  * Only the list slides (Contacts / Calls / Texts), starting from wherever the finger let go ([startX]) so the motion carries on.
- * The old list stays on screen, sliding out, until the new one has arrived.
+ * [bmp] is a picture of the old list; it slides out while the new list arrives.
  */
-internal fun MainActivity.slideLists(old: View, startX: Float, dir: Int) {
+internal fun MainActivity.slideLists(bmp: android.graphics.Bitmap, startX: Float, dir: Int) {
     val frame = chatsFrame ?: return
     val new = chatsScroll ?: return
-    if (new === old) return
-    (old as? ScrollView)?.setOnScrollChangeListener(null)   // the left-behind list must not move the real scroll position
-    (old.parent as? ViewGroup)?.removeView(old)
-    val shield = Shield(this).also { it.addView(old, FrameLayout.LayoutParams(-1, -1)) }
+    val pic = pictureView(bmp)
+    val shield = Shield(this).also { it.addView(pic, FrameLayout.LayoutParams(-1, -1)) }
     frame.addView(shield, 1, FrameLayout.LayoutParams(-1, -1))   // above the new list, below the round button
     val w = (frame.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels).toFloat()
-    val ease = DecelerateInterpolator(1.6f)
-    old.translationX = startX
+    pic.translationX = startX
     new.translationX = startX + dir * w
-    Tween(SLIDE_MS, ease, { f -> old.translationX = startX + (-dir * w - startX) * f; new.translationX = (startX + dir * w) * (1f - f) }) { new.translationX = 0f; frame.removeView(shield) }.start()
+    new.lift(); pic.lift()
+    Tween(SLIDE_MS, DecelerateInterpolator(1.6f), { f -> pic.translationX = startX + (-dir * w - startX) * f; new.translationX = (startX + dir * w) * (1f - f) }) {
+        new.translationX = 0f; new.drop(); frame.removeView(shield)
+    }.start()
 }
 
 /** Contacts, Calls, Texts (and Folders when they have their own tab), left to right. */
@@ -73,11 +90,11 @@ internal fun MainActivity.canSwipePhoneTab(dir: Int): Boolean {
 
 /** Show a Phone tab. [dir] 1 = the tab is to the right of this one. [old] is the list to slide away (it may already be dragged part way). */
 internal fun MainActivity.gotoPhoneTab(to: String, dir: Int, old: View? = chatsScroll) {
-    val oldList = old?.takeIf { animationsOn() }
-    val startX = oldList?.translationX ?: 0f
-    oldList?.let { (it as? ScrollView)?.setOnScrollChangeListener(null); (it.parent as? ViewGroup)?.removeView(it) }
+    val startX = old?.translationX ?: 0f
+    val bmp = if (animationsOn()) old?.let { snapshotOf(it) } else null
+    old?.drop()
     phoneSub = to; chatsScrollY = 0; showChats()
-    if (oldList != null) slideLists(oldList, startX, dir)
+    if (bmp != null) slideLists(bmp, startX, dir)
 }
 
 /** Move one tab along (1 = the next, to the right; -1 = the previous). Does nothing at either end. */
@@ -111,14 +128,14 @@ internal class TabSwipeFrame(
             MotionEvent.ACTION_MOVE -> if (!swiping) {
                 val dx = e.x - x0; val dy = e.y - y0
                 val horizontal = Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy) * 1.5f
-                if (horizontal && ((fromEdge && dx > 0) || tabs)) { swiping = true; parent?.requestDisallowInterceptTouchEvent(true); return true }
+                if (horizontal && ((fromEdge && dx > 0) || tabs)) { swiping = true; parent?.requestDisallowInterceptTouchEvent(true); if (follow() && !fromEdge) list()?.lift(); return true }
             }
         }
         return false
     }
 
     private fun list(): View? = if (childCount > 0) getChildAt(0) else null
-    private fun back(v: View?) { v ?: return; val from = v.translationX; Tween(160, DecelerateInterpolator(), { f -> v.translationX = from * (1f - f) }).start() }
+    private fun back(v: View?) { v ?: return; val from = v.translationX; Tween(160, DecelerateInterpolator(), { f -> v.translationX = from * (1f - f) }) { v.drop() }.start() }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
@@ -141,10 +158,10 @@ internal class TabSwipeFrame(
         return swiping
     }
 }
-
 /**
  * Our own animation clock, in step with the screen's frames. The system's animators follow the phone's "animation speed"
- * developer/accessibility setting (at 0 they finish instantly), so these slides and the balloon use this instead.
+ * setting (at 0 they finish instantly), so these slides and the balloon use this instead. Each frame moves time on by at most
+ * 20 ms, so one slow frame (building the next screen) shows as a short pause, never as a jump.
  */
 internal class Tween(
     private val ms: Long,
@@ -152,14 +169,16 @@ internal class Tween(
     private val onUpdate: (Float) -> Unit,
     private val onEnd: () -> Unit = {},
 ) : android.view.Choreographer.FrameCallback {
-    private var t0 = 0L
+    private var last = 0L
+    private var elapsed = 0f
     private var live = true
     fun start(): Tween { android.view.Choreographer.getInstance().postFrameCallback(this); return this }
     fun cancel() { live = false }
     override fun doFrame(frameTimeNanos: Long) {
         if (!live) return
-        if (t0 == 0L) t0 = frameTimeNanos
-        val f = ((frameTimeNanos - t0) / 1_000_000f / ms).coerceIn(0f, 1f)
+        if (last != 0L) elapsed += ((frameTimeNanos - last) / 1_000_000f).coerceIn(0f, 20f)
+        last = frameTimeNanos
+        val f = (elapsed / ms).coerceIn(0f, 1f)
         onUpdate(ease.getInterpolation(f))
         if (f < 1f) android.view.Choreographer.getInstance().postFrameCallback(this) else onEnd()
     }

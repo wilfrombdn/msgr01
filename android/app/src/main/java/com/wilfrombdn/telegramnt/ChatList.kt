@@ -338,7 +338,7 @@ internal fun MainActivity.messageResults(list: LinearLayout, q: String) {
 
 /** Flip between the Tellem window and the Phone window (the bottom-left switch does this). */
 internal fun MainActivity.switchWindow() {
-    val old = if (animationsOn()) contentRoot() else null
+    val old = if (animationsOn()) contentRoot()?.let { snapshotOf(it) } else null   // a picture of this screen, taken before it changes
     val dir = if (textsTab) -1 else 1   // to Phone: it comes in from the right; back to Tellem: from the left
     textsTab = !textsTab; chatsScrollY = 0
     showChats()
