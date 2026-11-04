@@ -10,6 +10,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// Adding friends: the New Message screen, scanning a QR code, and showing my own.
+
 // ---------- add a friend ----------
 
 internal fun MainActivity.showNewChat() {

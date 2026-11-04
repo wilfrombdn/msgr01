@@ -13,6 +13,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// Group chats: list rows, create, join by link, the group screen and its settings.
+
 internal fun MainActivity.groupRow(g: Group, key: String? = null, bg: Int = listBg): View {
     val row = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL

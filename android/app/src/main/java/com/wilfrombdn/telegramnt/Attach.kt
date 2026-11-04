@@ -9,6 +9,8 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import java.io.File
 
+// The paperclip menu and sending a picked photo, video or file.
+
 internal fun MainActivity.attachMenu(anchor: View) {   // target already set in attachTo / attachGroupId
     sendOnce = false   // only the "View once photo" row turns it on, for the photo picked right after
     val panel = LinearLayout(this).apply {

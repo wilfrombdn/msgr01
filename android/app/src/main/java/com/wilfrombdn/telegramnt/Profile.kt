@@ -9,6 +9,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// Your profile screen, profile photo and its crop screen.
+
 // ---------- profile photo ----------
 
 internal fun MainActivity.photoMenu(anchor: View) {

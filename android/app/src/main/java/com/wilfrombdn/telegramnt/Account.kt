@@ -10,6 +10,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// Welcome screen, sign up and log in, and the "messages can arrive late" phone-setting fixes.
+
 // ---------- welcome, sign up, log in ----------
 
 internal fun MainActivity.showWelcome() {

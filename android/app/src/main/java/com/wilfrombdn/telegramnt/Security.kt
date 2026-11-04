@@ -6,6 +6,8 @@ import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
 
+// App lock, screenshot blocking, identity confirmation, self-destruct menus and reopening where you were.
+
 /** Nothing but the logo and an Unlock button until the phone's own lock (fingerprint, face, PIN) is passed. */
 internal fun MainActivity.showLock() {
     val firstShow = screen != Screen.LOCK
@@ -105,7 +107,7 @@ internal fun MainActivity.reopenSpot() {
 }
 
 /** Status/navigation bar colours (and dark icons on them in light mode). */
-internal fun MainActivity.shotsAllowed() = getSharedPreferences("ui", 0).getBoolean("shots", false)
+internal fun MainActivity.shotsAllowed() = UiPrefs.screenshots(this)
 
 internal fun MainActivity.applyShotPolicy() {
     if (shotsAllowed()) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)

@@ -11,6 +11,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import java.io.File
 
+// In-app updates: checking, the "update available" pop-up and installing.
+
 /** Once Tor is up, look for a newer version (at most every 6 hours) and offer it. */
 internal fun MainActivity.maybeCheckUpdate() {
     if (Tor.socksPort() == null && !Messenger.direct && !Tor.outdated) return   // Tor still starting

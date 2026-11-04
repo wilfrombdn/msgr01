@@ -3,6 +3,8 @@ package com.wilfrombdn.telegramnt
 import android.content.Intent
 import android.widget.LinearLayout
 
+// Recovery backup file: save it, restore from it.
+
 internal fun MainActivity.chooseRecoveryFile() {
     val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
         .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, "tellem-recovery.m01")   // no username in the name either

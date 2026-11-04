@@ -8,6 +8,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import java.io.File
 
+// Round video messages.
+
 /** A recorded round video: read it, make a round-ish preview frame, delete the file, send it to the open chat. */
 internal fun MainActivity.sendRound(path: String) {
     val c = chatUser?.let { Messenger.core.contact(it) }.takeIf { screen == Screen.CHAT }

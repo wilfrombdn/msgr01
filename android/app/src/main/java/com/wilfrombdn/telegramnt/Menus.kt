@@ -15,6 +15,8 @@ import android.widget.LinearLayout
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 
+// Long-press menus, the side drawer, chat menus, safety codes and the message actions.
+
 /** First five are fixed; the last three are your most-used emoji (never repeating one already shown). */
 internal fun MainActivity.quickReactions(): List<String> = MainActivity.quickReactions(synchronized(Messenger.emojiUse) { Messenger.emojiUse.toMap() }, fixedReactions, fillerReactions)
 

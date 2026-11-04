@@ -12,6 +12,8 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 
+// Voice message recording button and playback view.
+
 // ---------- voice messages ----------
 
 /**

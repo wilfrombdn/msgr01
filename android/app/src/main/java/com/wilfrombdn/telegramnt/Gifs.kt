@@ -14,6 +14,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// GIF search, recent GIFs and sending/resending them.
+
 // ---------- GIFs ----------
 
 internal fun MainActivity.isGif(m: Msg) = m.file?.optString("m") == "image/gif"

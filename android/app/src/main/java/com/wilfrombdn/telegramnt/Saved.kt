@@ -7,10 +7,12 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 
+// Saved Messages: hidden until the first save, saving Tellem and text messages into it.
+
 // ---------- saved messages ----------
 
 /** Keep saved messages in the Tellem window only (otherwise they also sit in the Phone window's texts). */
-internal fun MainActivity.savedTellemOnly() = getSharedPreferences("ui", 0).getBoolean("savedTellemOnly", false)
+internal fun MainActivity.savedTellemOnly() = UiPrefs.savedTellemOnly(this)
 
 /** The Saved Messages chat, but only once something has really been saved into it. */
 internal fun MainActivity.savedWithMessages(): Contact? = synchronized(Messenger.core) {

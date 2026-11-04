@@ -22,6 +22,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+// Shared look and view helpers: dimensions, text/icon/button builders, top bar, dialogs, toasts, the call bar.
+
 internal fun MainActivity.texturedBg(base: Int): android.graphics.drawable.Drawable {
     val bmp = noiseTiles.getOrPut(base) {
         val size = 180

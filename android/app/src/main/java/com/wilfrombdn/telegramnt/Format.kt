@@ -23,6 +23,10 @@ object Format {
     val MARKS = listOf("**" to "Bold", "__" to "Italic", "~~" to "Strike", "||" to "Spoiler", "`" to "Mono")
     val MENTION = Regex("@([a-z0-9_]{5,32})")
 
+    /** One compiled pattern per marker, built once (every message and chat-list row goes through these). */
+    private val MARK_PATTERNS = MARKS.associate { (mark, _) -> mark to Regex("(?s)" + Regex.escape(mark) + "(.+?)" + Regex.escape(mark)) }
+    private val SPOILER = MARK_PATTERNS.getValue("||")
+
     /**
      * The styled text. [spoilerShown] reveals spoilers; otherwise they're a solid block that calls
      * [reveal] when tapped. [people] are the @usernames that get highlighted.
@@ -30,7 +34,7 @@ object Format {
     fun render(text: String, ink: Int, accent: Int, people: Set<String>, spoilerShown: Boolean, reveal: () -> Unit): CharSequence {
         val sb = SpannableStringBuilder(text)
         for ((mark, kind) in MARKS) {
-            val re = Regex("(?s)" + Regex.escape(mark) + "(.+?)" + Regex.escape(mark))
+            val re = MARK_PATTERNS.getValue(mark)
             var from = 0
             while (true) {
                 val m = re.find(sb, from) ?: break
@@ -67,8 +71,8 @@ object Format {
 
     /** Text with the markers taken out (chat list, notifications, reply quotes). Spoilers stay hidden. */
     fun plain(text: String): String {
-        var t = Regex("(?s)\\|\\|(.+?)\\|\\|").replace(text) { "▒".repeat(minOf(it.groupValues[1].length, 12)) }
-        for ((mark, _) in MARKS) t = Regex("(?s)" + Regex.escape(mark) + "(.+?)" + Regex.escape(mark)).replace(t) { it.groupValues[1] }
+        var t = SPOILER.replace(text) { "▒".repeat(minOf(it.groupValues[1].length, 12)) }
+        for (re in MARK_PATTERNS.values) t = re.replace(t) { it.groupValues[1] }
         return t
     }
 

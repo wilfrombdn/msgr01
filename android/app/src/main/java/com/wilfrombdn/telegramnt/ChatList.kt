@@ -16,6 +16,8 @@ import android.widget.ScrollView
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 
+// The main chat list (Tellem window): rows, search, pins, archive and the Tor status title.
+
 internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     val refreshing = screen == Screen.CHATS   // same screen redrawing (new message, reconnect), not arriving from elsewhere
     if (!refreshing) window.decorView.post { maybeAskRingSetup() }

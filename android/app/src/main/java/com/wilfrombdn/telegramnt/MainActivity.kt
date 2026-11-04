@@ -33,7 +33,8 @@ class MainActivity : Activity() {
         "system" -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_NO
         else -> true
     }
-    internal fun pick(d: String, l: String) = Color.parseColor(if (dark) d else l)
+    private val parsedColors = java.util.concurrent.ConcurrentHashMap<String, Int>()   // "#RRGGBB" -> colour, parsed once
+    internal fun pick(d: String, l: String): Int = (if (dark) d else l).let { hex -> parsedColors.getOrPut(hex) { Color.parseColor(hex) } }
     internal val bar get() = pick("#1F1F1F", "#F1F3F6")       // top bars
     internal val listBg get() = pick("#141414", "#F7F8FA")    // chat list, inputs
     internal val wall get() = pick("#0B0B0B", "#E8EBEF")      // behind messages

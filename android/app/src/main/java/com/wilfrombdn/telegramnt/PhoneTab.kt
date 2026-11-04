@@ -13,6 +13,8 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// The Phone window: calls, contacts and the pencil button for each sub-tab.
+
 /** Call history and contacts, read in the background (again when older than 15 s); redraws when they arrive. */
 internal fun MainActivity.loadPhone() {
     if (System.currentTimeMillis() - phoneLoaded < 15_000 && phoneCalls != null) return

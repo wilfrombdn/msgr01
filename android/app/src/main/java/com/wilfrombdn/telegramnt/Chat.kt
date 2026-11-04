@@ -21,6 +21,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+// One private chat: the screen, message bubbles, replies and edits, keeping your place, and jump-to-message.
+
 internal fun MainActivity.showChat(user: String, restore: Pair<String, Int>? = null) {
     val c = Messenger.core.contact(user) ?: return showChats()
     screen = Screen.CHAT

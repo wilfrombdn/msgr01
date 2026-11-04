@@ -11,6 +11,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// Snap: hold the camera button, slide onto Snap, caption it and send it to friends or by text.
+
 /** Tap = the button's normal job. Hold = a "Snap" bubble pops up above it; slide onto it and release to open the camera. */
 internal fun MainActivity.snapHold(fab: View, frame: FrameLayout) {
     val ui = android.os.Handler(android.os.Looper.getMainLooper())

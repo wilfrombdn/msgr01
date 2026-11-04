@@ -14,6 +14,8 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 
+// Settings, storage and appearance screens.
+
 internal fun MainActivity.showSettings() {
     screen = Screen.SETTINGS
     connLabel = null
@@ -46,14 +48,14 @@ internal fun MainActivity.showSettings() {
     col.addView(gap(8))
     col.addView(settingSwitch("Get messages when the app is closed", Messenger.background) { on -> Messenger.background = on; Messenger.settingsChanged(); showSettings() })
     col.addView(tv("Privacy", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
-    col.addView(settingSwitch("Allow screenshots", shotsAllowed()) { on -> getSharedPreferences("ui", 0).edit().putBoolean("shots", on).apply(); applyShotPolicy() })
+    col.addView(settingSwitch("Allow screenshots", shotsAllowed()) { on -> UiPrefs.setScreenshots(this, on); applyShotPolicy() })
     col.addView(settingNote("Lets you screenshot and screen-record the chat screens (they also show in the recent-apps preview). Calls, camera and QR codes stay blocked."))
     col.addView(settingRow("App lock", if (Messenger.appLock) "On: asks for your fingerprint, face or PIN after ${when (Messenger.lockAfterMin) { 1 -> "1 minute"; 60 -> "1 hour"; else -> "${Messenger.lockAfterMin} minutes" }} away" else "Off") { appLockMenu() })
     val sd = Destruct.hours(this)
     col.addView(settingRow("Self-destruct", if (sd == 0) "Off" else "On: everything in $APP_NAME on this phone is wiped if it isn't opened for ${destructLabel(sd)}", if (sd == 0) white else red) { selfDestructMenu() })
     col.addView(settingSwitch("Show names in notifications", Messenger.notifyNames) { on -> Messenger.notifyNames = on; Messenger.settingsChanged() })
     col.addView(settingSwitch("Show message text in notifications", Messenger.notifyText) { on -> Messenger.notifyText = on; Messenger.settingsChanged() })
-    col.addView(settingSwitch("Reply from the lock screen without unlocking", ReplyReceiver.lockReply(this)) { on -> getSharedPreferences("ui", 0).edit().putBoolean("lockreply", on).apply() })
+    col.addView(settingSwitch("Reply from the lock screen without unlocking", ReplyReceiver.lockReply(this)) { on -> UiPrefs.setLockReply(this, on) })
     col.addView(settingNote("When off, replying to a notification asks for your phone passcode first. Always asked while app lock is on."))
     if (Build.VERSION.SDK_INT >= 29 || packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) {
         col.addView(tv("Phone calls", 14f, dim, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) })
@@ -74,13 +76,13 @@ internal fun MainActivity.showSettings() {
             null, "Cancel" to dim, "Open settings" to white) { b -> if (b == 1) runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) } }
     })
     if (Texts.canRead(this)) col.addView(settingSwitch("Show texts together with chats", Texts.mixed(this)) { on -> Texts.setMixed(this, on); textsTab = false })
-    col.addView(settingSwitch("Keep saved messages in the $APP_NAME window only", savedTellemOnly()) { on -> getSharedPreferences("ui", 0).edit().putBoolean("savedTellemOnly", on).apply() })
+    col.addView(settingSwitch("Keep saved messages in the $APP_NAME window only", savedTellemOnly()) { on -> UiPrefs.setSavedTellemOnly(this, on) })
     col.addView(settingNote("Saved Messages appears after you save your first message. Off: it also shows in the Phone window's texts."))
     if (Texts.canRead(this)) {
         val places = listOf("top" to "Top of your texts", "bottom" to "Bottom of your texts", "menu" to "In the side menu", "tab" to "Their own Folders tab")
         col.addView(settingRow("Archive, Codes and Spam folders", "Shown: " + places.first { it.first == folderPlace() }.second.replaceFirstChar { it.lowercase() }) {
             pickList("Where should these folders go?", "Archive, Codes and Spam & blocked", places.map { it.second }.toTypedArray()) { i ->
-                getSharedPreferences("ui", 0).edit().putString("folders", places[i].first).apply(); showSettings()
+                UiPrefs.setFolderPlace(this, places[i].first); showSettings()
             }
         })
     }

@@ -9,6 +9,8 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// Chat folders and the text folders (Archive, Codes, Spam), including drag-and-drop into folders.
+
 internal fun MainActivity.folderRow(f: Folder, unread: Int, count: Int): View {
     val row = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
@@ -134,7 +136,7 @@ internal fun MainActivity.enableFolderDrops(list: LinearLayout, scroll: ScrollVi
 }
 
 /** Where Archive / Codes / Spam & blocked live: "top" or "bottom" of the texts, the side "menu", or their own "tab". */
-internal fun MainActivity.folderPlace() = getSharedPreferences("ui", 0).getString("folders", "top") ?: "top"
+internal fun MainActivity.folderPlace() = UiPrefs.folderPlace(this)
 
 internal fun MainActivity.folderCounts() = Triple(Texts.threads.count { it.archived }, Texts.threads.count { it.code }, Texts.threads.count { it.spam })
 

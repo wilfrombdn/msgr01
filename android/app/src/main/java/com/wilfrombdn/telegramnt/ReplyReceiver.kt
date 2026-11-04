@@ -29,7 +29,7 @@ class ReplyReceiver : BroadcastReceiver() {
         const val KEY = "reply"
 
         /** Reply from the lock screen without typing the phone's passcode (Settings > Privacy; off with app lock). */
-        fun lockReply(ctx: Context) = ctx.getSharedPreferences("ui", 0).getBoolean("lockreply", true) && !Messenger.appLock
+        fun lockReply(ctx: Context) = UiPrefs.lockReply(ctx) && !Messenger.appLock
 
         fun noUnlock(ctx: Context, b: Notification.Action.Builder) {
             if (android.os.Build.VERSION.SDK_INT >= 31) b.setAuthenticationRequired(!lockReply(ctx))

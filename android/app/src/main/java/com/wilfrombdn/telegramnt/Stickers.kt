@@ -8,6 +8,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import java.io.ByteArrayOutputStream
 
+// Stickers: saving a picture as a sticker and the sticker tab.
+
 // ---------- stickers ----------
 
 /** Stickers: a picture named sticker.* — shown big, with no bubble behind it. */

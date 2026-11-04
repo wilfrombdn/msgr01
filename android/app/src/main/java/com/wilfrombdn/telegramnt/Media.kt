@@ -17,6 +17,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// Photos and files in messages: viewing, saving, view-once, downloading, and shrinking/decoding images.
+
 /** Puts the photo on the clipboard (a temporary unlocked copy, wiped next time the app opens). */
 /** Longest side kept for in-app camera photos: at least a phone screen tall, so nothing is shrunk. */
 internal const val CAMERA_SIDE = 2560

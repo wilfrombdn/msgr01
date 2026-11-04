@@ -8,6 +8,8 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 
+// Starting Tellem calls from a chat and the call line shown inside a chat.
+
 internal fun MainActivity.callFriend(c: Contact) {
     if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
         callAfterMic = c

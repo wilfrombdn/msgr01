@@ -6,6 +6,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// Emoji picker and the emoji list.
+
 /** Full emoji list for choosing any reaction. */
 internal fun MainActivity.pickEmoji(onPick: (String) -> Unit) {
     val data = loadEmoji(); if (data.isEmpty()) return

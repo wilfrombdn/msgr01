@@ -14,6 +14,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import java.util.Locale
 
+// Polls, shared locations and link preview cards.
+
 // ---------- polls ----------
 
 /** Attach > Poll (groups): a question and 2-10 options. */

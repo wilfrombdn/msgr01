@@ -9,6 +9,8 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
+// Forwarding messages, sharing into Tellem from other apps, and the "pick a chat" list.
+
 internal fun MainActivity.fwdLabel(user: String, ink: Int) = tv("Forwarded from ${displayName(user)}", 13.5f, (ink and 0x00FFFFFF) or (0xCC shl 24)).apply {
     setTypeface(typeface, android.graphics.Typeface.ITALIC); setPadding(0, 0, 0, dp(3))
 }

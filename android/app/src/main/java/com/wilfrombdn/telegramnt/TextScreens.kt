@@ -20,6 +20,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import androidx.core.view.children
 
+// Normal texts (SMS/MMS): the text list, a text conversation, new text, and the texting-app role.
+
 /** Ask Android to make Tellem the texting app (Android shows its own "set as default" question). */
 internal fun MainActivity.askCallRole() {
     val rm = if (Build.VERSION.SDK_INT >= 29) getSystemService(android.app.role.RoleManager::class.java) else null
