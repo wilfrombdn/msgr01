@@ -1,64 +1,136 @@
 package com.wilfrombdn.telegramnt
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.atan2
 import kotlin.math.hypot
 
 class ShootWorldTest {
     private fun fresh() = ShootWorld(ShootLevel.townHall())
+    private fun step(w: ShootWorld, secs: Float, fire: Boolean = false) { var t = 0f; while (t < secs) { w.update(0.016f, 0f, 0f, 0f, fire); t += 0.016f } }
+    private fun intoPlay(w: ShootWorld) { var i = 0; while (w.phase == ShootWorld.Phase.INTRO && i++ < 600) w.update(0.016f, 0f, 0f, 0f, false) }
 
-    @Test fun introShootsHostageThenPlays() {
+    @Test fun everyoneStartsOnFreeFloor() {
         val w = fresh()
-        var i = 0
-        while (w.phase == ShootWorld.Phase.INTRO && i++ < 400) w.update(0.016f, 0f, 0f, 0f, 0f, 0f, 0f)
-        assertEquals(ShootWorld.Phase.PLAY, w.phase)
+        for (n in w.npcs) {
+            val ch = w.tile(n.x.toInt(), n.y.toInt())
+            assertTrue("npc ${n.id} at ${n.x},${n.y} stands on '$ch'", ch == '.')
+        }
+    }
+
+    @Test fun ambushShootsTheHostageAndYouDiveBehindATable() {
+        val w = fresh()
+        step(w, 1.4f)
+        assertEquals(ShootWorld.Phase.INTRO, w.phase)
+        assertTrue("officers aim at you", w.npcs.filter { !it.civ && !it.hostage }.all { it.state == ShootWorld.AIMED })
+        assertFalse(w.hostage!!.dead)
+        step(w, 1.5f)                                   // 1.5 s of everyone aiming, then the shot
         assertTrue(w.hostage!!.dead)
+        intoPlay(w)
+        assertEquals(ShootWorld.Phase.PLAY, w.phase)
+        assertEquals(1, w.tipped.size)
+        val tb = w.tipped.first()
+        assertTrue("you land next to the table", hypot(w.px - (tb.first + 0.5f), w.py - (tb.second + 0.5f)) < 1.6f)
+        assertTrue(w.npcs.filter { !it.civ && !it.hostage }.all { it.state == ShootWorld.ENGAGE })
     }
 
-    @Test fun doorsStayLockedUntilRoomClear() {
-        val w = fresh()
-        assertTrue(w.doorClosed(7, 18))
-        var i = 0
-        while (w.phase == ShootWorld.Phase.INTRO && i++ < 400) w.update(0.016f, 0f, 0f, 0f, 0f, 0f, 0f)
-        // cheat-kill every officer of room 0 by hand-fired bullets: teleport and shoot
-        for (n in w.npcs.filter { !it.civ && it.room == 0 }) { n.dead = true }
-        w.update(0.016f, 0f, 0f, 0f, 0f, 0f, 0f)
-        assertTrue(w.cleared[0]); assertTrue(!w.doorClosed(7, 18))
+    @Test fun lobbyClearOpensTheHallAndTheClerksRunOut() {
+        val w = fresh(); intoPlay(w)
+        assertTrue(w.doorClosed(7, 32))
+        for (n in w.npcs.filter { !it.civ && it.room == ShootLevel.LOBBY }) n.dead = true
+        step(w, 0.05f)
+        assertTrue(w.lobbyClear); assertFalse(w.doorClosed(7, 32))
+        step(w, 25f)
+        assertTrue("every living clerk got out", w.npcs.filter { it.civ && !it.dead }.all { it.gone })
     }
 
-    @Test fun officersKillYouIfYouStandInSight() {
-        val w = fresh()
-        var i = 0
-        while (i++ < 2000 && w.phase != ShootWorld.Phase.DEAD) w.update(0.016f, 0f, 0f, 0f, 0f, 0f, 0f)
-        assertEquals(ShootWorld.Phase.DEAD, w.phase)
+    @Test fun rollMovesYouAndMakesYouHardToHit() {
+        val w = fresh(); intoPlay(w)
+        val y0 = w.py
+        w.roll(0f, 1f)
+        step(w, 0.1f)
+        assertTrue(w.invulnerable || w.rollT > 0f)
+        step(w, 0.5f)
+        assertTrue("moved", w.py != y0 || w.px != w.px)
+        w.roll(1f, 0f); assertTrue("roll is on cooldown", w.rollT == 0f)
     }
 
-    @Test fun playerBulletKillsOfficer() {
-        val w = fresh()
+    @Test fun grenadeNeedsATargetInRange() {
+        val w = fresh(); intoPlay(w)
+        for (n in w.npcs) if (!n.civ && !n.hostage) n.dead = true
+        assertEquals("NO TARGET", w.throwGrenade())
+        // a pair of officers far across the lobby: out of range
+        val a = w.npcs.first { !it.civ && !it.hostage }; val b = w.npcs.last { !it.civ && !it.hostage }
+        a.dead = false; b.dead = false
+        a.x = w.px; a.y = w.py - 13.0f; b.x = w.px + 0.5f; b.y = w.py - 13.0f
+        // make sure there is a clear line: put the player in the open middle row of the lobby
+        w.px = 5.5f; w.py = 60.5f; a.x = 5.5f; a.y = 47.5f - 0f; b.x = 6.0f; b.y = 47.5f
+        val r = w.throwGrenade()
+        assertTrue("got $r", r == "OUT OF RANGE" || r == "NO TARGET")
+    }
+
+    @Test fun grenadeKillsAGroupInRange() {
+        val w = fresh(); intoPlay(w)
+        for (n in w.npcs) if (!n.civ && !n.hostage) n.dead = true
+        val offs = w.npcs.filter { !it.civ && !it.hostage }.take(3)
+        w.px = 5.5f; w.py = 60.5f
+        offs[0].dead = false; offs[0].x = 5.5f; offs[0].y = 54.0f
+        offs[1].dead = false; offs[1].x = 6.3f; offs[1].y = 54.2f
+        offs[2].dead = false; offs[2].x = 5.0f; offs[2].y = 53.8f
+        val why = w.throwGrenade(); assertNull("why: $why", why)
+        assertEquals(4, w.grenades)
+        w.diving = true; step(w, 3f); w.diving = false
+        assertTrue("whole group down", offs.all { it.dead })
+        assertTrue(w.phase == ShootWorld.Phase.PLAY)
+    }
+
+    @Test fun gunKillsTheClosestOfficerYouCanSee() {
+        val w = fresh(); intoPlay(w)
+        for (n in w.npcs) if (!n.civ && !n.hostage) n.dead = true
+        val o = w.npcs.first { !it.civ && !it.hostage }
+        w.px = 5.5f; w.py = 60.5f; o.dead = false; o.x = 5.5f; o.y = 56.5f; o.state = ShootWorld.IDLE
+        assertNotNull(w.nearestTarget())
         var i = 0
-        while (w.phase == ShootWorld.Phase.INTRO && i++ < 400) w.update(0.016f, 0f, 0f, 0f, 0f, 0f, 0f)
-        val o = w.npcs.first { !it.civ && it.room == 0 }
-        w.px = o.x; w.py = o.y + 5f
-        val a = atan2(o.y - w.py, o.x - w.px)
-        w.update(0.016f, 0f, 0f, 0f, kotlin.math.cos(a), kotlin.math.sin(a), 1f)
-        i = 0
-        while (!o.dead && i++ < 120 && w.phase == ShootWorld.Phase.PLAY) w.update(0.016f, 0f, 0f, 0f, kotlin.math.cos(a), kotlin.math.sin(a), 1f)
+        while (!o.dead && i++ < 200 && w.phase == ShootWorld.Phase.PLAY) w.update(0.016f, 0f, 0f, 0f, true)
         assertTrue(o.dead || w.phase == ShootWorld.Phase.DEAD)
     }
 
-    @Test fun finaleRuns() {
-        val w = fresh()
+    @Test fun coverSoaksUpBulletsAimedAtYouBehindFurniture() {
+        var soaked = 0; var hits = 0
+        for (seed in 0 until 60) {
+            val w = ShootWorld(ShootSpec(ShootLevel.townHall().map, emptyList(), emptyList(), emptyList(), emptyList(), 7.5f to 63.5f, seed * 7919 + 1234567))
+            w.phase = ShootWorld.Phase.PLAY
+            // you crouch behind the reception desk (row 55), a shooter fires from the north
+            w.px = 7.5f; w.py = 56.4f
+            w.bullets += ShootWorld.Bullet(7.5f, 52f, 0f, 12f, false)
+            var i = 0
+            while (w.bullets.isNotEmpty() && i++ < 100) w.update(0.016f, 0f, 0f, 0f, false)
+            if (w.phase == ShootWorld.Phase.DEAD) hits++ else soaked++
+        }
+        assertTrue("cover stopped most ($soaked saved, $hits hit)", soaked in 35..58)
+    }
+
+    @Test fun clearingEverythingAndKickingTheDoorRunsTheEnding() {
+        val w = fresh(); intoPlay(w)
+        for (n in w.npcs.filter { !it.civ && !it.hostage }) n.dead = true
+        step(w, 0.05f)
+        assertTrue(w.mayorUnlocked)
+        w.px = 7.5f; w.py = 12.6f
+        w.update(0.016f, 0f, -1f, 1f, false)
         var i = 0
-        while (w.phase == ShootWorld.Phase.INTRO && i++ < 400) w.update(0.016f, 0f, 0f, 0f, 0f, 0f, 0f)
-        for (n in w.npcs.filter { !it.civ }) n.dead = true
-        w.update(0.016f, 0f, 0f, 0f, 0f, 0f, 0f)
-        w.px = 8f; w.py = 8f
-        w.update(0.016f, 0f, -1f, 1f, 0f, 0f, 0f)
-        i = 0
-        while (w.phase != ShootWorld.Phase.DONE && i++ < 3000) w.update(0.016f, 0f, 0f, 0f, 0f, 0f, 0f)
+        while (w.phase != ShootWorld.Phase.DONE && i++ < 3000) w.update(0.016f, 0f, 0f, 0f, false)
         assertEquals(ShootWorld.Phase.DONE, w.phase)
-        assertTrue(w.runnerPos(19) != null || true)
+        assertFalse(w.doorClosed(7, 11))
+    }
+
+    @Test fun officersKillYouIfYouStandInTheOpen() {
+        val w = fresh(); intoPlay(w)
+        w.px = 7.5f; w.py = 45.5f; w.face = 0f
+        var i = 0
+        while (i++ < 4000 && w.phase != ShootWorld.Phase.DEAD) w.update(0.016f, 0f, 0f, 0f, false)
+        assertEquals(ShootWorld.Phase.DEAD, w.phase)
     }
 }

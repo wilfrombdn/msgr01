@@ -9,6 +9,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /** The night palette shared by every pixel-art scene. */
@@ -152,6 +153,59 @@ internal open class PixelSprites {
         c.restore()
     }
 
+
+    protected val swatOutfit = Outfit(PX.SKIN, 0xFF111418.toInt(), 0xFF1D2430.toInt(), 0xFF0B0F16.toInt(), 0xFF1E2632.toInt(), null, 0xFF141A24.toInt(), PX.K, 0xFF0B0F16.toInt(), radio = true)
+
+    /** A SWAT officer in a helmet, visor and armour plates. */
+    protected fun swatman(c: Canvas, fx: Int, fy: Int, dir: Int, frame: Int) {
+        folk(c, fx, fy, dir, frame, swatOutfit, false, false)
+        if (dir == 2) {
+            rect(c, fx - 3, fy - 16, 7, 2, PX.K); rect(c, fx - 2, fy - 16, 2, 1, 0xFF29F0FF.toInt()); rect(c, fx + 1, fy - 16, 2, 1, 0xFF29F0FF.toInt())   // visor
+            rect(c, fx - 4, fy - 20, 9, 1, 0xFF3A4458.toInt())
+            rect(c, fx - 4, fy - 12, 9, 5, 0xFF2B3442.toInt()); rect(c, fx - 4, fy - 12, 9, 1, 0xFF4A5470.toInt()); rect(c, fx - 3, fy - 8, 2, 2, 0xFF141A24.toInt()); rect(c, fx + 2, fy - 8, 2, 2, 0xFF141A24.toInt())
+            rect(c, fx - 1, fy - 11, 3, 2, 0xFF3A4458.toInt())
+        } else {
+            rect(c, fx - 2, fy - 16, 6, 2, PX.K); px(c, fx + 3, fy - 16, 0xFF29F0FF.toInt())
+            rect(c, fx - 3, fy - 12, 7, 5, 0xFF2B3442.toInt()); rect(c, fx - 3, fy - 12, 7, 1, 0xFF4A5470.toInt())
+        }
+    }
+
+    /** A rifle held at the shoulder pointing along [ang], with a red laser dot on the target when [laser] is set. */
+    protected fun rifle(c: Canvas, sx: Int, sy: Int, ang: Float, laser: Boolean, target: Pair<Int, Int>) {
+        val ca = Math.cos(ang.toDouble()).toFloat(); val sa = Math.sin(ang.toDouble()).toFloat()
+        for (i in -3..13) {
+            val x = sx + (ca * i).roundToInt(); val y = sy + (sa * i).roundToInt()
+            rect(c, x, y, 2, 2, if (i < 2) 0xFF6A4A32.toInt() else if (i == 7 || i == 8) 0xFFB4BED6.toInt() else 0xFF5A6478.toInt()); px(c, x, y, 0xFF8A94AC.toInt())
+        }
+        rect(c, sx + (ca * 5).roundToInt() + 1, sy + (sa * 5).roundToInt() + 2, 2, 3, 0xFF0B0F16.toInt())
+        if (laser) {
+            val mx = sx + (ca * 14).roundToInt(); val my = sy + (sa * 14).roundToInt()
+            val len = Math.hypot((target.first - mx).toDouble(), (target.second - my).toDouble()).toInt().coerceAtLeast(1)
+            for (k in 0 until len step 4) px(c, mx + (target.first - mx) * k / len, my + (target.second - my) * k / len, a(PX.RED, 0x90))
+            rect(c, target.first - 1, target.second - 1, 3, 3, PX.RED); px(c, target.first, target.second, PX.W)
+        }
+    }
+
+
+    /** A speech bubble with a pointer to the head at (hx, topY). The text types itself out, [shown] letters so far. */
+    protected fun bubble(c: Canvas, text: String, hx: Int, topY: Int, shown: Int, maxX: Int) {
+        p.typeface = android.graphics.Typeface.MONOSPACE; p.textSize = 8f; p.textAlign = android.graphics.Paint.Align.LEFT; p.style = android.graphics.Paint.Style.FILL
+        val maxW = 112f
+        val lines = ArrayList<String>(); var cur = ""
+        for (word in text.split(" ")) { val tryL = if (cur.isEmpty()) word else "$cur $word"; if (p.measureText(tryL) > maxW && cur.isNotEmpty()) { lines += cur; cur = word } else cur = tryL }
+        if (cur.isNotEmpty()) lines += cur
+        val bw = (lines.maxOf { p.measureText(it) } + 8f).toInt(); val bh = lines.size * 9 + 6
+        val x0 = (hx - bw / 2).coerceIn(3, maxX - bw - 3); val y0 = topY - 5 - bh
+        rect(c, x0 - 1, y0 - 1, bw + 2, bh + 2, PX.K); rect(c, x0, y0, bw, bh, PX.W)
+        val ax = hx.coerceIn(x0 + 4, x0 + bw - 5)
+        rect(c, ax - 3, y0 + bh, 7, 1, PX.K); rect(c, ax - 2, y0 + bh, 5, 1, PX.W)
+        rect(c, ax - 2, y0 + bh + 1, 5, 1, PX.K); rect(c, ax - 1, y0 + bh + 1, 3, 1, PX.W)
+        rect(c, ax - 1, y0 + bh + 2, 3, 1, PX.K); px(c, ax, y0 + bh + 2, PX.W); px(c, ax, y0 + bh + 3, PX.K)
+        p.color = PX.K
+        var left = shown
+        for ((i, ln) in lines.withIndex()) { if (left <= 0) break; c.drawText(ln.take(left), (x0 + 4).toFloat(), (y0 + 9 + i * 9).toFloat(), p); left -= ln.length + 1 }
+        p.typeface = null
+    }
 
     /** The clock the scenes advance each frame, for little animations (a wrench swinging, smoke rising). */
     protected var animT = 0f

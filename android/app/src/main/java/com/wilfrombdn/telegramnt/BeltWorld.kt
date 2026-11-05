@@ -41,6 +41,7 @@ internal class BeltWorld(val spec: BeltSpec) {
     var endS = spec.endS             // where the kicker is (it moves on while you are short of coins)
     var invuln = 0f; var hitFlash = 0f; var shake = 0f; var coinFlash = 0f
     var speedNow = 0f
+    var fellInHole = false           // the last life was lost to a hole in the belt (shows YOU FELL), otherwise YOU DIED
     var fell = false                 // set once the fall has played out: the stage restarts
     var moving = false
     var launchK = 0f                 // 0..1 through the throw at the end
@@ -132,7 +133,7 @@ internal class BeltWorld(val spec: BeltSpec) {
             val dx = max(abs(x - obsX(o)) - o.hw, 0f); val ds = max(abs(s - o.curS) - o.hs, 0f)
             if (dx < 0.38f && ds < 0.4f) {
                 lives--; hits++; invuln = 1.4f; hitFlash = 0.4f; shake = 0.3f
-                if (lives <= 0) { phase = Phase.FALL; phaseT = 0f }
+                if (lives <= 0) { phase = Phase.FALL; phaseT = 0f; fellInHole = o.kind == GAP }
                 break
             }
         }

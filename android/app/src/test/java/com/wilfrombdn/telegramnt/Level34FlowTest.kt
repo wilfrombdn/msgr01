@@ -37,8 +37,8 @@ class Level34FlowTest {
         v.debugMg(2); v.debugMgAdvance(4f); shot(v, "v3-cine-a")
         v.debugMgAdvance(8f)
         assertEquals(3, v.debugLevelIdx()); assertEquals(0, v.debugMgIdx())
-        v.debugMgAdvance(5f); shot(v, "v4-arrive")
-        v.debugMgAdvance(7f)
+        v.debugMgAdvance(8f); shot(v, "v4-arrive")
+        v.debugMgAdvance(12f)
         assertEquals(1, v.debugMgIdx())
         v.debugMgAdvance(3f); shot(v, "v4-shoot")
     }

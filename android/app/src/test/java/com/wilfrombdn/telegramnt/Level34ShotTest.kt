@@ -63,6 +63,34 @@ class Level34ShotTest {
         println("fly shots saved=$saved rocketsSeen=${w.rocketsSeen}")
     }
 
+    @Test fun lobbyShots() {
+        val w = ShootWorld(ShootLevel.townHall()); val s = ShootScene(w)
+        fun run(secs: Float) { var t = 0f; while (t < secs) { w.update(0.016f, 0f, 0f, 0f, false); t += 0.016f } }
+        run(0.2f); for (i in 0..20) s.render(i * 0.016f); save(s.render(0.5f), "l4-lobby-0-walkin")
+        run(2.0f); save(s.render(2.5f), "l4-lobby-1-frozen")
+        run(0.9f); save(s.render(3.5f), "l4-lobby-2-dive")
+        w.diving = true; run(2.0f); w.diving = false; for (i in 0..30) s.render(5f + i * 0.016f); save(s.render(6f), "l4-lobby-3-fight")
+        for (n in w.npcs) if (!n.civ && n.room == ShootLevel.LOBBY) n.dead = true
+        run(0.1f); w.px = 7.5f; w.py = 34.5f; for (i in 0..30) s.render(7f + i * 0.016f); save(s.render(8f), "l4-hall-door")
+        w.px = 7.5f; w.py = 31.0f; w.diving = true; run(0.1f); for (i in 0..30) s.render(9f + i * 0.016f); save(s.render(9.5f), "l4-hall-0")
+        w.px = 7.5f; w.py = 22.5f; run(0.1f); save(s.render(10f), "l4-hall-1")
+        w.px = 3.0f; w.py = 21.5f; run(0.1f); save(s.render(11f), "l4-room-office")
+        w.px = 3.0f; w.py = 28.5f; run(0.1f); save(s.render(11.5f), "l4-room-store")
+    }
+
+    @Test fun mayorShots() {
+        val w = ShootWorld(ShootLevel.townHall()); val s = ShootScene(w)
+        fun run(secs: Float) { var t = 0f; while (t < secs) { w.update(0.016f, 0f, 0f, 0f, false); t += 0.016f } }
+        run(4f); for (n in w.npcs) if (!n.civ && !n.hostage) n.dead = true
+        run(0.1f); w.px = 7.5f; w.py = 12.6f; run(0.05f)
+        for ((k, tt) in listOf(0.4f, 2.0f, 4.0f, 6.0f, 9.0f, 10.4f, 12.8f, 13.6f).withIndex()) { while (w.ft < tt) run(0.016f); for (i in 0..40) s.render(20f + i * 0.016f); save(s.render(21f), "l4-mayor-$k") }
+    }
+
+    @Test fun cineHall() {
+        val c = CineScene(1)
+        for (tt in listOf(1.5f, 5.0f, 8.0f, 12.3f, 14.5f)) { c.t = tt; save(c.render(tt), "l4-hall-${(tt * 10).toInt()}") }
+    }
+
     @Test fun cine() {
         val c = CineScene(0)
         for (tt in listOf(0.2f, 1.2f, 2.6f, 4.2f, 5.8f, 7.6f, 8.4f)) { c.t = tt; save(c.render(tt), "l3-cine-${(tt * 10).toInt()}") }

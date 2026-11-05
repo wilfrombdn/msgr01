@@ -37,6 +37,8 @@ internal class PacWorld(val spec: PacSpec) {
     var doorX = 0; var doorY = 0
     var doorOpen = false
     var phase = Phase.INTRO
+    /** Each failed try makes the police 6% slower (down to 60%) and the catch circle a little smaller. */
+    var fails = 0
     var t = 0f; var phaseT = 0f
 
     // me
@@ -190,7 +192,7 @@ internal class PacWorld(val spec: PacSpec) {
         moveLeavers(dt)
         for (gh in ghosts) if (gh.state == OUT) moveCop(gh, dt)
         // caught?
-        for (gh in ghosts) if (gh.state != IN_CHAMBER && gh.visible && hypot(gh.x - px, gh.y - py) < CATCH) { phase = Phase.CAUGHT; phaseT = 0f }
+        for (gh in ghosts) if (gh.state != IN_CHAMBER && gh.visible && hypot(gh.x - px, gh.y - py) < CATCH - 0.03f * min(fails, 4)) { phase = Phase.CAUGHT; phaseT = 0f }
     }
 
     private fun releaseCops() {
@@ -267,7 +269,9 @@ internal class PacWorld(val spec: PacSpec) {
     }
 
     // ----- a cop out in the sewer -----
-    private fun copSpeed(gh: Ghost): Float {
+    private fun copSpeed(gh: Ghost): Float = copSpeedRaw(gh) * (1f - 0.06f * fails).coerceAtLeast(0.6f)
+
+    private fun copSpeedRaw(gh: Ghost): Float {
         val inTunnel = floor(gh.y).toInt() == spec.tunnelRow && (gh.x < 5f || gh.x > w - 5f)
         if (inTunnel) return U * 0.4f
         if (gh.id == BLINKY) { val e = elroy(); if (e == 2) return U * 0.85f; if (e == 1) return U * 0.8f }

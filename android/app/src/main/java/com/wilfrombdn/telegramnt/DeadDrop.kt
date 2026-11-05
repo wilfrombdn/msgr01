@@ -15,6 +15,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import kotlin.math.PI
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -48,6 +49,7 @@ internal fun MainActivity.showDeadDrop() {
     }
     setContentView(frame)
     window.statusBarColor = Color.TRANSPARENT; window.navigationBarColor = Color.TRANSPARENT
+    if (android.os.Build.VERSION.SDK_INT >= 28) window.attributes = window.attributes.also { it.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES }
     @Suppress("DEPRECATION")
     window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
     frame.requestApplyInsets()
@@ -148,10 +150,14 @@ internal class DeadDropView(
     }
     private val mgName get() = if (mgIdx < 0) null else stagesOf(spec)?.getOrNull(mgIdx)
     private val aimCx get() = width - joyCx
+    private var gunId = -1; private var rollId = -1; private var rollX = 0f; private var rollY = 0f; private var rolled = false
+    private var grMsg = ""; private var grMsgT = 0f
+    private val gunR get() = 46f * d; private val gunCx get() = width - 22f * d - gunR
+    private val grR get() = 32f * d; private val grCx get() = gunCx - gunR - grR - 8f * d; private val grCy get() = joyCy + 14f * d
 
     private fun startMg(i: Int) {
         mgIdx = i; belt = null; beltScene = null; fly = null; flyScene = null; shoot = null; shootScene = null; cine = null
-        bPid = -1; joyId = -1; aimId = -1; thrustId = -1; joyActive = false; mag = 0f; aimMag = 0f; knobX = 0f; knobY = 0f; aimKX = 0f; aimKY = 0f; deadT = 0f; mgPending = -9
+        bPid = -1; joyId = -1; aimId = -1; thrustId = -1; gunId = -1; rollId = -1; grMsgT = 0f; joyActive = false; mag = 0f; aimMag = 0f; knobX = 0f; knobY = 0f; aimKX = 0f; aimKY = 0f; deadT = 0f; mgPending = -9
         when (mgName) {
             "belt" -> { belt = BeltWorld(BeltLevel.warehouse); beltScene = BeltScene(belt!!); music.setHeat(3) }
             "fly" -> { fly = FlyWorld(FlySpec()); flyScene = FlyScene(fly!!); music.setHeat(4) }
@@ -183,7 +189,8 @@ internal class DeadDropView(
         fly?.let { f -> f.thrust = thrustId >= 0; f.update(dt); if (f.finished) mgGo(mgIdx + 1) }
         cine?.let { cn -> cn.t += dt; if (cn.t >= cn.fadeStart) mgGo(mgIdx + 1) }
         shoot?.let { sw ->
-            sw.update(dt, ix, iy, mag, aimDx, aimDy, aimMag)
+            sw.update(dt, ix, iy, mag, gunId >= 0)
+            grMsgT = max(0f, grMsgT - dt)
             if (sw.phase == ShootWorld.Phase.DEAD) deadT += dt
             if (sw.phase == ShootWorld.Phase.DONE) mgGo(mgIdx + 1)
         }
@@ -208,7 +215,9 @@ internal class DeadDropView(
                 val m = mgName
                 if (m == "belt") { bPid = id; bDX = x; bDY = y; bJumped = false }
                 else if (m == "shoot" && hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) }
-                else if (m == "shoot" && hypot(x - aimCx, y - joyCy) < joyR * 1.7f) { aimId = id; readAim(x, y) }
+                else if (m == "shoot" && hypot(x - gunCx, y - joyCy) < gunR * 1.25f) gunId = id
+                else if (m == "shoot" && hypot(x - grCx, y - grCy) < grR * 1.4f) { val why = shoot?.throwGrenade(); if (why != null) { grMsg = why; grMsgT = 1.3f } }
+                else if (m == "shoot" && joyId >= 0) { rollId = id; rollX = x; rollY = y; rolled = false }
                 else if (m == "fly") thrustId = id
             }
             MotionEvent.ACTION_MOVE -> {
@@ -216,6 +225,7 @@ internal class DeadDropView(
                 for (i in 0 until e.pointerCount) {
                     val pid = e.getPointerId(i)
                     if (pid == joyId) readJoystick(e.getX(i), e.getY(i)) else if (pid == aimId) readAim(e.getX(i), e.getY(i))
+                    if (pid == rollId && !rolled && hypot(e.getX(i) - rollX, e.getY(i) - rollY) > 26f * d) { shoot?.roll(e.getX(i) - rollX, e.getY(i) - rollY); rolled = true }
                     if (pid == bPid && !bJumped && bDY - e.getY(i) > 36f * d) { belt?.jump(); bJumped = true }
                 }
             }
@@ -225,7 +235,9 @@ internal class DeadDropView(
                     if (act == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); applyCue() }
                     return true
                 }
-                if (act == MotionEvent.ACTION_CANCEL) { joyId = -1; aimId = -1; thrustId = -1; bPid = -1 }
+                if (act == MotionEvent.ACTION_CANCEL) { joyId = -1; aimId = -1; thrustId = -1; bPid = -1; gunId = -1; rollId = -1 }
+                if (id == gunId) gunId = -1
+                if (id == rollId) rollId = -1
                 if (id == bPid) { if (!bJumped && act != MotionEvent.ACTION_CANCEL && hypot(e.getX(idx) - bDX, e.getY(idx) - bDY) < 28f * d) belt?.leap(if (bDX < width / 2f) -1 else 1); bPid = -1 }
                 if (id == joyId) { joyId = -1; joyActive = false; mag = 0f; knobX = 0f; knobY = 0f }
                 if (id == aimId) { aimId = -1; aimMag = 0f; aimKX = 0f; aimKY = 0f }
@@ -254,7 +266,7 @@ internal class DeadDropView(
             val bt = oy + bmp.height * sc
             belt?.let { b ->
                 mgText(c, "COINS  ${b.coins} / ${b.spec.coinGoal}", w / 2f + 70f * d, oy - 10f * d, 13f, if (b.coinFlash > 0f) Color.WHITE else 0xFFFFD84D.toInt()); mgText(c, "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f - 90f * d, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
-                if (b.phase == BeltWorld.Phase.FALL) mgText(c, "YOU FELL", w / 2f, oy + bmp.height * sc / 2f, 22f, danger)
+                if (b.phase == BeltWorld.Phase.FALL) mgText(c, if (b.fellInHole) "YOU FELL" else "YOU DIED", w / 2f, oy + bmp.height * sc / 2f, 22f, danger)
                 if (b.phase == BeltWorld.Phase.LAUNCH || b.phase == BeltWorld.Phase.PICKUP) mgText(c, "THE JETPACK!", w / 2f, oy - 10f * d - 18f * d, 12f, 0xFFFFD84D.toInt())
                 if (b.t < 9f) mgText(c, "TAP LEFT / RIGHT TO LEAP BELTS. SWIPE UP TO JUMP.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false) else if (b.coins < b.spec.coinGoal) mgText(c, "COLLECT 100 COINS TO REACH THE END.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0x80), false)
             }
@@ -264,8 +276,9 @@ internal class DeadDropView(
             }
             cine?.caption()?.let { mgText(c, it, w / 2f, bt - 16f * d, 13f, a(Color.WHITE, 0xEE)) }
             shoot?.let { sw ->
-                if (sw.clearedT > 0f) mgText(c, "ROOM CLEAR. THE DOOR IS OPEN.", w / 2f, oy - 10f * d, 13f, 0xFF3BFF9A.toInt())
-                if (sw.phase == ShootWorld.Phase.PLAY && sw.phaseT < 6f) mgText(c, "Left stick walks. Right stick aims and shoots. One hit kills.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
+                if (sw.msgT > 0f) mgText(c, sw.msg, w / 2f, oy - 10f * d, 11f, if (sw.msgGood) 0xFF3BFF9A.toInt() else 0xFFFF6A6A.toInt())
+                if (sw.phase == ShootWorld.Phase.PLAY) { mgText(c, "AREAS ${sw.roomsClear()}/7", w / 2f - 96f * d, oy - 28f * d, 10f, a(Color.WHITE, 0xCC)); if (sw.innocents > 0) mgText(c, "CLERKS LOST ${sw.innocents}", w / 2f + 96f * d, oy - 28f * d, 10f, a(0xFFFF6A6A.toInt(), 0xDD)) }
+                if (sw.phase == ShootWorld.Phase.PLAY && sw.phaseT < 8f) mgText(c, "HOLD GUN TO SHOOT THE CLOSEST. GRENADE HITS THE BIGGEST GROUP. SWIPE WITH A 2ND FINGER TO ROLL.", w / 2f, bt + 14f * d, 8.5f, a(Color.WHITE, 0xAA), false)
                 if (sw.phase == ShootWorld.Phase.FINALE && sw.fade > 0f) { p.style = Paint.Style.FILL; p.color = a(Color.BLACK, (sw.fade * 255).toInt()); c.drawRect(0f, 0f, w, h, p) }
                 if (sw.phase == ShootWorld.Phase.DEAD) {
                     p.style = Paint.Style.FILL; p.color = a(0xFFB01020.toInt(), (min(1f, deadT * 2f) * 0x88).toInt()); c.drawRect(0f, 0f, w, h, p)
@@ -275,10 +288,29 @@ internal class DeadDropView(
         }
         if (mgName == "shoot") drawJoystick(c)
         if (mgName == "shoot" && shoot?.phase == ShootWorld.Phase.PLAY) {
-            val cx = aimCx; val cy = joyCy; val r = joyR
-            p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(cx, cy, r + 4f * d, p)
-            p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; p.color = a(0xFFFF6A6A.toInt(), 0x66); c.drawCircle(cx, cy, r, p)
-            p.style = Paint.Style.FILL; p.color = a(0xFFFF6A6A.toInt(), if (aimId >= 0) 0x99 else 0x55); c.drawCircle(cx + aimKX, cy + aimKY, 22f * d, p)
+            val sw = shoot!!
+            val cy = joyCy
+            // GUN: hold to shoot the closest officer you can see
+            val hasT = sw.nearestTarget() != null
+            val red = 0xFFFF6A6A.toInt()
+            p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(gunCx, cy, gunR + 4f * d, p)
+            p.color = a(red, if (gunId >= 0) 0xAA else if (hasT) 0x66 else 0x2A); c.drawCircle(gunCx, cy, gunR - 4f * d, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; p.color = a(red, if (hasT) 0xAA else 0x55); c.drawCircle(gunCx, cy, gunR, p)
+            p.strokeWidth = 2.2f * d; p.color = a(Color.WHITE, if (hasT) 0xEE else 0x66)
+            c.drawCircle(gunCx, cy, 15f * d, p)
+            c.drawLine(gunCx - 24f * d, cy, gunCx - 8f * d, cy, p); c.drawLine(gunCx + 8f * d, cy, gunCx + 24f * d, cy, p)
+            c.drawLine(gunCx, cy - 24f * d, gunCx, cy - 8f * d, p); c.drawLine(gunCx, cy + 8f * d, gunCx, cy + 24f * d, p)
+            // GRENADE: tap to throw at the biggest group in range
+            val ready = sw.grenades > 0 && sw.grCd() <= 0f
+            p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(grCx, grCy, grR + 4f * d, p)
+            val amber = 0xFFFFB347.toInt()
+            p.color = a(amber, if (ready) 0x55 else 0x22); c.drawCircle(grCx, grCy, grR - 3f * d, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; p.color = a(amber, if (ready) 0xAA else 0x55); c.drawCircle(grCx, grCy, grR, p)
+            p.style = Paint.Style.FILL; p.color = a(Color.WHITE, if (ready) 0xEE else 0x66)
+            c.drawCircle(grCx, grCy + 3f * d, 10f * d, p); c.drawRect(grCx - 3f * d, grCy - 11f * d, grCx + 3f * d, grCy - 6f * d, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; c.drawLine(grCx + 2f * d, grCy - 10f * d, grCx + 9f * d, grCy - 14f * d, p)
+            mgText(c, "x${sw.grenades}", grCx, grCy + grR + 14f * d, 11f, a(Color.WHITE, 0xCC))
+            if (grMsgT > 0f) mgText(c, grMsg, grCx, grCy - grR - 8f * d, 11f, a(0xFFFF6A6A.toInt(), min(1f, grMsgT * 3f * 255f / 255f).let { (it * 255).toInt() }))
         }
         drawFade(c, w, h)
     }
@@ -413,7 +445,8 @@ internal class DeadDropView(
     }
 
     private fun restartPac() {
-        pac = PacWorld(spec.pac!!); pacScene = PacScene(pac!!); pacWant = -1
+        val f = (pac?.fails ?: 0) + 1
+        pac = PacWorld(spec.pac!!).also { it.fails = f }; pacScene = PacScene(pac!!); pacWant = -1
         world.state = StealthWorld.State.PLAY; world.stateT = 0f
     }
 
@@ -421,7 +454,7 @@ internal class DeadDropView(
         var best: Prop? = null; var bd = 99f; var bi = -1
         if (world.state == StealthWorld.State.PLAY && pac == null) for ((i, pr) in world.spec.props.withIndex()) {
             if (pr.text == null) continue
-            val reach = if (pr.kind == "window") (if (world.spec.walk) 2.8f else 2.1f) else 1.15f      // you can hear a radio from further off
+            val reach = if (pr.kind == "window") (if (world.spec.walk) 2.2f else 2.1f) else 1.15f      // you can hear a radio from further off
             val dd = hypot(world.px - pr.x, world.py - pr.y)
             if (dd < reach && dd < bd) { bd = dd; best = pr; bi = i }
         }
@@ -517,17 +550,17 @@ internal class DeadDropView(
         } else if (pix != null) {
             // pixel-art level: the scene is drawn small and scaled up by a whole number so every pixel is the same size.
             // Tall maps scroll: the view follows the courier (kept to whole art pixels so nothing shimmers).
-            val sc = max(1, (w / (world.cols * 16f)).toInt())
-            T = 16f * sc
-            offX = ((w - T * world.cols) / 2f).toInt().toFloat(); offY = top
-            val availH = h - top - bottom
-            val viewRows = min(world.rows.toFloat(), floor((availH / T)))
-            scrollY = (world.py - viewRows * 0.68f).coerceIn(0f, world.rows - viewRows)   // look ahead: you sit low on the screen
-            offY = top + max(0f, ((availH - viewRows * T) / 2f).toInt().toFloat())          // a short map sits in the middle
+            // fills the whole screen edge to edge: scaled to the width (or the height for short maps), the extra is cropped
+            T = max(w / world.cols, h / world.rows)
+            offX = (w - T * world.cols) / 2f
+            val viewRows = min(world.rows.toFloat(), h / T)
+            scrollY = ((world.py - viewRows * 0.68f).coerceIn(0f, world.rows - viewRows) * 16f).toInt() / 16f   // look ahead: you sit low on the screen
+            offY = 0f
             val srcTop = (scrollY * 16f).toInt()
+            val srcH = min(pix.H - srcTop, ceil(h / T * 16f).toInt())
             c.drawColor(0xFF03050A.toInt())
-            val src = android.graphics.Rect(0, srcTop, pix.W, srcTop + (viewRows * 16f).toInt())
-            rect.set(offX, offY, offX + T * world.cols, offY + viewRows * T)
+            val src = android.graphics.Rect(0, srcTop, pix.W, srcTop + srcH)
+            rect.set(offX, 0f, offX + T * world.cols, srcH * T / 16f)
             c.drawBitmap(pix.render(clock, read, bc), src, rect, nearest)
         } else {
         c.save(); c.translate(offX, offY); c.scale(T, T)

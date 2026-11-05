@@ -19,8 +19,8 @@ internal class CineScene(val kind: Int) : PixelSprites() {
     private val fc = Canvas(frame)
     var t = 0f
 
-    val duration get() = if (kind == 0) 10.5f else 11f
-    val fadeStart get() = if (kind == 0) 8.6f else 9.6f
+    val duration get() = if (kind == 0) 10.5f else 18.4f
+    val fadeStart get() = if (kind == 0) 8.6f else 17.0f
     val done get() = t >= duration
 
     /** The line shown under the picture right now (or null). */
@@ -30,7 +30,7 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         t in 5.2f..6.4f -> "and I can get you there."
         t in 6.4f..7.8f -> "Let's end this shit, brother."
         else -> null }
-        else { if (t in 6.8f..9.0f) "Nobody move. Walk." else null }
+        else null
 
     private fun ease(a: Float, b: Float, k: Float) = a + (b - a) * k.coerceIn(0f, 1f)
     private fun seg(t0: Float, t1: Float) = ((t - t0) / (t1 - t0)).coerceIn(0f, 1f)
@@ -117,43 +117,337 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         }
     }
 
-    // ---------- kind 1 ----------
-    private fun hall(c: Canvas) {
-        rect(c, 0, 0, W, H, 0xFF0A1226.toInt())
-        // the town hall: wall, pillars, steps, door
-        rect(c, 0, 0, W, 6 * S, 0xFF3A4260.toInt()); rect(c, 0, 5 * S, W, S, 0xFF2A3050.toInt())
-        rect(c, 2 * S, 0, 12 * S, 3 * S, 0xFF8A94AC.toInt()); rect(c, 2 * S, 3 * S - 4, 12 * S, 4, PX.K)
-        for (col in intArrayOf(3, 5, 10, 12)) { rect(c, col * S, 3 * S, 14, 3 * S + 4, 0xFFC6CFE4.toInt()); rect(c, col * S + 10, 3 * S, 4, 3 * S + 4, 0xFF4A5470.toInt()) }
-        rect(c, 7 * S, 3 * S, 2 * S, 3 * S + 4, PX.K); rect(c, 7 * S + 3, 3 * S + 3, 2 * S - 6, 3 * S, 0xFF6A1020.toInt()); rect(c, 8 * S - 1, 4 * S, 2, 2 * S, PX.GOLD)
-        rect(c, 6 * S, 0, 4 * S, 12, 0xFFB02038.toInt()); rect(c, 6 * S, 12, 4 * S, 2, PX.GOLD)
-        for (i in 0..3) rect(c, (3 - i) * S, 6 * S + i * 6, (10 + i * 2) * S, 6, if (i % 2 == 0) 0xFF8A94AC.toInt() else 0xFF6A7490.toInt())
-        // the street
-        rect(c, 0, 8 * S, W, 16 * S, 0xFF1A2038.toInt())
-        for (i in 0 until 8) rect(c, i * 2 * S + 6, 17 * S, 18, 3, 0xFFB8B070.toInt())
-        for (x in intArrayOf(1, 14)) { rect(c, x * S, 8 * S, 3, 5 * S, PX.K); rect(c, x * S - 4, 8 * S - 4, 11, 5, PX.WARM) }
-        // the car arrives
-        val arrive = seg(0.2f, 2.6f)
-        val cy = (ease(28f, 15f, 1f - (1f - arrive) * (1f - arrive)) * S).roundToInt()
-        val carX = 8 * S
-        car(c, carX, cy, false)
-        // both get out at 3.0 s
-        val out = seg(3.0f, 3.8f)
-        if (t >= 3.0f) {
-            // the cop with his hands up, you behind him with a gun, walking to the door from 4.4 s
-            val walk = seg(4.4f, 9.4f)
-            val cx = ease(10.4f, 8.5f, seg(3.0f, 4.4f)); val cyy = ease(15.6f, 14.2f, seg(3.0f, 4.4f))
-            val copX = cx; val copY = ease(cyy, 7.2f, walk)
-            val plY = copY + 1.5f; val plX = ease(copX + (if (t < 4.4f) 0.2f else 0f), 8.5f, 1f)
-            val cx0 = (copX * S).roundToInt(); val cy0 = (copY * S).roundToInt() + 6
-            rect(c, cx0 - 5, cy0 - 1, 11, 3, a(PX.K, 0x70))
-            folk(c, cx0, cy0, 0, if (walk in 0.01f..0.99f) 1 + ((animT * 6f).toInt() % 2) else 0, police, false, false)
-            rect(c, cx0 - 8, cy0 - 20, 2, 5, police.skin); rect(c, cx0 + 7, cy0 - 20, 2, 5, police.skin)       // hands up
-            val px0 = (plX * S).roundToInt(); val py0 = (plY * S).roundToInt() + 6
-            if (t >= 3.4f) {
-                rect(c, px0 - 5, py0 - 1, 11, 3, a(PX.K, 0x70))
-                folk(c, px0, py0, 0, if (walk in 0.01f..0.99f) 1 + ((animT * 6f).toInt() % 2) else 0, clerk, false, true)
-                rect(c, px0 - 2, py0 - 16, 4, 3, PX.K); rect(c, px0 - 1, py0 - 19, 2, 4, 0xFF9AA4B5.toInt())           // the gun, aimed at him
-            }
+    // ---------- the town hall front: drawn once into a picture, then only the flags and chimney smoke move ----------
+    private var hallBg: Bitmap? = null
+    private val lampX = intArrayOf(16, 224)
+
+    /** Brick / block work with mortar lines and a little tint variation per brick. */
+    private fun bricks(c: Canvas, x: Int, y: Int, w: Int, h: Int, tints: IntArray, mortar: Int, seed: Int, bw: Int = 8, bh: Int = 4) {
+        for (yy in 0 until h) for (xx in 0 until w) {
+            val row = yy / bh; val off = if (row % 2 == 0) 0 else bw / 2
+            val gx = xx + off
+            val col = if (yy % bh == bh - 1 || gx % bw == bw - 1) mortar else tints[hash(gx / bw, row, seed) % tints.size]
+            px(c, x + xx, y + yy, col)
         }
     }
+
+    /** An arched window, lit warm (or dark), with a cross bar, a stone frame and a sill. */
+    private fun archWindow(c: Canvas, x: Int, y: Int, w: Int, h: Int, glass: Int, glassTop: Int) {
+        val stone = 0xFF8A94AC.toInt(); val stoneD = 0xFF5A6482.toInt()
+        rect(c, x - 2, y - 2, w + 4, h + 4, stone)
+        rect(c, x - 2, y - 2, 1, h + 4, 0xFFB4BED6.toInt()); rect(c, x + w + 1, y - 2, 1, h + 4, stoneD)
+        rect(c, x - 1, y - 1, w + 2, h + 1, PX.K)
+        rect(c, x, y, w, h, glass); rect(c, x, y, w, h / 3, glassTop)
+        rect(c, x + w / 2, y, 1, h, PX.K); rect(c, x, y + h / 2, w, 1, PX.K)
+        rect(c, x - 3, y + h + 1, w + 6, 2, stone); rect(c, x - 3, y + h + 3, w + 6, 1, stoneD)
+        px(c, x, y, PX.K); px(c, x + w - 1, y, PX.K); px(c, x + 1, y, PX.K); px(c, x + w - 2, y, PX.K); px(c, x, y + 1, PX.K); px(c, x + w - 1, y + 1, PX.K)
+    }
+
+    private fun column(c: Canvas, x: Int, top: Int, bottom: Int) {
+        val stoneL = 0xFFE0E6F4.toInt(); val stone = 0xFFC6CFE4.toInt(); val stoneM = 0xFF8A94AC.toInt(); val stoneD = 0xFF4A5470.toInt()
+        // shadow it throws on the wall
+        rect(c, x + 14, top + 4, 5, bottom - top - 4, a(PX.K, 0x50))
+        // shaft: lit on the left, dark on the right, with flutes
+        rect(c, x, top + 5, 14, bottom - top - 9, stone)
+        rect(c, x, top + 5, 3, bottom - top - 9, stoneL)
+        rect(c, x + 8, top + 5, 3, bottom - top - 9, stoneM)
+        rect(c, x + 11, top + 5, 3, bottom - top - 9, stoneD)
+        for (fx in intArrayOf(3, 6, 9, 12)) rect(c, x + fx, top + 6, 1, bottom - top - 11, a(PX.K, 0x38))
+        // capital with two scrolls
+        rect(c, x - 3, top, 20, 3, stoneL); rect(c, x - 3, top + 3, 20, 2, stoneM); rect(c, x - 3, top, 20, 1, PX.W)
+        rect(c, x - 2, top + 5, 18, 2, stoneM)
+        rect(c, x - 3, top + 3, 4, 4, stone); rect(c, x + 13, top + 3, 4, 4, stoneD); px(c, x - 2, top + 5, stoneD); px(c, x + 14, top + 5, PX.K)
+        // base
+        rect(c, x - 2, bottom - 4, 18, 2, stone); rect(c, x - 3, bottom - 2, 20, 2, stoneM); rect(c, x - 3, bottom - 2, 20, 1, stoneL)
+    }
+
+    private fun lamp(c: Canvas, x: Int, glow: Bitmap) {
+        val iron = 0xFF1A2030.toInt(); val ironL = 0xFF3A4660.toInt()
+        c.drawBitmap(glow, (x - glow.width / 2).toFloat(), 122f - glow.height / 2f + 10f, plain)
+        // pole with a fluted base
+        rect(c, x - 1, 136, 3, 70, iron); rect(c, x - 1, 136, 1, 70, ironL)
+        rect(c, x - 4, 198, 9, 8, iron); rect(c, x - 3, 190, 7, 8, iron); rect(c, x - 3, 190, 1, 16, ironL); rect(c, x - 5, 206, 11, 2, PX.K)
+        rect(c, x - 2, 150, 5, 2, ironL); rect(c, x - 2, 168, 5, 2, ironL)
+        // the lantern: cage, warm glass, cap and finial
+        rect(c, x - 5, 128, 11, 2, iron); rect(c, x - 4, 118, 9, 11, iron)
+        rect(c, x - 3, 120, 7, 8, PX.WARM); rect(c, x - 2, 121, 5, 6, 0xFFFFF0C0.toInt()); rect(c, x, 120, 1, 8, iron)
+        rect(c, x - 6, 116, 13, 3, iron); rect(c, x - 6, 116, 13, 1, ironL); rect(c, x - 2, 113, 5, 3, iron); px(c, x, 111, PX.GOLD); px(c, x, 112, PX.GOLD)
+        // scrolled arm
+        rect(c, x - 6, 130, 2, 2, iron); rect(c, x + 5, 130, 2, 2, iron)
+    }
+
+    private fun buildHallBg(): Bitmap {
+        val bm = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bm)
+        val stoneL = 0xFFB4BED6.toInt(); val stone = 0xFF8A94AC.toInt(); val stoneM = 0xFF6A7490.toInt(); val stoneD = 0xFF5A6482.toInt()
+        val wallD = 0xFF2A3050.toInt(); val wallDD = 0xFF1F2440.toInt()
+        // ---- night sky, banded with dithered joins, stars and a moon
+        val sky = intArrayOf(0xFF050A1E.toInt(), 0xFF081230.toInt(), 0xFF0C1A42.toInt(), 0xFF122456.toInt(), 0xFF1A3068.toInt(), 0xFF223A78.toInt())
+        for (i in sky.indices) {
+            rect(c, 0, i * 20, W, 20, sky[i])
+            if (i > 0) for (x in 0 until W) { val oy = if ((x + (x / 2)) % 2 == 0) 0 else 1; px(c, x, i * 20 - 1 + oy, sky[i - 1]); px(c, x, i * 20 + 2 + oy, sky[i]) }
+        }
+        for (i in 0 until 46) {
+            val sx = hash(i, 1, 7) % W; val sy = hash(i, 2, 7) % 62
+            val br = hash(i, 3, 7) % 3
+            px(c, sx, sy, if (br == 0) PX.W else if (br == 1) PX.ICE else 0xFF6A86C8.toInt())
+            if (br == 0) { px(c, sx - 1, sy, a(PX.ICE, 0x60)); px(c, sx + 1, sy, a(PX.ICE, 0x60)); px(c, sx, sy - 1, a(PX.ICE, 0x60)); px(c, sx, sy + 1, a(PX.ICE, 0x60)) }
+        }
+        c.drawBitmap(glowBitmap(26, PX.ICE, 0x30), 22f - 26f, 20f - 26f, plain)
+        for (dy in -8..8) for (dx in -8..8) if (dx * dx + dy * dy <= 64) {
+            val inShadow = (dx + 4) * (dx + 4) + (dy - 2) * (dy - 2) <= 52
+            if (!inShadow) px(c, 22 + dx, 20 + dy, if (dx + dy < -2) PX.W else 0xFFDCE6FF.toInt())
+        }
+        px(c, 17, 19, 0xFFB0BCDC.toInt()); px(c, 18, 23, 0xFFB0BCDC.toInt()); px(c, 19, 14, 0xFFB0BCDC.toInt())
+        // thin clouds drifting past the moon
+        for (k in 0..11) rect(c, 6 + k * 3 + (k % 3), 29 + (k % 2), 5, 1, a(0xFF3A4C88.toInt(), 0x80))
+        for (k in 0..14) rect(c, 168 + k * 4, 44 + (k % 3), 6, 1, a(0xFF3A4C88.toInt(), 0x70))
+        // far city skyline behind the building
+        var sx = 0
+        while (sx < W) {
+            val bw = 9 + hash(sx, 4, 9) % 10; val bh = 10 + hash(sx, 5, 9) % 24
+            rect(c, sx, 62 - bh, bw, bh + 6, 0xFF0A1330.toInt()); rect(c, sx, 62 - bh, bw, 1, 0xFF16224A.toInt())
+            for (wy in 0 until bh / 5) for (wx in 0 until bw / 4) if (hash(sx + wx, wy, 11) % 5 == 0) px(c, sx + 1 + wx * 4, 62 - bh + 3 + wy * 5, 0xFFC8A050.toInt())
+            sx += bw + 1
+        }
+        // ---- the wings: brick, tall windows, a cornice and chimneys
+        val brick = intArrayOf(0xFF3A4260.toInt(), 0xFF424B6C.toInt(), 0xFF353D5A.toInt())
+        bricks(c, 0, 46, W, 54, brick, 0xFF262C46.toInt(), 3)
+        for (wing in intArrayOf(0, 224)) {
+            for ((i, wx) in intArrayOf(wing + 3, wing + 17).withIndex()) {
+                for ((j, wy) in intArrayOf(54, 78).withIndex()) {
+                    val lit = hash(wing + i, j, 5) % 3 != 0
+                    archWindow(c, wx, wy, 9, 16, if (lit) 0xFFFFC866.toInt() else 0xFF14204E.toInt(), if (lit) 0xFFFFE6A0.toInt() else 0xFF0B1230.toInt())
+                }
+            }
+        }
+        rect(c, 0, 38, 32, 3, 0xFF1A2038.toInt()); rect(c, 224, 38, 32, 3, 0xFF1A2038.toInt())            // roof slab
+        rect(c, 0, 41, 32, 5, stone); rect(c, 0, 41, 32, 1, stoneL); rect(c, 0, 45, 32, 1, stoneD)
+        rect(c, 224, 41, 32, 5, stone); rect(c, 224, 41, 32, 1, stoneL); rect(c, 224, 45, 32, 1, stoneD)
+        for (k in 0..7) { rect(c, k * 4 + 1, 46, 2, 2, stoneM); rect(c, 224 + k * 4 + 1, 46, 2, 2, stoneM) }   // dentils
+        for (cx in intArrayOf(8, 240)) { bricks(c, cx - 4, 22, 8, 17, intArrayOf(0xFF4A3A44.toInt(), 0xFF3A2C36.toInt()), 0xFF241A22.toInt(), 6); rect(c, cx - 5, 20, 10, 3, stoneM); rect(c, cx - 5, 20, 10, 1, stoneL) }
+        // ---- the portico: recessed wall behind the pillars
+        bricks(c, 30, 48, 196, 52, intArrayOf(0xFF2A3050.toInt(), 0xFF2F3658.toInt(), 0xFF262C48.toInt()), 0xFF1B2038.toInt(), 8)
+        rect(c, 30, 48, 196, 6, a(PX.K, 0x60))                                                             // shade under the roof
+        // tall windows between the pillars, a lantern on each side of the door
+        archWindow(c, 66, 58, 10, 30, 0xFFFFC866.toInt(), 0xFFFFE6A0.toInt())
+        archWindow(c, 180, 58, 10, 30, 0xFFFFC866.toInt(), 0xFFFFE6A0.toInt())
+        for (lx in intArrayOf(103, 152)) {
+            rect(c, lx, 56, 1, 4, 0xFF1A2030.toInt()); rect(c, lx - 2, 60, 5, 7, 0xFF1A2030.toInt()); rect(c, lx - 1, 61, 3, 5, PX.WARM); px(c, lx, 62, PX.W)
+            c.drawBitmap(glowBitmap(16, PX.WARM, 0x44), (lx - 16).toFloat(), (63 - 16).toFloat(), plain)
+        }
+        // ---- the door: stone surround, fan-light, two panelled red leaves with gold handles
+        rect(c, 108, 46, 40, 56, stone); rect(c, 108, 46, 1, 56, stoneL); rect(c, 147, 46, 1, 56, stoneD); rect(c, 108, 46, 40, 1, stoneL)
+        rect(c, 111, 49, 34, 51, PX.K)
+        rect(c, 112, 50, 32, 9, 0xFF3A2A18.toInt())                                                         // fan-light
+        for (k in 0..7) { rect(c, 112 + k * 4, 50, 3, 8, if (k % 2 == 0) 0xFFFFD27A.toInt() else 0xFFE8A850.toInt()) }
+        rect(c, 112, 58, 32, 1, PX.K); px(c, 112, 50, PX.K); px(c, 143, 50, PX.K)
+        for (leaf in 0..1) {
+            val lx = 112 + leaf * 16
+            rect(c, lx, 59, 16, 41, 0xFF6A1020.toInt()); rect(c, lx, 59, 16, 1, 0xFF9A1C34.toInt())
+            rect(c, lx + 2, 62, 12, 14, 0xFF8A1830.toInt()); rect(c, lx + 3, 63, 10, 12, 0xFF5A0C1A.toInt())
+            rect(c, lx + 2, 80, 12, 16, 0xFF8A1830.toInt()); rect(c, lx + 3, 81, 10, 14, 0xFF5A0C1A.toInt())
+            rect(c, lx + 2, 62, 12, 1, 0xFFB02A48.toInt()); rect(c, lx + 2, 80, 12, 1, 0xFFB02A48.toInt())
+        }
+        rect(c, 127, 59, 2, 41, PX.K)
+        rect(c, 124, 76, 3, 5, PX.GOLD); rect(c, 129, 76, 3, 5, PX.GOLD); px(c, 124, 76, PX.W); px(c, 129, 76, PX.W)
+        rect(c, 110, 98, 36, 4, stoneD); rect(c, 110, 98, 36, 1, stone)
+        // ---- the four pillars
+        for (col in intArrayOf(48, 80, 160, 192)) column(c, col, 48, 100)
+        // ---- the architrave, frieze and plaque
+        rect(c, 28, 38, 200, 10, stone); rect(c, 28, 38, 200, 1, PX.W); rect(c, 28, 39, 200, 1, stoneL); rect(c, 28, 47, 200, 1, PX.K)
+        rect(c, 28, 42, 200, 1, stoneD)
+        for (k in 0..48) rect(c, 29 + k * 4, 44, 2, 3, stoneM)                                              // dentils
+        rect(c, 98, 39, 60, 8, PX.K); rect(c, 99, 40, 58, 6, 0xFF1A2038.toInt())
+        p.typeface = android.graphics.Typeface.MONOSPACE; p.isFakeBoldText = true; p.textSize = 7f; p.textAlign = android.graphics.Paint.Align.CENTER; p.color = PX.GOLD
+        c.drawText("TOWN HALL", 128f, 45f, p)
+        p.isFakeBoldText = false; p.textAlign = android.graphics.Paint.Align.LEFT; p.typeface = null
+        // ---- the pediment with a clock in the middle
+        for (y in 4..37) {
+            val half = (y - 4) * 100 / 34
+            rect(c, 128 - half, y, half * 2, 1, if (y < 6) PX.W else stone)
+            rect(c, 128 - half, y, 2, 1, stoneL); rect(c, 128 + half - 2, y, 2, 1, stoneM)
+        }
+        for (y in 11..34) {
+            val half = (y - 11) * 90 / 23
+            if (half > 1) rect(c, 128 - half + 1, y, half * 2 - 2, 1, if (y % 2 == 0) wallD else wallDD)
+        }
+        for (k in 0..6) { px(c, 70 + k * 2, 33, stoneM); px(c, 177 - k * 2 + 4, 33, stoneM) }
+        for (k in 0..9) { px(c, 108 + k * 4, 34, 0xFF3A4C88.toInt()) }
+        // laurel stars either side of the clock
+        for (sxx in intArrayOf(96, 104, 152, 160)) { px(c, sxx, 28, PX.GOLD); px(c, sxx - 1, 28, a(PX.GOLD, 0x80)); px(c, sxx + 1, 28, a(PX.GOLD, 0x80)); px(c, sxx, 27, a(PX.GOLD, 0x80)); px(c, sxx, 29, a(PX.GOLD, 0x80)) }
+        // the clock (it says two minutes to midnight)
+        for (dy in -8..8) for (dx in -8..8) {
+            val d2 = dx * dx + dy * dy
+            if (d2 <= 64) px(c, 128 + dx, 26 + dy, if (d2 > 49) PX.GOLD else if (d2 > 42) PX.K else 0xFFEDE6CC.toInt())
+        }
+        for (k in 0..11) { val ang = k * Math.PI / 6; px(c, 128 + Math.round(Math.sin(ang) * 5.2).toInt(), 26 - Math.round(Math.cos(ang) * 5.2).toInt(), PX.K) }
+        rect(c, 128, 21, 1, 5, PX.K); rect(c, 127, 23, 1, 3, PX.RED); px(c, 128, 26, PX.K)
+        // ---- the steps (with a red carpet and gold edging down the middle)
+        for (i in 0..3) {
+            val sx0 = (3 - i) * S; val sw = (10 + i * 2) * S; val sy = 96 + i * 6
+            rect(c, sx0, sy, sw, 6, stoneM)
+            rect(c, sx0, sy, sw, 2, stoneL); rect(c, sx0, sy + 2, sw, 1, stone)
+            rect(c, sx0, sy + 5, sw, 1, stoneD)
+            for (k in 0 until sw step 3) if (hash(k, i, 13) % 3 == 0) px(c, sx0 + k, sy + 3, stoneD)
+            rect(c, sx0, sy, 1, 6, PX.W); rect(c, sx0 + sw - 1, sy, 1, 6, stoneD)
+        }
+        rect(c, 112, 102, 32, 20, 0xFF8A1830.toInt())
+        for (r in 0..3) rect(c, 112, 102 + r * 6 + 4, 32, 2, 0xFF5A0C1A.toInt())
+        rect(c, 112, 102, 1, 20, PX.GOLD); rect(c, 143, 102, 1, 20, PX.GOLD); rect(c, 114, 102, 1, 20, 0xFFB02A48.toInt()); rect(c, 141, 102, 1, 20, 0xFFB02A48.toInt())
+        c.drawBitmap(glowBitmap(44, PX.WARM, 0x30), 128f - 44f, 100f - 44f, plain)                          // light spilling out of the door
+        // urns on plinths either side
+        for (ux in intArrayOf(33, 213)) {
+            rect(c, ux, 90, 11, 12, stoneM); rect(c, ux, 90, 11, 2, stoneL); rect(c, ux - 1, 100, 13, 2, stoneD)
+            rect(c, ux + 1, 78, 9, 12, 0xFF2F6F73.toInt()); rect(c, ux + 1, 78, 3, 12, 0xFF63C7C2.toInt()); rect(c, ux + 7, 78, 3, 12, 0xFF1A4A4E.toInt()); rect(c, ux, 76, 11, 3, 0xFF2F6F73.toInt())
+            for (k in 0..4) { px(c, ux + 2 + k * 2, 74 - (k % 2), 0xFF2E8F4E.toInt()); px(c, ux + 3 + k * 2, 73 - (k % 3), 0xFF4EC878.toInt()) }
+        }
+        // ---- the plaza: paving, a kerb, shrubs, a bench, a bin and bollards
+        for (y in 122 until 154) for (x in 0 until W) {
+            val row = (y - 122) / 4; val off = if (row % 2 == 0) 0 else 6
+            val gx = x + off
+            val mortar = (y - 122) % 4 == 3 || gx % 12 == 11
+            val tone = hash(gx / 12, row, 17) % 3
+            px(c, x, y, if (mortar) 0xFF121830.toInt() else if (tone == 0) 0xFF252E4C.toInt() else if (tone == 1) 0xFF2B3556.toInt() else 0xFF222A46.toInt())
+        }
+        rect(c, 0, 154, W, 5, 0xFF4A5470.toInt()); rect(c, 0, 154, W, 1, 0xFF8A94AC.toInt()); rect(c, 0, 158, W, 1, PX.K)
+        for (k in 0 until W step 8) px(c, k, 156, 0xFF3A4260.toInt())
+        for (bx in intArrayOf(6, 232)) {        // shrubs
+            for (dy in -8..8) for (dx in -11..11) {
+                if (dx * dx * 64 + dy * dy * 121 > 64 * 121) continue
+                val sh = hash(bx + dx, dy, 19) % 5
+                px(c, bx + 8 + dx, 132 + dy, if (dy < -3 && sh < 2) 0xFF3E9A58.toInt() else if (dy > 3) 0xFF0F3A22.toInt() else if (sh == 0) 0xFF2E8F4E.toInt() else 0xFF1E6A38.toInt())
+            }
+            rect(c, bx - 2, 139, 21, 3, a(PX.K, 0x70))
+        }
+        // bench
+        rect(c, 176, 134, 30, 3, 0xFF7A5A32.toInt()); rect(c, 176, 134, 30, 1, 0xFFA8804A.toInt()); rect(c, 176, 138, 30, 3, 0xFF5A4226.toInt())
+        rect(c, 178, 141, 3, 6, 0xFF1A2030.toInt()); rect(c, 201, 141, 3, 6, 0xFF1A2030.toInt()); rect(c, 176, 130, 30, 3, 0xFF7A5A32.toInt()); rect(c, 176, 130, 30, 1, 0xFFA8804A.toInt())
+        rect(c, 177, 130, 2, 10, 0xFF1A2030.toInt()); rect(c, 203, 130, 2, 10, 0xFF1A2030.toInt()); rect(c, 174, 147, 34, 2, a(PX.K, 0x60))
+        // bin
+        rect(c, 56, 132, 10, 13, PX.K); rect(c, 57, 133, 8, 11, 0xFF2F3D58.toInt()); rect(c, 57, 133, 2, 11, 0xFF5A6E94.toInt()); rect(c, 55, 130, 12, 3, 0xFF1A2030.toInt()); rect(c, 55, 130, 12, 1, 0xFF5A6E94.toInt())
+        for (k in 0..2) rect(c, 59, 136 + k * 3, 4, 1, PX.K)
+        rect(c, 54, 145, 14, 2, a(PX.K, 0x60))
+        // bollards along the kerb
+        for (k in 0..5) { val bx = 28 + k * 40; if (bx > 212 || bx < 28) continue; rect(c, bx, 146, 4, 8, 0xFF1A2030.toInt()); rect(c, bx, 146, 4, 2, 0xFFE8E0C8.toInt()); px(c, bx, 148, PX.RED) }
+        // ---- the road: dark asphalt, speckle, a zebra crossing, the centre line, a manhole
+        for (y in 159 until H) for (x in 0 until W) {
+            val n = hash(x, y, 23) % 60
+            px(c, x, y, if (n == 0) 0xFF2A3452.toInt() else if (n == 1) 0xFF0F1426.toInt() else if (n < 6) 0xFF181F36.toInt() else 0xFF151B30.toInt())
+        }
+        rect(c, 0, 159, W, 1, PX.K)
+        for (k in 0..11) { rect(c, 22 + k * 18, 170, 9, 20, 0xFF9AA4BC.toInt()); rect(c, 22 + k * 18, 170, 9, 2, PX.W) }
+        for (i in 0 until 8) rect(c, i * 2 * S + 6, 17 * S, 18, 3, 0xFFB8B070.toInt())
+        for (dy in -6..6) for (dx in -6..6) if (dx * dx + dy * dy <= 36) px(c, 70 + dx, 222 + dy, if (dx * dx + dy * dy > 28) PX.K else if ((dx + dy) % 3 == 0) 0xFF1B2238.toInt() else 0xFF0E1426.toInt())
+        // lamp light lying on the wet road
+        for (lx in lampX) {
+            for (k in 0..14) { val w2 = 4 + (k / 3); rect(c, lx - w2 / 2 + (if (k % 2 == 0) 0 else 1), 162 + k * 7, w2, 2, a(PX.WARM, 0x26 - k * 2)) }
+            c.drawBitmap(glowBitmap(34, PX.WARM, 0x22), (lx - 34).toFloat(), (150 - 34).toFloat(), plain)
+        }
+        for (lx in lampX) lamp(c, lx, glowBitmap(30, PX.WARM, 0x44))
+        // flag poles on the roof, with gold balls
+        for (fx in intArrayOf(40, 216)) { rect(c, fx, 8, 2, 30, 0xFF8A94AC.toInt()); rect(c, fx, 8, 1, 30, PX.W); rect(c, fx - 1, 5, 4, 4, PX.GOLD); px(c, fx, 5, PX.W) }
+        // ---- soft dark corners, so your eye goes to the door
+        for (i in 0..13) { val al = (0x58 - i * 6).coerceAtLeast(0); rect(c, 0, H - 1 - i * 2, W, 2, a(PX.K, al)); rect(c, 0, i * 2, W, 2, a(PX.K, (al * 3) / 5)) }
+        for (i in 0..9) { val al = (0x48 - i * 7).coerceAtLeast(0); rect(c, i * 2, 0, 2, H, a(PX.K, al)); rect(c, W - 2 - i * 2, 0, 2, H, a(PX.K, al)) }
+        return bm
+    }
+
+    /** What moves in front of the town hall: the two flags and the smoke from the chimneys. */
+    private fun hallLive(c: Canvas) {
+        for ((n, fx) in intArrayOf(40, 216).withIndex()) {
+            val dir = if (n == 0) 1 else -1
+            for (k in 0..14) {
+                val wave = (sin(animT * 4f + k * 0.55f + n) * (1f + k * 0.12f)).toInt()
+                val x = if (dir > 0) fx + 2 + k else fx - 1 - k
+                val y = 9 + wave
+                rect(c, x, y, 1, 9, if (n == 0) 0xFFB02038.toInt() else 0xFF2B4FA8.toInt())
+                rect(c, x, y + 3, 1, 3, if (n == 0) PX.GOLD else PX.W)
+                if (k > 10) rect(c, x, y + 8, 1, 1, a(PX.K, 0x50))
+            }
+        }
+        for (cx in intArrayOf(8, 240)) for (k in 0..2) {
+            val ph = (animT * 0.4f + k / 3f + cx * 0.01f) % 1f
+            val sz = 3 + (ph * 4).toInt()
+            rect(c, cx - 1 + (sin(animT * 1.3f + k + cx) * 3 * ph).toInt() + (ph * 6).toInt(), 18 - (ph * 22).toInt(), sz, sz, a(0xFF9AA4B5.toInt(), ((1f - ph) * 0x70).toInt()))
+        }
+    }
+
+    // ---------- kind 1 ----------
+    private fun hall(c: Canvas) {
+        val bg = hallBg ?: buildHallBg().also { hallBg = it }
+        c.drawBitmap(bg, 0f, 0f, plain)
+        hallLive(c)
+        // ---------- the story: the cruiser pulls up, the cop talks, two SWAT officers cover you, then let you in ----------
+        val arrive = seg(0.2f, 2.6f)
+        val carX = 72
+        val cy = (ease(28f, 15f, 1f - (1f - arrive) * (1f - arrive)) * S).roundToInt()
+        car(c, carX, cy, t in 2.6f..13f)
+        // both get out at 3.0 s, on the car's right side, and walk to the middle
+        val toMid = seg(3.0f, 4.4f)
+        val walk = seg(14.4f, 17.0f)
+        val copX = ease(5.9f, 8.0f, toMid); val copY0 = ease(15.6f, 14.2f, toMid)
+        val copY = ease(copY0, 6.3f, walk)
+        val cx0 = (copX * S).roundToInt(); val cy0 = (copY * S).roundToInt() + 6
+        val plX = (copX * S).roundToInt(); val plY = ((copY + 1.5f) * S).roundToInt() + 6
+        val moving = walk in 0.01f..0.99f || toMid in 0.01f..0.99f
+        val stepF = if (moving) 1 + ((animT * 6f).toInt() % 2) else 0
+        val aimAt = cx0 to (cy0 - 10)
+
+        // the two SWAT officers by the door: lowered until you get out, then rifles up and tracking you
+        val raise = seg(3.2f, 3.8f)
+        val look = seg(11.8f, 12.1f) * (1f - seg(12.8f, 13.0f))
+        val enter = seg(13.6f, 15.4f)
+        for (side in 0..1) {
+            val homeX = if (side == 0) 92 else 164
+            val inX = if (side == 0) 121 else 135
+            val sx = ease(homeX.toFloat(), inX.toFloat(), enter).roundToInt()
+            val sy = (ease(108f, 82f, enter)).roundToInt()
+            val dir = if (look > 0.5f) (if (side == 0) 1 else 3) else 2
+            val sf = if (enter in 0.01f..0.99f) 1 + ((animT * 6f).toInt() % 2) else 0
+            c.save()
+            if (sy < 100) c.clipRect(112f, 56f, 144f, 101f)       // inside the doorway they are only seen through it
+            swatman(c, sx, sy, dir, sf)
+            val shx = sx + (if (side == 0) 3 else -3); val shy = sy - 10
+            val toward = Math.atan2((aimAt.second - shy).toDouble(), (aimAt.first - shx).toDouble()).toFloat()
+            val ang = if (raise < 1f) 1.25f + (toward - 1.25f) * raise else toward
+            rifle(c, shx, shy, ang, raise >= 1f && enter < 0.6f, aimAt)
+            c.restore()
+        }
+        // the open door: warm light and the lobby beyond, drawn over the shut doors
+        val open = seg(12.8f, 13.6f)
+        if (open > 0f) {
+            val w2 = (30 * open).toInt()
+            rect(c, 128 - w2 / 2, 59, w2, 41, 0xFF241626.toInt())
+            rect(c, 128 - w2 / 2, 59, w2, 6, 0xFF3A2A44.toInt())
+            for (k in 0..5) rect(c, 128 - w2 / 2, 66 + k * 6, w2, 1, a(PX.K, 0x40))
+            if (open > 0.6f) { rect(c, 118, 70, 3, 30, 0xFF4A5470.toInt()); rect(c, 135, 70, 3, 30, 0xFF4A5470.toInt()); rect(c, 126, 62, 4, 4, PX.WARM); c.drawBitmap(hallGlow, 128f - 30f, 100f - 30f, plain) }
+            rect(c, 112, 59, 3, 41, 0xFF6A1020.toInt()); rect(c, 141, 59, 3, 41, 0xFF6A1020.toInt())        // the leaves swung back
+        }
+        if (enter > 0f) rect(c, 112, 59, 32, 41, a(PX.K, (seg(14.2f, 15.6f) * 0xC0).toInt()))
+
+        // the cop and you
+        if (t >= 3.0f) {
+            val cdir = if (t < 11.6f) 2 else 0
+            rect(c, cx0 - 5, cy0 - 1, 11, 3, a(PX.K, 0x70))
+            folk(c, cx0, cy0, cdir, stepF, police, false, false)
+            val gunOut = seg(4.6f, 5.2f)
+            if (t in 4.6f..5.4f) { rect(c, cx0 + 4, cy0 - 8 + (4 * (1f - gunOut)).toInt(), 6, 3, PX.K); rect(c, cx0 + 4, cy0 - 7, 5, 1, 0xFF9AA4B5.toInt()) }
+            if (t >= 9.8f) { rect(c, cx0 - 8, cy0 - 20, 2, 5, police.skin); rect(c, cx0 + 7, cy0 - 20, 2, 5, police.skin) }      // hands up
+            if (t >= 3.4f) {
+                rect(c, plX - 5, plY - 1, 11, 3, a(PX.K, 0x70))
+                folk(c, plX, plY, 0, stepF, clerk, false, t < 5.4f)
+                if (t >= 5.4f) { rect(c, plX - 2, plY - 16, 4, 3, PX.K); rect(c, plX - 1, plY - 19, 2, 4, 0xFF9AA4B5.toInt()) }          // the gun, on the cop's back
+            }
+            val line = when {
+                t in 4.4f..6.0f -> "Here, take this gun." to (t - 4.4f)
+                t in 6.2f..9.6f -> "You're going to have to use me as a hostage so you can get in close." to (t - 6.2f)
+                t in 9.8f..11.6f -> "They won't let anyone in." to (t - 9.8f)
+                else -> null
+            }
+            if (line != null) bubble(c, line.first, cx0, cy0 - 24, (line.second * 24f).toInt(), W)
+        }
+    }
+
+    private val hallGlow: Bitmap by lazy { glowBitmap(30, PX.WARM, 0x40) }
 }
