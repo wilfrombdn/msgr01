@@ -48,7 +48,10 @@ internal class FinaleWorld(seed: Int = 6) {
         const val BEACH_S = 17f
         const val KICK_T = 15.6f
         const val INTRO_S = 9.2f
-        const val EXECUTE_S = 5.2f
+        const val EXECUTE_S = 7.8f
+        const val GUN_T = 1.6f       // the pistol comes up: the music cuts
+        const val SHOT_T = 3.5f      // ...a held breath, then the shot
+        const val TOWER_DOOR = 110f  // the door to the next room, at the end of the top platform
         const val DOOR_S = 5.0f
         const val CONTROL_S = 15.5f
         const val VIGNETTE_S = 3.4f
@@ -129,7 +132,7 @@ internal class FinaleWorld(seed: Int = 6) {
 
     // ---------------------------------------------------------------------------------------------------------------- end
     /** True while the room is silent after the transmission cuts out (the music stops). */
-    val silent get() = stage == Stage.END && t > 2.6f
+    val silent get() = (stage == Stage.END && t > 2.6f) || (stage == Stage.EXECUTE && t >= GUN_T) || stage == Stage.DOOR || stage == Stage.CONTROL
     val over get() = stage == Stage.END && t >= END_TAP
 
     fun update(dt: Float, ix: Float = 0f, iy: Float = 0f, mag: Float = 0f) {
@@ -145,7 +148,7 @@ internal class FinaleWorld(seed: Int = 6) {
         when (stage) {
             Stage.BEACH -> if (at(KICK_T)) events += "kick"
             Stage.INTRO -> { if (t in 4.7f..6.0f && (t * 4f).toInt() != (tPrev * 4f).toInt()) events += "type"; if (at(6.0f) || at(6.8f) || at(7.5f)) events += "clank" }
-            Stage.EXECUTE -> if (at(2.9f)) events += "shot"
+            Stage.EXECUTE -> { if (at(SHOT_T)) events += "shot"; if (at(5.2f)) events += "keys" }
             Stage.CONTROL -> if (at(6.5f)) events += "boom"
             Stage.END -> if (at(2.4f)) events += "static"
             else -> {}
@@ -308,12 +311,23 @@ internal class FinaleWorld(seed: Int = 6) {
     }
 
     // ---------------------------------------------------------------------------------------------------------------- execute
+    /** He kneels, hands up; you walk up and raise the pistol (the music cuts); a held breath; the shot. You take his keys and walk to the door. */
     private fun executeTick() {
-        gPose = if (t < 2.9f) 4 else 5
-        px = min(76f, 40f + t * 30f); py = base(TOP); faceRight = false; gFace = true
+        gPose = if (t < SHOT_T) 4 else 5
+        py = base(TOP); gFace = true
+        when {
+            t < GUN_T -> { px = min(70f, 46f + t * 30f); faceRight = false; walking = px < 70f }
+            t < 4.3f -> { px = 70f; faceRight = false; walking = false }
+            t < 4.9f -> { px = 70f - (t - 4.3f) / 0.6f * 26f; faceRight = false; walking = true }          // over to the body
+            t < 5.7f -> { px = 44f; faceRight = false; walking = false }                                     // crouch, take the keys
+            else -> { px = min(TOWER_DOOR, 44f + (t - 5.7f) * 40f); faceRight = true; walking = px < TOWER_DOOR }   // to the door
+        }
     }
-    val pistolUp get() = stage == Stage.EXECUTE && t > 1.6f
-    val shotFlash get() = stage == Stage.EXECUTE && t in 2.9f..3.05f
+    val pistolUp get() = stage == Stage.EXECUTE && t > GUN_T && t < 4.3f
+    val shotFlash get() = stage == Stage.EXECUTE && t in SHOT_T..SHOT_T + 0.15f
+    /** You're crouched over him taking his keys. */
+    val takingKeys get() = stage == Stage.EXECUTE && t in 4.9f..5.7f
+    val hasKeys get() = stage == Stage.EXECUTE && t >= 5.3f
 
     // ---------------------------------------------------------------------------------------------------------------- simon
     private fun simonTick(dt: Float) {
@@ -359,7 +373,7 @@ internal class FinaleWorld(seed: Int = 6) {
             else -> null
         }
         Stage.INTRO -> if (t in 4.7f..6.0f) "patrol" to "4 · 7 · 1 · 1" else if (t in 7.9f..9.2f) "patrol" to "COME ON UP." else null
-        Stage.EXECUTE -> if (t in 0.4f..2.4f) "patrol" to "WAIT! WAIT!" else null
+        Stage.EXECUTE -> if (t in 0.4f..GUN_T + 0.4f) "patrol" to "WAIT! WAIT! PLEASE!" else null
         Stage.CLIMB -> if (hitT < 0f && t % 9f in 3f..5.2f) "patrol" to TAUNTS[(t / 9f).toInt() % TAUNTS.size] else null
         else -> null
     }

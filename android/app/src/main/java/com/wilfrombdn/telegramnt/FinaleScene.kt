@@ -387,6 +387,10 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         }
         // cable bundles hanging from the ceiling
         for (k in 0 until 7) { val x0 = 10 + k * 36; for (xx in 0 until 30) { val y = 8 + (sin(xx / 30f * PI.toFloat()) * (10 + k % 3 * 4)).toInt(); px(c, x0 + xx, y, if (k % 2 == 0) K(0xFF2A3A6A) else K(0xFF3A2A5A)); px(c, x0 + xx, y + 1, K(0xFF141A30)) } }
+        // the door to the last room, at the end of the top platform, with light under it
+        run { val dx = FinaleWorld.TOWER_DOOR.toInt() + 2; val dy = FinaleWorld.base(FinaleWorld.TOP).toInt()
+            rect(c, dx - 1, dy - 22, 13, 22, PX.K); rect(c, dx, dy - 21, 11, 21, 0xFF3A424E.toInt()); rect(c, dx, dy - 21, 11, 1, 0xFF6A7488.toInt())
+            rect(c, dx + 2, dy - 18, 7, 3, 0xFF1A2A4A.toInt()); rect(c, dx + 8, dy - 11, 2, 2, 0xFFB0A060.toInt()); rect(c, dx, dy - 1, 11, 1, 0xFFA8C8F0.toInt()) }
         // the door at the bottom left, and the terminal at the top
         rect(c, 0, 318, 8, 34, K(0xFF020304)); rect(c, 0, 318, 8, 1, K(0xFF4A5C86))
         rect(c, 92, FinaleWorld.base(FinaleWorld.TOP).toInt() - 18, 20, 18, K(0xFF1A1E26)); rect(c, 94, FinaleWorld.base(FinaleWorld.TOP).toInt() - 16, 16, 9, K(0xFF0A2A3A))
@@ -464,8 +468,14 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         val pxI = world.px.roundToInt(); val pyI = (world.py - world.jumpH).roundToInt()
         if (st == FinaleWorld.Stage.CLIMB && world.hitT >= 0f) lying(c, pxI, world.py.roundToInt(), you, world.faceRight, false)
         else if (world.onLadder != null) folk(c, pxI, pyI, 0, 1 + ((world.py / 4f).toInt() % 2), you, false, false)
+        else if (world.takingKeys) { folk(c, pxI, pyI + 3, 3, 0, you, false, false, 4); rect(c, pxI - 7, pyI - 6, 3, 2, you.skin) }      // crouched over him
         else {
             folk(c, pxI, pyI, if (world.faceRight) 1 else 3, if (world.walking) 1 + ((clock * 10f).toInt() % 2) else if (world.jumpT >= 0f) 1 else 0, you, false, false)
+            if (world.hasKeys && world.t < 6.6f) {   // his keys, held up for a moment
+                val kx = pxI + 6; val ky = pyI - 26 - ((world.t - 5.3f) * 4f).toInt().coerceAtMost(4)
+                rect(c, kx - 1, ky - 1, 9, 8, a(PX.K, 0x90)); rect(c, kx + 1, ky, 3, 3, PX.GOLD); px(c, kx + 2, ky + 1, PX.K); rect(c, kx + 3, ky + 3, 1, 4, PX.GOLD); rect(c, kx + 4, ky + 5, 2, 1, PX.GOLD); rect(c, kx + 4, ky + 1, 3, 1, 0xFFC0C8D0.toInt())
+                if ((clock * 8f).toInt() % 2 == 0) { px(c, kx - 2, ky - 2, PX.W); px(c, kx + 8, ky - 1, PX.W) }
+            }
             if (world.pistolUp) {
                 val dir = if (world.faceRight) 1 else -1
                 rect(c, pxI + dir * 2 - (if (dir < 0) 8 else 0), pyI - 11, 8, 2, you.shirt); rect(c, pxI + dir * 10 - (if (dir < 0) 3 else 0), pyI - 12, 4, 3, PX.K)
@@ -569,10 +579,17 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         // drones
         for (k in 0 until 4) { val dx = ((clock * (8f + k * 3f) + k * 60f) % (WX1 - WX0 + 40)).toInt() + WX0 - 20; val dy = 60 + k * 26 + (sin(clock * 2f + k) * 4f).toInt(); rect(c, dx - 3, dy, 7, 2, K(0xFF14141A)); px(c, dx - 3, dy - 1, K(0xFF14141A)); px(c, dx + 3, dy - 1, K(0xFF14141A)); if ((clock * 3f + k).toInt() % 2 == 0) px(c, dx, dy + 2, if (k % 2 == 0) PX.RED else K(0xFF3BFF9A)) }
         // the bomb
+        if (bombT >= 0f) {   // the fires it starts keep burning along the skyline
+            for (k in 0 until 9) { val fx = 112 + k * 15 + (hash(k, 1, 3) % 8); val fy = 214 + hash(k, 2, 3) % 18; val grow = ((bombT - 0.4f - k * 0.12f) / 1.5f).coerceIn(0f, 1f); if (grow <= 0f) continue
+                c.drawBitmap(fireGlow, fx - 24f, fy - 24f, plain)
+                val fl = (6 + (sin(clock * 11f + k) * 3f)).toInt(); rect(c, fx - 3, fy - (fl * grow).toInt(), 6, (fl * grow).toInt(), K(0xFFFF7A2A)); rect(c, fx - 1, fy - (fl * grow * 0.7f).toInt(), 3, (fl * grow * 0.7f).toInt(), K(0xFFFFE07A))
+                for (i in 0 until 3) { val ph = (clock * 0.35f + i * 0.33f + k * 0.1f) % 1f; rect(c, fx - 3 + (sin(ph * 5f + k) * 4).toInt(), fy - 8 - (ph * 50).toInt(), 6 + (ph * 8).toInt(), 5, a(K(0xFF1A1418), ((1f - ph) * 0xB0).toInt())) } }
+        }
         if (bombT >= 0f && bombT < 6f) {
             val bx = 182; val by = 200
-            if (bombT < 0.25f) { p.color = a(PX.W, 0xE0); c.drawRect(WX0.toFloat(), WY0.toFloat(), WX1.toFloat(), WY1.toFloat(), p) }
-            val r = (bombT * 40f).coerceAtMost(46f)
+            if (bombT < 0.35f) { p.color = a(PX.W, 0xF0); c.drawRect(WX0.toFloat(), WY0.toFloat(), WX1.toFloat(), WY1.toFloat(), p) }
+            val r = (bombT * 52f).coerceAtMost(64f)
+            for (k in 0 until 14) { val an = k * 0.45f + bombT; val rr = r * 0.8f; c.drawBitmap(fireGlow, bx + cos(an) * rr - 24f, by - abs(sin(an)) * rr - 24f, plain) }   // a ball of fire, glowing
             for (k in 0 until 30) { val an = k * 0.21f; val rr = r * (0.7f + 0.3f * ((k * 7) % 3) / 2f); rect(c, bx + (cos(an) * rr).toInt() - 3, by - (abs(sin(an)) * rr).toInt() - 3, 6, 6, a(K(0xFFFF8A2A), ((1f - bombT / 6f) * 0xE0).toInt())) }
             rect(c, bx - (r / 2).toInt(), by - (r * 0.9f).toInt(), r.toInt(), (r * 0.5f).toInt(), a(K(0xFFFFE0A0), ((1f - bombT / 3f).coerceAtLeast(0f) * 0xC0).toInt()))
             p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = a(PX.W, ((1f - bombT / 2f).coerceAtLeast(0f) * 0xA0).toInt()); c.drawOval(bx - bombT * 70f, by - bombT * 14f, bx + bombT * 70f, by + bombT * 14f, p); p.style = Paint.Style.FILL
@@ -616,8 +633,10 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         val t = world.t
         val end = world.stage == FinaleWorld.Stage.END
         val bombT = if (!end) t - 6.5f else -1f
-        val shake = if (bombT in 0f..0.8f) ((clock * 50f).toInt() % 3 - 1) * 2 else 0
-        c.save(); c.translate(shake.toFloat(), 0f)
+        // the blast shakes the whole building: hard at first, rumbling on for a couple of seconds
+        val sk = if (bombT in 0f..2.4f) (1f - bombT / 2.4f) else 0f
+        val shake = (((clock * 53f).toInt() % 3 - 1) * 5f * sk).toInt(); val shakeY = (((clock * 41f).toInt() % 3 - 1) * 3f * sk).toInt()
+        c.save(); c.translate(shake.toFloat(), shakeY.toFloat())
         c.drawBitmap(roomBg, 0f, 0f, plain)
         cityNow(c, clock, bombT, world.sirens)
         screens(c, clock, if (!end) 0 else if (t < 2.4f) 1 else if (t < 2.9f) 2 else 3)
@@ -636,7 +655,11 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         }
         val xi = x.roundToInt()
         rect(c, xi - 12, FLOOR - 2, 24, 4, a(PX.K, 0x80))
-        big(xi, FLOOR) { folk(c, xi, FLOOR, dir, fr, you, false, false) }
+        // you nearly lose your footing as the floor shakes
+        val wob = if (bombT in 0.05f..1.8f) (sin(bombT * 22f) * 3f * (1f - bombT / 1.8f)).toInt() else 0
+        val stumble = bombT in 0.1f..1.4f
+        big(xi + wob, FLOOR) { if (stumble) { c.save(); c.rotate(sin(bombT * 9f) * 9f, (xi + wob).toFloat(), FLOOR.toFloat()); folk(c, xi + wob, FLOOR, 2, 1, you, false, false); c.restore() } else folk(c, xi, FLOOR, dir, fr, you, false, false) }
+        if (bombT in 0f..2.5f) { p.style = Paint.Style.FILL; p.color = a(K(0xFFFF8A3A), ((1f - bombT / 2.5f) * 0x70).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }   // the blast lights the room
         c.restore()
         // the end: the screens go dark, then the words come back to just you
         if (end && t > 3.6f) {

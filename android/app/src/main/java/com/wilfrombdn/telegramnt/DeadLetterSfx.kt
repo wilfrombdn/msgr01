@@ -61,6 +61,7 @@ internal object DeadLetterSfx {
         "static" -> noise(0.5f, 0.25f, 3f, 0.9f, 11)
         "over" -> tone(listOf(1046.5f, 1568f), 0.22f, 0.18f, 9f)
         "beat" -> noise(0.18f, 0.8f, 22f, 0.12f, 13)
+        "keys" -> tone(listOf(2100f, 2900f, 3600f), 0.25f, 0.12f, 14f, square = true)
         else -> null
     }
 
