@@ -119,6 +119,79 @@ class PrisonTest {
         run(w, 1.5f); assertTrue(w.doorOpen > 0.9f)
     }
 
+    private fun nightInCell(w: PrisonWorld) { w.clock = ((w.day - 1) * 1440 + 1262).toFloat(); at(w, w.spec.startX, w.spec.startY - 1f); run(w, 0.2f) }
+
+    @Test fun theMirrorSendsTheSignal() {
+        val w = awake()
+        at(w, 4.5f, 2.5f)
+        assertEquals("PICK UP THE MIRROR PIECE", w.prompt())
+        assertTrue(w.act()); assertEquals(PrisonWorld.Phase.SIGNAL, w.phase)
+        run(w, PrisonWorld.SIGNAL_S + 0.2f)
+        assertEquals(PrisonWorld.Phase.PLAY, w.phase); assertTrue(w.signalSent)
+    }
+
+    @Test fun diggingOutWithoutTheSignalDrownsYouAndYouWakeUpNextDay() {
+        val w = awake()
+        w.debugGive(PrisonWorld.Item.SPOON)
+        repeat(PrisonWorld.DIG_NIGHTS) {
+            nightInCell(w); assertTrue("in cell", w.inMyCell)
+            assertEquals("DIG TONIGHT", w.prompt()); assertTrue(w.act())
+            run(w, 25f)                                    // the night passes
+            assertEquals(PrisonWorld.Period.ROLL_AM, w.period)
+        }
+        assertEquals(PrisonWorld.DIG_NIGHTS, w.digNights)
+        nightInCell(w)
+        assertEquals("CRAWL OUT", w.prompt()); assertTrue(w.act())
+        assertEquals(PrisonWorld.Phase.ESCAPE, w.phase); assertTrue(w.drowned)
+        val day = w.day
+        run(w, PrisonWorld.DROWN_S + 0.2f); assertFalse(w.done)
+        w.retry()
+        assertEquals(PrisonWorld.Phase.PLAY, w.phase); assertEquals(day + 1, w.day); assertTrue(w.has(PrisonWorld.Item.SPOON))
+    }
+
+    @Test fun withTheSignalTheBoatPicksYouUp() {
+        val w = awake()
+        at(w, 4.5f, 2.5f); w.act(); run(w, PrisonWorld.SIGNAL_S + 0.2f)
+        w.debugGive(PrisonWorld.Item.UNIFORM); w.debugHaircut()
+        at(w, w.spec.startX, w.spec.startY - 1f)
+        assertEquals("PUT ON THE UNIFORM", w.prompt()); assertTrue(w.act()); assertTrue(w.disguised)
+        assertTrue("the guards' door opens for you", w.walkable(PrisonWorld.GATE_DOOR.first, PrisonWorld.GATE_DOOR.second))
+        at(w, 70.5f, 34.5f)
+        assertEquals("WALK OUT THE GATE", w.prompt()); assertTrue(w.act())
+        assertEquals(PrisonWorld.Route.GATE, w.route); assertFalse(w.drowned)
+        run(w, PrisonWorld.ESCAPE_RESCUED + 0.2f); assertTrue(w.done)
+    }
+
+    @Test fun ropeAndHookAreMadeInYourCell() {
+        val w = awake()
+        w.debugGive(PrisonWorld.Item.SHEET, 3); w.debugGive(PrisonWorld.Item.FORK); w.debugGive(PrisonWorld.Item.PIPE)
+        at(w, w.spec.startX, w.spec.startY - 1f)
+        assertTrue(w.act()); assertTrue(w.act())
+        assertTrue(w.has(PrisonWorld.Item.ROPE)); assertTrue(w.has(PrisonWorld.Item.HOOK)); assertFalse(w.has(PrisonWorld.Item.SHEET))
+    }
+
+    @Test fun escapeShots() {
+        val w = awake(); val s = PrisonScene(w)
+        var t = 0f
+        fun step(sec: Float) { val end = t + sec; while (t < end) { w.update(0.05f, 0f, 0f, 0f); t += 0.05f; s.render(t) } }
+        at(w, 4.5f, 2.5f); w.act()
+        step(1.0f); save(s.render(t), "l5-signal-flash")
+        step(3.5f); save(s.render(t), "l5-signal-boat")
+        step(2f)
+        w.debugGive(PrisonWorld.Item.UNIFORM); w.debugHaircut(); at(w, w.spec.startX, w.spec.startY - 1f); w.act(); at(w, 70.5f, 34.5f); w.act()
+        step(2f); save(s.render(t), "l5-escape-boat-arrives")
+        step(1.7f); save(s.render(t), "l5-escape-jump")
+        step(3f); save(s.render(t), "l5-escape-sails")
+        val w2 = awake(); val s2 = PrisonScene(w2); w2.debugGive(PrisonWorld.Item.SPOON)
+        repeat(3) { nightInCell(w2); w2.act(); run(w2, 25f) }
+        nightInCell(w2); w2.act()
+        var t2 = 0f
+        fun step2(sec: Float) { val end = t2 + sec; while (t2 < end) { w2.update(0.05f, 0f, 0f, 0f); t2 += 0.05f; s2.render(t2) } }
+        step2(1f); save(s2.render(t2), "l5-drown-edge")
+        step2(1f); save(s2.render(t2), "l5-drown-dive")
+        step2(1.2f); save(s2.render(t2), "l5-drown-splash")
+    }
+
     @Test fun shots() {
         val w = PrisonWorld(PrisonLevel.rock()); val s = PrisonScene(w)
         var t = 0f

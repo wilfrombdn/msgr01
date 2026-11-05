@@ -18,7 +18,12 @@ import kotlin.random.Random
  * spend the night in solitary in D block. The ways out come next (see the plan in CLAUDE.md).
  */
 internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
-    enum class Phase { WAKE, PLAY }
+    enum class Phase { WAKE, PLAY, SIGNAL, ESCAPE }
+
+    /** Things you can steal and make. */
+    enum class Item(val label: String) { SPOON("SPOON"), FORK("FORK"), FILE("FILE"), PIPE("PIPE"), SHEET("SHEET"), POSTER("POSTER"), UNIFORM("UNIFORM"), ROPE("ROPE"), HOOK("HOOK") }
+    /** The ways out. */
+    enum class Route { DIG, CHIP, WALL, CART, GATE }
 
     /** The parts of the day: when they start (minutes after midnight), what they're called, and where you must be. */
     enum class Period(val start: Int, val label: String, val place: String?) {
@@ -91,6 +96,44 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     var loadsTotal = 0; private set
     /** Seconds spent folding the bag in your hands (it takes [FOLD_S]). */
     var folding = -1f; private set
+    // ---------- the ways out ----------
+    val items = LinkedHashMap<Item, Int>()
+    fun has(i: Item, n: Int = 1) = (items[i] ?: 0) >= n
+    private fun give(i: Item) { items[i] = (items[i] ?: 0) + 1 }
+    private fun take(i: Item, n: Int = 1) { val v = (items[i] ?: 0) - n; if (v <= 0) items.remove(i) else items[i] = v }
+    var haircut = false; private set
+    var disguised = false; private set
+    /** You flashed the mirror and a boat flashed back: it waits off the island. Without it, escaping means swimming (you don't make it). */
+    var signalSent = false; private set
+    var digNights = 0; private set
+    var chipNights = 0; private set
+    /** What you're doing tonight in your cell ("DIG" or "CHIP"); it counts when the morning comes. */
+    var workTonight: String? = null; private set
+    var route: Route? = null; private set
+    /** Seconds into the signal or escape scene. */
+    var sceneT = 0f; private set
+    /** The escape is over and the boat has you: on to the last level. */
+    val done get() = phase == Phase.ESCAPE && signalSent && sceneT >= ESCAPE_RESCUED
+    /** You escaped with no boat waiting. */
+    val drowned get() = phase == Phase.ESCAPE && !signalSent
+    /** What the scene says right now. */
+    fun caption(): String = when (phase) {
+        Phase.SIGNAL -> if (sceneT < 2.6f) "YOU CATCH THE LIGHT WITH THE MIRROR AND FLASH IT OUT THE WINDOW..." else "...A BOAT FLASHES BACK. IT WILL WAIT OFF THE ISLAND."
+        Phase.ESCAPE -> when {
+            sceneT < 3.2f -> when (route) {
+                Route.DIG -> "YOU CRAWL OUT UNDER THE WALL AND DOWN TO THE ROCKS."
+                Route.CHIP -> "THROUGH THE PIPES, OVER THE ROOF, DOWN TO THE ROCKS."
+                Route.WALL -> "OVER THE WALL. DOWN THE CLIFF TO THE WATER."
+                Route.CART -> "THE CART ROLLS DOWN TO THE DOCK. YOU SLIP OUT."
+                Route.GATE -> "THE GATE GUARD NODS. YOU WALK DOWN TO THE WATER."
+                null -> ""
+            }
+            signalSent -> "THE BOAT WAS WAITING."
+            else -> ""
+        }
+        else -> ""
+    }
+
     class Machine(val c: Int, val r: Int, val dryer: Boolean) {
         var left = -1f        // seconds until done while running
         var ready = false     // finished, waiting to be emptied
@@ -125,6 +168,12 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         const val DRY_S = 8f
         const val FOLD_S = 2f
         const val SEE = 7f                // how far the guards see
+        const val SIGNAL_S = 6f           // the mirror scene
+        const val ESCAPE_RESCUED = 9.5f   // the escape scene when the boat picks you up
+        const val DROWN_S = 6f            // ...and when it doesn't
+        const val DIG_NIGHTS = 3
+        const val CHIP_NIGHTS = 2
+        val GATE_DOOR = 61 to 34          // the guards' door to the front gate
         fun periodAt(m: Float): Period {
             if (m < Period.ROLL_AM.start) return Period.LIGHTS_OUT
             var p = Period.ROLL_AM
@@ -136,6 +185,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     fun walkable(c: Int, r: Int): Boolean = when (tile(c, r)) {
         '.', ',', 'o', 'z', 'h', 'p' -> true
         'O' -> doorOpen >= 0.9f
+        'L' -> disguised && c == GATE_DOOR.first && r == GATE_DOOR.second
         else -> false
     }
 
@@ -177,6 +227,11 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     fun update(dt: Float, ix: Float, iy: Float, mag: Float) {
         t += dt
         msgT = max(0f, msgT - dt)
+        if (phase == Phase.SIGNAL || phase == Phase.ESCAPE) {
+            sceneT += dt; moving = false
+            if (phase == Phase.SIGNAL && sceneT >= SIGNAL_S) { phase = Phase.PLAY; say("THE BOAT WILL WAIT. NOW GET OUT OF HERE.") }
+            return
+        }
         if (phase == Phase.WAKE) {
             doorOpen = ((t - WAKE_DOOR) / (WAKE_END - WAKE_DOOR)).coerceIn(0f, 1f)
             if (t >= WAKE_STAND) face = -kotlin.math.PI.toFloat() / 2f + 0.01f
@@ -260,8 +315,13 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         when (p) {
             Period.ROLL_AM -> {
                 doorTarget = 1f
+                when (workTonight) {
+                    "DIG" -> { digNights++; workTonight = null; startPeriodMsg = if (digNights >= DIG_NIGHTS) "THE TUNNEL IS DONE. CRAWL OUT TONIGHT." else "YOU DUG ALL NIGHT ($digNights/$DIG_NIGHTS). THE BUNK HIDES THE HOLE." }
+                    "CHIP" -> { chipNights++; workTonight = null; startPeriodMsg = if (chipNights >= CHIP_NIGHTS) "THE VENT IS OUT. SQUEEZE THROUGH TONIGHT." else "YOU CHIPPED ALL NIGHT ($chipNights/$CHIP_NIGHTS). THE POSTER HIDES THE HOLE." }
+                }
                 if (solitary) { solitary = false; px = spec.startX; py = spec.startY; heat = 40f }
-                say("6:00 AM. DAY $day. MORNING COUNT: STAND BY YOUR CELL.")
+                say(startPeriodMsg ?: "6:00 AM. DAY $day. MORNING COUNT: STAND BY YOUR CELL.")
+                startPeriodMsg = null
             }
             Period.LIGHTS_OUT -> { doorTarget = 0f; if (!solitary) say("LIGHTS OUT. GET IN YOUR CELL.") }
             Period.FREE -> say("FREE TIME. GO WHERE YOU LIKE.")
@@ -272,6 +332,8 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         }
         routineForNpcs(p)
     }
+
+    private var startPeriodMsg: String? = null
 
     private fun rules(dt: Float) {
         val p = period
@@ -291,7 +353,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         // a guard who sees you where you shouldn't be gets suspicious
         watchers.clear()
         val due = dueAt
-        if (due != null && p != Period.LIGHTS_OUT && periodMin > GRACE_MIN && !atPlace(due)) {
+        if (due != null && !disguised && p != Period.LIGHTS_OUT && periodMin > GRACE_MIN && !atPlace(due)) {
             for (n in npcs) if (n.guard && sees(n)) watchers += n.id
             if (watchers.isNotEmpty()) { heat += 4f * dt; if (msgT <= 0f) say("A GUARD IS WATCHING YOU. YOU SHOULD BE AT THE ${due}.", true) }
         }
@@ -342,7 +404,9 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
 
     /** What tapping the action button would do right now ("" = nothing to do here). */
     fun prompt(): String {
-        val s = station() ?: return ""
+        val s = station() ?: return options().firstOrNull()?.label ?: ""
+        if (s.kind == 'C' && canHideInCart()) return "HIDE IN THE CART"
+        if (s.kind == 'F' && laundryOpen && carry == Carry.NONE && folding < 0f && wantSheet()) return "TAKE A SHEET"
         if (!laundryOpen) return "CLOSED"
         if (folding >= 0f) return "FOLDING…"
         return when (s.kind) {
@@ -365,7 +429,10 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
 
     /** The action button. Returns true if something happened. */
     fun act(): Boolean {
-        val s = station() ?: return false
+        if (phase != Phase.PLAY) return false
+        val s = station() ?: return options().firstOrNull()?.run?.invoke() ?: false
+        if (s.kind == 'C' && canHideInCart()) return tryUnseen { escape(Route.CART) }
+        if (s.kind == 'F' && laundryOpen && carry == Carry.NONE && folding < 0f && wantSheet()) return steal(Item.SHEET)
         if (!laundryOpen) { say("THE LAUNDRY IS CLOSED."); return false }
         if (folding >= 0f) return false
         when (s.kind) {
@@ -388,6 +455,95 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         }
         return false
     }
+
+    // ---------- stealing, making things, and the ways out ----------
+    class Option(val label: String, val run: () -> Boolean)
+    private fun near(c: Int, r: Int, d: Float = 1.45f) = hypot(c + 0.5f - px, r + 0.5f - py) < d
+    private fun nearTile(chars: String, zoneName: String? = null): Boolean {
+        val c0 = floor(px).toInt(); val r0 = floor(py).toInt()
+        for (r in r0 - 2..r0 + 2) for (c in c0 - 2..c0 + 2) if (tile(c, r) in chars && near(c, r) && (zoneName == null || PrisonLevel.zoneName(spec, c, r) == zoneName || PrisonLevel.zoneName(spec, c, r + 1) == zoneName)) return true
+        return false
+    }
+    private fun guardSees() = npcs.any { it.guard && sees(it) }
+    private fun wantSheet() = !has(Item.ROPE) && (items[Item.SHEET] ?: 0) < 3
+    private fun canHideInCart() = period == Period.WORK_PM && shiftDone && carry == Carry.NONE && !solitary
+    /** Do something only if no guard is looking; if one is, it costs you. */
+    private fun tryUnseen(what: () -> Unit): Boolean {
+        if (guardSees()) { heat += 25f; say("A GUARD IS WATCHING. NOT NOW.", true); return false }
+        what(); return true
+    }
+    private fun steal(i: Item): Boolean {
+        if (guardSees()) { heat += 25f; say("A GUARD SAW YOU REACH FOR IT.", true); return false }
+        give(i)
+        say(when (i) {
+            Item.SPOON -> "A SPOON. THE FLOOR UNDER YOUR BUNK IS SOFT... AT NIGHT."
+            Item.FORK -> "A FORK. BENT RIGHT, IT COULD HOOK ONTO SOMETHING."
+            Item.FILE -> "A FILE. THE VENT BEHIND YOUR SINK LOOKS WEAK."
+            Item.PIPE -> "A LOOSE PIPE. GOOD FOR A HOOK, WITH A FORK."
+            Item.SHEET -> "A SHEET (${items[Item.SHEET]}/3). KNOTTED TOGETHER THEY'D MAKE A ROPE."
+            Item.POSTER -> "A POSTER. IT WOULD HIDE A HOLE IN A WALL."
+            Item.UNIFORM -> "A GUARD UNIFORM. YOU'D NEED A GUARD'S HAIRCUT TOO."
+            else -> ""
+        })
+        return true
+    }
+    private fun escape(r: Route) { route = r; phase = Phase.ESCAPE; sceneT = 0f; moving = false; carry = Carry.NONE; folding = -1f }
+
+    /** Everything you could do where you're standing, best first (the action button does the first one). */
+    fun options(): List<Option> {
+        if (phase != Phase.PLAY || solitary) return emptyList()
+        val o = ArrayList<Option>()
+        val p = period
+        // the signal: a broken mirror on the shower-room wall
+        if (!signalSent && near(4, 1, 1.6f)) o += Option("PICK UP THE MIRROR PIECE") { phase = Phase.SIGNAL; sceneT = 0f; signalSent = true; true }
+        // things to steal
+        if (near(20, 1, 1.6f) && !has(Item.PIPE) && !has(Item.HOOK)) o += Option("PULL A LOOSE PIPE") { steal(Item.PIPE) }
+        val meal = p == Period.BREAKFAST || p == Period.LUNCH || p == Period.DINNER
+        if (meal && nearTile("T")) {
+            if (!has(Item.SPOON)) o += Option("TAKE A SPOON") { steal(Item.SPOON) }
+            else if (!has(Item.FORK) && !has(Item.HOOK)) o += Option("TAKE A FORK") { steal(Item.FORK) }
+        }
+        if (nearTile("k", "KITCHEN") && !has(Item.FILE)) o += Option("TAKE A FILE") { steal(Item.FILE) }
+        if (nearTile("r", "LIBRARY") && !has(Item.POSTER)) o += Option("TAKE A POSTER") { steal(Item.POSTER) }
+        if (nearTile("u") && !has(Item.UNIFORM) && !disguised) o += Option("TAKE A UNIFORM") { steal(Item.UNIFORM) }
+        if (p == Period.FREE && !haircut && nearTile("c", "BARBER")) o += Option("GET A GUARD'S HAIRCUT") { haircut = true; say(if (has(Item.UNIFORM)) "SHORT BACK AND SIDES. PUT THE UNIFORM ON IN YOUR CELL." else "SHORT BACK AND SIDES. VERY GUARD-LIKE."); true }
+        // in your cell: make things, and the night's work
+        if (inMyCell) {
+            if (night) {
+                if (digNights >= DIG_NIGHTS) o += Option("CRAWL OUT") { escape(Route.DIG); true }
+                if (chipNights >= CHIP_NIGHTS) o += Option("SQUEEZE INTO THE PIPES") { escape(Route.CHIP); true }
+                if (workTonight == null) {
+                    if (has(Item.SPOON) && digNights < DIG_NIGHTS) o += Option("DIG TONIGHT") { workTonight = "DIG"; say("YOU PUSH THE BUNK ASIDE AND START DIGGING."); true }
+                    if (has(Item.FILE) && has(Item.POSTER) && chipNights < CHIP_NIGHTS) o += Option("CHIP THE VENT TONIGHT") { workTonight = "CHIP"; say("YOU START ON THE VENT BEHIND THE SINK."); true }
+                }
+            }
+            if (has(Item.SHEET, 3) && !has(Item.ROPE)) o += Option("KNOT A ROPE") { take(Item.SHEET, 3); give(Item.ROPE); say(if (has(Item.HOOK)) "A ROPE. WITH THE HOOK, GO OVER THE YARD WALL IN FREE TIME." else "A ROPE. NOW A HOOK."); true }
+            if (has(Item.FORK) && has(Item.PIPE) && !has(Item.HOOK)) o += Option("BEND A HOOK") { take(Item.FORK); take(Item.PIPE); give(Item.HOOK); say(if (has(Item.ROPE)) "A HOOK. WITH THE ROPE, GO OVER THE YARD WALL IN FREE TIME." else "A HOOK. NOW A ROPE."); true }
+            if (has(Item.UNIFORM) && haircut && !disguised) o += Option("PUT ON THE UNIFORM") { take(Item.UNIFORM); disguised = true; say("IN UNIFORM. THE GUARDS' DOOR BY THE FRONT GATE WILL OPEN FOR YOU."); true }
+        }
+        // over the yard wall in free time
+        if (p == Period.FREE && zone == "RECREATION YARD" && py >= 45.2f && has(Item.HOOK) && has(Item.ROPE)) o += Option("THROW THE HOOK") {
+            if (guardSees()) { take(Item.HOOK); take(Item.ROPE); heat += 40f; say("A GUARD SAW YOU. THEY TOOK THE HOOK AND ROPE.", true); false } else { escape(Route.WALL); true }
+        }
+        // out the front gate in uniform
+        if (disguised && !night && nearTile("X")) o += Option("WALK OUT THE GATE") { escape(Route.GATE); true }
+        return o
+    }
+
+    /** After drowning: you wake up in your cell the next morning with everything you had. */
+    fun retry() {
+        if (!drowned || sceneT < DROWN_S) return
+        phase = Phase.PLAY; route = null; sceneT = 0f
+        clock = ((day) * 1440 + Period.ROLL_AM.start).toFloat()
+        lastPeriod = Period.ROLL_AM; px = spec.startX; py = spec.startY; doorOpen = 1f; doorTarget = 1f
+        heat = 30f; solitary = false
+        startPeriod(Period.ROLL_AM)
+        say("YOU WAKE UP IN YOUR CELL, SOAKED. A BOAT. YOU NEED A BOAT.", true)
+    }
+
+    // for the tests
+    internal fun debugGive(i: Item, n: Int = 1) { repeat(n) { give(i) } }
+    internal fun debugHaircut() { haircut = true }
 
     private fun laundryTick(dt: Float) {
         for (m in machines) if (m.running) { m.left -= dt; if (m.left < 0f) { m.left = -1f; m.ready = true } }

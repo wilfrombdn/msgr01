@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.PorterDuff
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
@@ -813,6 +814,7 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
     fun render(clock: Float): Bitmap {
         val c = fc
         c.drawColor(0, PorterDuff.Mode.CLEAR)
+        if (world.phase == PrisonWorld.Phase.SIGNAL || world.phase == PrisonWorld.Phase.ESCAPE) { sea(c, clock); c.drawBitmap(vignette, 0f, 0f, plain); return frame }
         camX += (world.px - camX) * 0.2f; camY += (world.py - camY) * 0.2f
         val cxT = (camX - VW / 2f).coerceIn(0f, (world.cols - VW).toFloat())
         val cyT = (camY - VH / 2f).coerceIn(0f, (world.rows - VH).toFloat())
@@ -831,6 +833,8 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
 
         laundryNow(c, clock)
         showerWater(c, clock)
+        // the broken mirror on the shower-room wall catches the light
+        if (!world.signalSent) { val mx = 4 * S + 4; val my = S + 5; rect(c, mx, my, 7, 6, K(0xFF1A2228)); rect(c, mx + 1, my + 1, 5, 4, K(0xFF8AB0C8)); px(c, mx + 2, my + 1, PX.W); px(c, mx + 4, my + 3, K(0xFF5A7A90)); if ((clock * 1.5f).toInt() % 3 == 0) { px(c, mx + 3, my - 1, PX.W); px(c, mx + 1, my + 2, PX.W) } }
         steam(c, clock, dark)
 
         // the people, sorted so the lower ones stand in front
@@ -857,7 +861,7 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
                 if (world.t > 0.4f && world.t < 1.6f) for (i in 0..2) { val zt = (world.t * 1.5f + i * 0.33f) % 1f; rect(c, bc * S + 4 + (zt * 8).toInt(), br * S - (zt * 14).toInt(), 3, 1, a(PX.W, ((1f - zt) * 0xC0).toInt())) }   // z z z
             } else {
                 tintAt(fx, fy)
-                folk(c, fx, fy, dirOf(world.face), if (world.moving) 1 + ((clock * 9f).toInt() % 2) else 0, you, false, false)
+                folk(c, fx, fy, dirOf(world.face), if (world.moving) 1 + ((clock * 9f).toInt() % 2) else 0, if (world.disguised) guardOutfit else you, false, false)
                 if (dirOf(world.face) != 0) bag(c, fx, fy, world.carry)
                 noTint()
                 if (world.phase == PrisonWorld.Phase.PLAY && (world.t < PrisonWorld.WAKE_END + 6f || world.idle > 3f)) {
@@ -892,6 +896,159 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
             if ((clock * 3f).toInt() % 2 == 0) rect(c, mx + floor(world.px).toInt() - 1, my + floor(world.py).toInt() - 1, 3, 3, PX.GOLD)
         }
         return frame
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------
+    //  the water: the mirror signal, and the escape (picked up by the boat, or not)
+    // ---------------------------------------------------------------------------------------------------------------------
+    private val seaBg: Bitmap by lazy { buildSeaBg() }
+    private val boatGlow by lazy { glowBitmap(10, PX.WARM, 0x70) }
+    private val towerGlow by lazy { glowBitmap(6, PX.RED, 0x80) }
+    private val flashGlow by lazy { glowBitmap(60, K(0xFFFFF4D0), 0x90) }
+    private val HORIZON = 168
+
+    /** Dusk over the bay: the sky, stars, the moon, and the city across the water with the radio tower (the last level) on its hill. */
+    private fun buildSeaBg(): Bitmap {
+        val bm = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val px0 = IntArray(W * H)
+        val skyTop = K(0xFF050816); val skyMid = K(0xFF1A1D46); val skyLow = K(0xFF4A2A58); val skyHor = K(0xFF8A3A4E)
+        for (y in 0 until H) for (x in 0 until W) {
+            val th = dith(x, y)
+            val col: Int = if (y < HORIZON) {
+                val t = y / HORIZON.toFloat()
+                val steps = 10f; val q = floor(t * steps + th) / steps
+                when { q < 0.5f -> mix(skyTop, skyMid, q / 0.5f); q < 0.85f -> mix(skyMid, skyLow, (q - 0.5f) / 0.35f); else -> mix(skyLow, skyHor, ((q - 0.85f) / 0.15f).coerceAtMost(1f)) }
+            } else {
+                val t = (y - HORIZON) / (H - HORIZON).toFloat()
+                val q = floor(t * 6f + th) / 6f
+                mix(K(0xFF1E1E44), K(0xFF04060E), q.coerceIn(0f, 1f))
+            }
+            px0[y * W + x] = col
+            if (y < 110 && hash(x, y, 91) % 260 == 0) px0[y * W + x] = if (hash(x, y, 92) % 3 == 0) PX.W else K(0xFF8A9AC8)       // stars
+        }
+        bm.setPixels(px0, 0, W, 0, 0, W, H)
+        val c = Canvas(bm)
+        // the moon
+        c.drawBitmap(glowBitmap(26, K(0xFFB8C8F0), 0x40), 196f - 26f, 46f - 26f, plain)
+        for (yy in -8..8) for (xx in -8..8) if (xx * xx + yy * yy <= 64) px(c, 196 + xx, 46 + yy, if ((xx + 3) * (xx + 3) + (yy - 2) * (yy - 2) < 20) K(0xFFD0DAF0) else K(0xFFEEF2FF))
+        // the city across the water
+        var x = 0
+        var i = 0
+        while (x < W) {
+            val bw = 6 + hash(i, 1, 51) % 12; val bh = 8 + hash(i, 2, 51) % 30 + (if (x in 70..150) 14 else 0)
+            rect(c, x, HORIZON - bh, bw, bh, K(0xFF0C0E22))
+            for (wy in HORIZON - bh + 2 until HORIZON - 1 step 3) for (wx in x + 1 until x + bw - 1 step 2) if (hash(wx, wy, 53) % 5 == 0) px(c, wx, wy, if (hash(wx, wy, 54) % 4 == 0) PX.CYAN else PX.WARM)
+            x += bw; i++
+        }
+        // the radio tower on its hill
+        rect(c, 30, HORIZON - 16, 40, 16, K(0xFF0C0E22)); rect(c, 38, HORIZON - 22, 24, 6, K(0xFF0C0E22))
+        for (yy in 0 until 70) { val half = 1 + (70 - yy) / 10; rect(c, 50 - half, HORIZON - 22 - 70 + yy, 1, 1, K(0xFF2A2E48)); rect(c, 50 + half, HORIZON - 22 - 70 + yy, 1, 1, K(0xFF2A2E48)); if (yy % 8 == 0) rect(c, 50 - half, HORIZON - 22 - 70 + yy, half * 2 + 1, 1, K(0xFF2A2E48)) }
+        // haze on the horizon
+        for (yy in HORIZON - 6 until HORIZON + 8) for (xx in 0 until W) if (bayer[(yy and 3) * 4 + (xx and 3)] < 4 - abs(yy - HORIZON) / 2) px(c, xx, yy, a(K(0xFFB88AA0), 0x50))
+        return bm
+    }
+
+    private fun waves(c: Canvas, clock: Float) {
+        for (y in HORIZON + 2 until H step 3) {
+            val k = (y - HORIZON) / (H - HORIZON).toFloat()
+            val len = 3 + (k * 9).toInt(); val gap = 10 + (k * 22).toInt()
+            val off = ((clock * (6f + k * 18f)) + hash(0, y, 7) % 40).toInt()
+            var x = -gap + (off % gap)
+            while (x < W) { if (hash(x / gap, y, 8) % 3 != 0) rect(c, x, y, len, 1, a(K(0xFF5A6AA8), (0x30 + k * 0x50).toInt())); x += gap }
+        }
+        // the moon on the water
+        for (y in HORIZON + 4 until H step 2) {
+            val k = (y - HORIZON) / (H - HORIZON).toFloat()
+            val w = 3 + (k * 14).toInt(); val wob = (sin(clock * 3f + y * 0.4f) * (2 + k * 6)).toInt()
+            if (hash(y, (clock * 6).toInt(), 3) % 4 != 0) rect(c, 196 - w / 2 + wob, y, w, 1, a(K(0xFFDCE6FF), (0x90 - k * 0x50).toInt()))
+        }
+    }
+
+    private fun boat(c: Canvas, x: Int, y: Int, scale: Int, lamp: Boolean, withYou: Boolean, clock: Float) {
+        c.save(); c.translate(x.toFloat(), y.toFloat()); if (scale > 1) c.scale(scale.toFloat(), scale.toFloat())
+        rect(c, -16, 0, 32, 2, a(K(0xFFDCE6FF), 0x40))                                                       // the wake
+        rect(c, -14, -6, 28, 6, K(0xFFD8DCE4)); rect(c, -12, -1, 24, 2, K(0xFF8A90A0)); rect(c, -14, -4, 28, 1, K(0xFF2A4A8A))   // hull, stripe
+        rect(c, -14, -6, 2, 3, K(0xFFD8DCE4)); rect(c, 12, -8, 3, 4, K(0xFFD8DCE4))                          // the bow lifts
+        rect(c, -6, -11, 10, 5, K(0xFF3A404C)); rect(c, -5, -10, 4, 2, K(0xFF8AB8D8))                        // the cabin
+        rect(c, 6, -13, 2, 7, K(0xFF1A1C22)); rect(c, 5, -16, 4, 3, PX.SKIN); rect(c, 5, -17, 4, 1, K(0xFF2A1A10))   // the one who came for you
+        if (withYou) { rect(c, -11, -12, 3, 6, K(0xFF6E96CC)); rect(c, -11, -15, 3, 3, PX.SKIN); rect(c, -11, -16, 3, 1, K(0xFF4A2E1B)) }
+        if (lamp && (clock * 2.5f).toInt() % 2 == 0) { px(c, 0, -13, PX.WARM); c.restore(); c.drawBitmap(boatGlow, x - 10f, y - 13f * scale - 10f, plain); return }
+        c.restore()
+    }
+
+    /** Draws [what] twice as big, grown around the feet at (x, y), to match the boat in the water scenes. */
+    private inline fun big(x: Int, y: Int, what: () -> Unit) { fc.save(); fc.scale(2f, 2f, x.toFloat(), y.toFloat()); what(); fc.restore() }
+
+    private fun sea(c: Canvas, clock: Float) {
+        val t = world.sceneT
+        c.drawBitmap(seaBg, 0f, 0f, plain)
+        // a blinking red light on top of the radio tower
+        if ((clock * 1.2f).toInt() % 2 == 0) { px(c, 50, HORIZON - 93, PX.RED); c.drawBitmap(towerGlow, 44f, HORIZON - 99f, plain) }
+        waves(c, clock)
+        if (world.phase == PrisonWorld.Phase.SIGNAL) { signalScene(c, clock, t); return }
+
+        // the island: rocks in front, the prison wall above them with its windows lit, a searchlight sweeping the water
+        val rockTop = IntArray(W) { xx -> if (xx < 150) 250 + (sin(xx * 0.13f) * 5f + sin(xx * 0.37f) * 3f).toInt() + (if (xx > 120) (xx - 120) * 2 else 0) else H }
+        rect(c, 0, 196, 112, 56, K(0xFF0C0E16)); for (wx in 6 until 108 step 9) rect(c, wx, 206, 3, 6, if (hash(wx, 1, 4) % 3 == 0) K(0xFF3A3424) else K(0xFFC8B880))
+        rect(c, 0, 196, 112, 1, K(0xFF4A5C86))
+        for (xx in 0 until W) if (rockTop[xx] < H) { rect(c, xx, rockTop[xx], 1, H - rockTop[xx], K(0xFF14161C)); px(c, xx, rockTop[xx], K(0xFF4A5468)); if (hash(xx, 0, 5) % 3 == 0) px(c, xx, rockTop[xx] + 1, K(0xFF2E3442)) }
+        for (k in 0 until 40) { val rx = hash(k, 1, 6) % 140; val ry = rockTop[rx] + 6 + hash(k, 2, 6) % 90; if (ry < H) rect(c, rx, ry, 4, 2, K(0xFF262A34)) }
+        c.save(); c.rotate(-8f + sin(clock * 0.5f) * 14f, 96f, 200f); c.drawBitmap(searchCone, 96f, 200f - searchCone.height / 2f, plain); c.restore()
+
+        val edgeX = 136; val edgeY = rockTop[edgeX]
+        if (world.signalSent) {
+            // the boat glides in, you jump aboard, and it heads off toward the city
+            val arrive = (t / 3f).coerceIn(0f, 1f); val ease = 1f - (1f - arrive) * (1f - arrive)
+            val leave = ((t - 4.2f) / 5f).coerceIn(0f, 1f)
+            val bx = (300 - 125 * ease + leave * 150).toInt(); val by = (300 - leave * 70).toInt()
+            val jumped = t > 3.9f
+            boat(c, bx, by, if (leave > 0.6f) 1 else 2, true, jumped, clock)
+            if (!jumped) {
+                val jk = ((t - 3.2f) / 0.7f).coerceIn(0f, 1f)
+                val pxx = (edgeX + (bx - 22 - edgeX) * jk).toInt(); val pyy = (edgeY + (by - 12 - edgeY) * jk - sin(jk * PI.toFloat()) * 26f).toInt()
+                big(pxx, pyy) { folk(c, pxx, pyy, 1, if (t < 3.2f) ((clock * 8f).toInt() % 2) else 1, if (world.disguised) guardOutfit else you, false, false) }
+            }
+        } else {
+            // nobody comes. you look around... and dive.
+            if (t < 1.7f) big(edgeX, edgeY) { folk(c, edgeX, edgeY, if ((t * 1.6f).toInt() % 2 == 0) 1 else 3, 0, if (world.disguised) guardOutfit else you, false, false) }
+            else if (t < 2.4f) {
+                val k = (t - 1.7f) / 0.7f
+                val dx = (edgeX + 44 * k).toInt(); val dy = (edgeY - sin(k * PI.toFloat()) * 30f + k * 52f).toInt()
+                c.save(); c.rotate(k * 150f, dx.toFloat(), dy - 16f); big(dx, dy) { folk(c, dx, dy, 1, 1, if (world.disguised) guardOutfit else you, false, false) }; c.restore()
+            } else {
+                val k = t - 2.4f
+                val sx = edgeX + 44; val sy = edgeY + 52
+                if (k < 0.6f) for (i in 0 until 10) { val an = i * 0.6f + 0.3f; val r = k * 40f; rect(c, sx + (cos(an) * r * 0.6f).toInt(), sy - (sin(an) * r).toInt().coerceAtLeast(0) + (k * k * 60).toInt(), 2, 2, a(PX.W, ((0.6f - k) / 0.6f * 0xE0).toInt())) }
+                for (ring in 0..2) { val rk = k - ring * 0.6f; if (rk > 0f && rk < 3f) { p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = a(K(0xFFA8B8E0), ((1f - rk / 3f) * 0x90).toInt()); c.drawOval(sx - rk * 14f, sy - rk * 3.5f, sx + rk * 14f, sy + rk * 3.5f, p); p.style = Paint.Style.FILL } }
+                val bubbles = (6 - (k * 2).toInt()).coerceAtLeast(0)
+                for (i in 0 until bubbles) { val bt = (clock * 1.5f + i * 0.37f) % 1f; px(c, sx - 4 + (i * 3) % 9, sy - (bt * 4).toInt(), a(PX.W, ((1f - bt) * 0xC0).toInt())) }
+                if (k > 2f) { p.style = Paint.Style.FILL; p.color = a(K(0xFF02030A), ((k - 2f) / 1.6f * 0xB0).toInt().coerceAtMost(0xB0)); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
+            }
+        }
+    }
+
+    /** Through the shower-room window: you flash the mirror; out on the water a boat's lamp answers and it comes in to wait. */
+    private fun signalScene(c: Canvas, clock: Float, t: Float) {
+        // the flashes: short, short, long... (you hold the mirror at the bottom of the window)
+        val pattern = floatArrayOf(0.2f, 0.45f, 0.65f, 0.9f, 1.1f, 1.7f, 1.9f, 2.15f)
+        var on = false; var i = 0
+        while (i + 1 < pattern.size) { if (t in pattern[i]..pattern[i + 1]) on = true; i += 2 }
+        // the answer: far out, a lamp blinks back, then the boat comes in closer and waits
+        if (t > 2.4f) {
+            val k = ((t - 2.6f) / 2.6f).coerceIn(0f, 1f)
+            val bx = (230 - k * 70).toInt(); val by = (HORIZON + 14 + k * 50).toInt()
+            boat(c, bx, by, 1, true, false, clock)
+        }
+        // the window: thick frame and bars over everything
+        val frameC = K(0xFF0E1218)
+        rect(c, 0, 0, W, 24, frameC); rect(c, 0, H - 30, W, 30, frameC); rect(c, 0, 0, 20, H, frameC); rect(c, W - 20, 0, 20, H, frameC)
+        for (bx in 60 until W - 20 step 44) { rect(c, bx, 24, 6, H - 54, K(0xFF1A2028)); rect(c, bx + 1, 24, 1, H - 54, K(0xFF4A5468)) }
+        rect(c, 20, 190, W - 40, 6, K(0xFF1A2028)); rect(c, 20, 190, W - 40, 1, K(0xFF4A5468))
+        rect(c, 20, 23, W - 40, 1, K(0xFF4A5C86)); rect(c, 19, 24, 1, H - 54, K(0xFF4A5C86))
+        // a hand holding the glass up to the window
+        rect(c, 114, 306, 20, 54, PX.SKIN); rect(c, 114, 306, 3, 54, K(0xFFC89470)); rect(c, 132, 312, 4, 14, PX.SKIN)
+        rect(c, 110, 290, 26, 18, K(0xFF1A2228)); rect(c, 112, 292, 22, 14, K(0xFF8AB0C8)); rect(c, 113, 293, 8, 2, PX.W); px(c, 130, 302, K(0xFF5A7A90))
+        if (on) { c.drawBitmap(flashGlow, 123f - 60f, 298f - 60f, plain); for (k in 0 until 8) { val an = k * PI.toFloat() / 4f; rect(c, 123 + (cos(an) * 20f).toInt(), 298 + (sin(an) * 20f).toInt(), 2, 2, PX.W) }; rect(c, 116, 293, 14, 11, PX.W) }
     }
 
     /** Where to point on the small map for a place you're due at. */
