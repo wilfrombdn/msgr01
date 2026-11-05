@@ -133,7 +133,7 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     else if (search.isNotEmpty() || screenSearch) searchBar() else {
         // the name at the top shows Tellem (chats) or Phone; the bottom-left switch changes between them
         val flip = android.text.SpannableStringBuilder()
-        if (textsTab) flip.append("Phone")
+        if (textsTab) flip.append(phoneTitle())
         else flip.append(if (!Messenger.connected) "Connecting…" else if (Messenger.direct) APP_NAME else torTitle())
         topBar(flip,
             if (textsTab) null else if (Messenger.connected) null else if (Messenger.direct) (Messenger.directProblem ?: "Direct connection") else Tor.status(),
@@ -149,7 +149,6 @@ internal fun MainActivity.showChats(searchOnly: Boolean = false) {
     val d = DrawerLayout(this)
     val body = if (!showArchive) LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        if (textsTab) addView(textTabs(all.sumOf { it.unread } + grps.sumOf { it.unread }, mixed))
         addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
     } else frame
     d.addView(page(top, body), DrawerLayout.LayoutParams(-1, -1))

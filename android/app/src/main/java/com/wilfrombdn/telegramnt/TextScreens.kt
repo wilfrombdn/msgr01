@@ -74,46 +74,6 @@ internal fun MainActivity.rebuildTextScreen() = when (screen) {
 
 internal fun MainActivity.textsUnread() = Texts.threads.filter { !it.spam }.sumOf { it.unread }
 
-/** Where the Contacts / Calls / Texts underline was last, so on the next screen it glides from there to the new tab. */
-private var lastSubIdx = -1
-
-/** Chats | Phone under the top bar; Phone has its own row: Texts · Calls · Contacts (carrier things, not private). */
-internal fun MainActivity.textTabs(chatsUnread: Int, mixed: Boolean): View = LinearLayout(this).apply {
-    orientation = LinearLayout.VERTICAL
-    setBackgroundColor(bar)
-    if (textsTab) {
-        val row = LinearLayout(context)
-        fun go(k: String) { if (phoneSub != k) { val o = phoneTabOrder(); gotoPhoneTab(k, if (o.indexOf(k) > o.indexOf(phoneSub)) 1 else -1) } }
-        fun tab(label: String, n: Int, key: String) = row.addView(tv(label + if (n > 0) "  $n" else "", 14f, if (phoneSub == key) white else dim, true).apply {
-            gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(12)); background = pressable(); setOnClickListener { go(key) }
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        tab("Contacts", 0, "contacts")
-        tab("Calls", 0, "calls")
-        if (!mixed) tab("Texts", textsUnread(), "texts")
-        if (folderPlace() == "tab") tab("Folders", 0, "folders")
-        val count = row.childCount
-        val cur = phoneTabOrder().indexOf(phoneSub).coerceAtLeast(0)
-        val from = if (lastSubIdx in 0 until count) lastSubIdx else cur
-        lastSubIdx = cur
-        // one underline for the whole row: it slides to the chosen tab with the same curve and time as the list under it
-        val line = View(context).apply { setBackgroundColor(white) }
-        val wrap = FrameLayout(context).apply { setBackgroundColor(listBg) }
-        wrap.addView(row, FrameLayout.LayoutParams(-1, -2))
-        wrap.addView(line, FrameLayout.LayoutParams(0, dp(2), Gravity.BOTTOM))
-        wrap.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
-            override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, or: Int, ob: Int) {
-                if (r - l <= 0) return
-                wrap.removeOnLayoutChangeListener(this)
-                val w = (r - l) / count
-                line.layoutParams = (line.layoutParams as FrameLayout.LayoutParams).apply { width = w }
-                val x0 = from * w.toFloat(); val x1 = cur * w.toFloat()
-                line.translationX = if (animationsOn()) x0 else x1
-                if (animationsOn() && x0 != x1) { line.lift(); Tween(300, SMOOTH, { f -> line.translationX = x0 + (x1 - x0) * f }) { line.drop() }.start() }
-            }
-        })
-        addView(wrap)
-    }
-}
 
 internal fun MainActivity.textMatches(t: Texts.Thread, q: String) = q.isEmpty() || Texts.title(this, t.addresses).lowercase().contains(q) ||
     t.addresses.any { it.contains(q) } || t.snippet.lowercase().contains(q)
@@ -456,7 +416,7 @@ internal fun MainActivity.fillTextThread() {
         if (screen != Screen.TEXT_THREAD || textThread != id) return@run
         if (Texts.threads.firstOrNull { it.id == id }?.unread ?: 1 > 0) Texts.markRead(this, id)
         // reuse bubbles that haven't changed: redrawing them all made the chat jump on every send
-        val keys = msgs.map { "${if (it.mms) "m" else "s"}${it.id}:${it.state}:${it.attachments.size}:${it.body.length}" }
+        val keys = msgs.map { "${if (it.mms) "m" else "s"}${it.id}:${it.state}:${it.attachments.size}:${it.body.length}:${it.reactions.hashCode()}" }
         if (keys == textKeys && list.childCount > 0) return@run
         textKeys = keys
         val old = HashMap(textViews); textViews.clear()
@@ -512,12 +472,15 @@ internal fun MainActivity.textBubble(t: Texts.Text, group: Boolean): View {
             })
         }
     }, LinearLayout.LayoutParams(-1, -2))
+    if (t.reactions.isNotEmpty()) addReactionChips(b, t.reactions, "me") { e -> reactToText(t, if (t.reactions["me"] == e) "" else e) }
     b.setOnLongClickListener { textMenu(t); true }
     wrap.addView(b, LinearLayout.LayoutParams(-2, -2).apply { if (t.mine) leftMargin = dp(56) else rightMargin = dp(56) })
     return wrap
 }
 
-internal fun MainActivity.textMenu(t: Texts.Text) = longPressMenu(null, null, listOfNotNull(
+internal fun MainActivity.textMenu(t: Texts.Text) = longPressMenu(t.reactions["me"],
+    if (t.body.isNotEmpty() && Texts.isDefault(this) && textPeople.isNotEmpty()) { e -> reactToText(t, e) } else null,
+    listOfNotNull(
     t.body.takeIf { it.isNotEmpty() }?.let { body -> "Copy" to { getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("text", body)); toast("Copied") } },
     if (Messenger.signedIn && (t.body.isNotEmpty() || t.attachments.any { it.mime.startsWith("image/") })) "Save" to { saveText(t) } else null,
     "Delete" to { Texts.deleteText(this, t) },
@@ -598,4 +561,16 @@ internal fun MainActivity.textImagePicked(uri: android.net.Uri, fromCamera: Bool
         textImage = b to "image/jpeg"
         textImageBar?.apply { text = "📷 Picture attached (${b.size / 1024} KB) · tap to remove"; visibility = View.VISIBLE }
     }) { toast("Couldn't open that photo") }
+}
+
+/** React to a text, or take your reaction back with "": sent as an ordinary text in Google Messages' wording (👍 to “…”), so their phone shows it as a reaction. */
+internal fun MainActivity.reactToText(t: Texts.Text, emoji: String) {
+    val old = t.reactions["me"]
+    val body = when {
+        emoji.isNotEmpty() -> Texts.reactionText(emoji, t.body)
+        old != null -> Texts.unreactionText(old, t.body)
+        else -> return
+    }
+    Messenger.useEmoji(emoji)
+    Texts.send(this, textPeople, body)
 }

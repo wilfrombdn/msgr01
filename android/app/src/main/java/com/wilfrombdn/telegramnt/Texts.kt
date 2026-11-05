@@ -39,6 +39,7 @@ object Texts {
     class Text(
         val id: Long, val mms: Boolean, val mine: Boolean, val from: String?, val body: String, val date: Long,
         val state: Int, val attachments: List<Attachment> = emptyList(),
+        val reactions: Map<String, String> = emptyMap(),   // who ("me" or their number) -> emoji, worked out from reaction texts (see foldReactions)
     )
     const val OK = 0; const val SENDING = 1; const val FAILED = 2; const val NOT_DOWNLOADED = 3; const val DOWNLOADING = 4
     const val DOWNLOAD_FAILED = 0x82   // our mark on a picture text's notice when fetching it failed
@@ -178,7 +179,54 @@ object Texts {
                 out += Text(id, true, mine, if (mine) null else mmsFrom(ctx, id), text[id]?.toString() ?: "", date, state, att[id] ?: emptyList())
             }
         }
-        return out.sortedBy { it.date }.takeLast(limit)
+        return foldReactions(out.sortedBy { it.date }.takeLast(limit))
+    }
+
+    // ---- reactions, sent and read the way Google Messages does it over SMS: a plain text like  👍 to “the original text” ----
+    private val QUOTE = "[“\"](.*)[”\"]"
+    private val REACT_ADD = Regex("^([^\\s]+) to $QUOTE$", RegexOption.DOT_MATCHES_ALL)
+    private val REACT_REMOVE = Regex("^Removed an? ([^\\s]+) from $QUOTE$", RegexOption.DOT_MATCHES_ALL)
+    private val REACT_APPLE = Regex("^(Loved|Liked|Disliked|Laughed at|Emphasized|Questioned) $QUOTE$", RegexOption.DOT_MATCHES_ALL)
+    private val APPLE_EMOJI = mapOf("Loved" to "❤️", "Liked" to "👍", "Disliked" to "👎", "Laughed at" to "😂", "Emphasized" to "‼️", "Questioned" to "❓",
+        "heart" to "❤️", "like" to "👍", "dislike" to "👎", "laugh" to "😂", "emphasis" to "‼️", "question mark" to "❓")
+
+    /** The text Google Messages sends to react: the emoji, then the message it is about in quotes (cut short if long). */
+    fun reactionText(emoji: String, target: String): String {
+        val t = target.replace('\n', ' ').trim().let { if (it.length > 60) it.take(60).trimEnd() + "…" else it }
+        return "$emoji to “$t”"
+    }
+    fun unreactionText(emoji: String, target: String) = "Removed a " + reactionText(emoji, target).replaceFirst(" to ", " from ")
+
+    private fun looksLikeEmoji(s: String) = s.isNotEmpty() && s.none { it.isLetterOrDigit() && it.code < 0x2000 }
+
+    /** Hides reaction texts and attaches each one, as a reaction, to the earlier message it quotes. A reaction that matches nothing stays as an ordinary text. */
+    fun foldReactions(all: List<Text>): List<Text> {
+        val reacts = HashMap<Long, MutableMap<String, String>>()   // index in [all] -> who -> emoji
+        val hidden = HashSet<Int>()
+        all.forEachIndexed { i, t ->
+            val body = t.body.trim()
+            if (t.attachments.isNotEmpty() || body.isEmpty()) return@forEachIndexed
+            var emoji: String? = null; var quoted: String? = null; var remove = false
+            REACT_REMOVE.matchEntire(body)?.let { m -> emoji = APPLE_EMOJI[m.groupValues[1]] ?: m.groupValues[1]; quoted = m.groupValues[2]; remove = true }
+            if (quoted == null) REACT_APPLE.matchEntire(body)?.let { m -> emoji = APPLE_EMOJI[m.groupValues[1]]; quoted = m.groupValues[2] }
+            if (quoted == null) REACT_ADD.matchEntire(body)?.let { m -> if (looksLikeEmoji(m.groupValues[1])) { emoji = m.groupValues[1]; quoted = m.groupValues[2] } }
+            val q = quoted?.replace('\n', ' ')?.trim()?.removeSuffix("…") ?: return@forEachIndexed
+            if (q.isEmpty() || emoji == null) return@forEachIndexed
+            val target = (i - 1 downTo 0).firstOrNull { j ->
+                val b = all[j].body.replace('\n', ' ').trim()
+                j !in hidden && b.isNotEmpty() && (b == q || b.startsWith(q) || q.startsWith(b.removeSuffix("…")))
+            } ?: return@forEachIndexed
+            hidden += i
+            val who = if (t.mine) "me" else (t.from ?: "them")
+            val map = reacts.getOrPut(target.toLong()) { LinkedHashMap() }
+            if (remove) map.remove(who) else map[who] = emoji!!
+        }
+        if (hidden.isEmpty()) return all
+        return all.mapIndexedNotNull { i, t ->
+            if (i in hidden) null else reacts[i.toLong()]?.takeIf { it.isNotEmpty() }?.let { r ->
+                Text(t.id, t.mms, t.mine, t.from, t.body, t.date, t.state, t.attachments, r)
+            } ?: t
+        }
     }
 
     private fun mmsFrom(ctx: Context, id: Long): String? =

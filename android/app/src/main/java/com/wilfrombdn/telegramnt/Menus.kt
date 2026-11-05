@@ -207,6 +207,28 @@ internal fun MainActivity.drawerPanel(d: DrawerLayout): View {
     col.addView(gap(6))
     if (textsTab) {
         // Phone screen: texts, dialling, contacts and the text folders
+        // the Phone screens (they used to be a tab row under the top bar); swiping the list left and right moves between them too
+        for (k in phoneTabOrder()) {
+            val on = phoneSub == k
+            val label = when (k) { "contacts" -> "Contacts"; "calls" -> "Calls"; "folders" -> "Folders"; else -> "Texts" }
+            val unread = if (k == "texts") textsUnread() else 0
+            col.addView(LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(22), dp(15), dp(20), dp(15))
+                background = if (on) round(panel2, 0) else pressable()
+                isClickable = true
+                addView(icon(when (k) { "contacts" -> R.drawable.ic_person; "calls" -> R.drawable.ic_call; "folders" -> R.drawable.ic_folder; else -> R.drawable.ic_send }, if (on) white else dim, 23, 0))
+                addView(tv(label, 16.5f, if (on) white else dim, on).apply { setPadding(dp(26), 0, 0, 0) }, LinearLayout.LayoutParams(0, -2, 1f))
+                if (unread > 0) addView(tv(if (unread > 99) "99+" else "$unread", 12f, Look.textOn(look.sms), true).apply {
+                    gravity = Gravity.CENTER; minWidth = dp(20); setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(look.sms, 10)
+                })
+                setOnClickListener {
+                    d.closeDrawer(GravityCompat.START)
+                    if (!on) { val o = phoneTabOrder(); gotoPhoneTab(k, if (o.indexOf(k) > o.indexOf(phoneSub)) 1 else -1) }
+                }
+            })
+        }
+        divider()
         if (Texts.isDefault(this)) item(R.drawable.ic_edit, "New Text", "a normal text, not encrypted") { showNewText() }
         else if (Texts.canRead(this)) item(R.drawable.ic_edit, "Use $APP_NAME for texts", "so you can send and receive here") { askTextRole() }
         item(R.drawable.ic_call, "Dial pad") { runCatching { startActivity(Intent(Intent.ACTION_DIAL)) } }

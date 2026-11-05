@@ -96,7 +96,7 @@ internal fun MainActivity.gotoPhoneTab(to: String, dir: Int, old: View? = chatsS
     val startX = old?.translationX ?: 0f
     val bmp = if (animationsOn()) old?.let { snapshotOf(it) } else null
     old?.drop()
-    phoneSub = to; chatsScrollY = 0; showChats()
+    phoneSub = to; chatsScrollY = 0; flipAnim = true; showChats()
     if (bmp != null) slideLists(bmp, startX, dir)
 }
 
@@ -192,3 +192,6 @@ internal class Tween(
  * never stacks slides on top of each other or snapshots a screen that is half way across.
  */
 internal fun MainActivity.finishSlide() { slideEnd?.invoke() }
+
+/** The name at the top of the Phone window: whichever of Contacts, Calls, Texts or Folders you are on. */
+internal fun MainActivity.phoneTitle() = when (phoneSub) { "contacts" -> "Contacts"; "calls" -> "Calls"; "folders" -> "Folders"; else -> "Texts" }

@@ -369,11 +369,12 @@ internal fun MainActivity.bubble(c: Contact, m: Msg): View {
 }
 
 /** Chips under a bubble showing each emoji and how many people reacted; tap to toggle yours. */
-internal fun MainActivity.addReactions(b: LinearLayout, m: Msg, toggle: (String) -> Unit) {
-    if (m.reactions.isEmpty()) return
-    val me = Messenger.core.me?.user
+internal fun MainActivity.addReactions(b: LinearLayout, m: Msg, toggle: (String) -> Unit) = addReactionChips(b, m.reactions, Messenger.core.me?.user, toggle)
+
+internal fun MainActivity.addReactionChips(b: LinearLayout, reactions: Map<String, String>, me: String?, toggle: (String) -> Unit) {
+    if (reactions.isEmpty()) return
     val row = LinearLayout(this).apply { setPadding(0, dp(3), 0, dp(1)) }
-    m.reactions.entries.groupBy({ it.value }, { it.key }).toList().sortedByDescending { it.second.size }.forEach { (emoji, who) ->
+    reactions.entries.groupBy({ it.value }, { it.key }).toList().sortedByDescending { it.second.size }.forEach { (emoji, who) ->
         val mineHere = me != null && me in who
         row.addView(tv("$emoji ${who.size}", 13f, if (mineHere) white else dim).apply {
             setPadding(dp(8), dp(3), dp(8), dp(3))
