@@ -39,6 +39,7 @@ internal fun MainActivity.showDeadDrop() {
         beaten = prefs.getBoolean("beaten", false), saveBeaten = { prefs.edit().putBoolean("beaten", it).apply() })
     // on the right: restart (tap = this level, hold = back to level 1) next to exit
     val skip = icon(R.drawable.ic_skip) { game.skip() }
+    deadDropGame = game
     // hold restart: once you've beaten the game, choose any letter; before that, back to level 1
     val again = icon(R.drawable.ic_restart) { game.restart() }.apply { setOnLongClickListener { if (game.beaten) game.openChooser() else { game.restartAll(); toast("Back to level 1") }; true } }
     // edge to edge: the game fills the whole screen and the title bar floats over it, see-through (the game blurs behind it)
@@ -106,7 +107,7 @@ internal class DeadDropView(
             "fly" -> { val f = fly ?: return ""; return if (f.phase != FlyWorld.Phase.DONE) "l3b" else "" }
             "cine0" -> return ""
             "cine1" -> return "synth"
-            "shoot" -> return "synth"
+            "shoot" -> return if (shoot?.phase == ShootWorld.Phase.FINALE || shoot?.phase == ShootWorld.Phase.DONE) "" else "synth"   // silence for the mayor
             "prison" -> return "synth"
             "finale" -> return if (finale?.silent == true) "" else "l6"
         }
@@ -209,7 +210,7 @@ internal class DeadDropView(
         }
         fly?.let { f -> f.thrust = thrustId >= 0; f.update(dt); if (f.finished) mgGo(mgIdx + 1) }
         cine?.let { cn -> cn.t += dt; if (cn.t >= cn.fadeStart) mgGo(mgIdx + 1) }
-        prison?.let { pw -> pw.update(dt, ix, iy, mag); if (pw.done) mgGo(mgIdx + 1) }
+        prison?.let { pw -> pw.update(dt, ix, iy, mag); if (soundOn) for (e in pw.events) DeadLetterSfx.play(e); pw.events.clear(); if (pw.done) mgGo(mgIdx + 1) }
         finale?.let { fw -> fw.update(dt, ix, iy, mag); if (soundOn) for (e in fw.events) DeadLetterSfx.play(e); fw.events.clear() }
         shoot?.let { sw ->
             sw.update(dt, ix, iy, mag, gunId >= 0)
@@ -263,9 +264,10 @@ internal class DeadDropView(
                     if (pid == bPid) {
                         // swipes: up = jump, left/right = leap to the next belt; several in one drag, each from where the last one ended
                         val dx = e.getX(i) - bDX; val dy = e.getY(i) - bDY
-                        if (-dy > 34f * d && -dy > abs(dx)) { if (!bJumped) { belt?.jump(); bJumped = true }; bDX = e.getX(i); bDY = e.getY(i) }
-                        else if (dy > 12f * d) { bJumped = false; bDX = e.getX(i); bDY = e.getY(i) }
-                        else if (abs(dx) > 30f * d && abs(dx) > abs(dy)) { belt?.leap(if (dx > 0) 1 else -1); bDX = e.getX(i); bDY = e.getY(i) }
+                        if (!bJumped) {   // one swipe, one action: after a jump or a leap, nothing more until the finger lifts
+                            if (-dy > 34f * d && -dy > abs(dx)) { belt?.jump(); bJumped = true }
+                            else if (abs(dx) > 30f * d && abs(dx) > abs(dy)) { belt?.leap(if (dx > 0) 1 else -1); bJumped = true }
+                        }
                     }
                 }
             }
@@ -345,7 +347,7 @@ internal class DeadDropView(
                     // the clock and the guards' suspicion
                     mgText(c, "DAY ${pw.day}  ${pw.clockText}", w / 2f - 90f * d, hy - 28f * d, 11f, a(Color.WHITE, 0xDD))
                     val hc = when { pw.heat >= 70f -> 0xFFFF6A6A.toInt(); pw.heat >= 35f -> 0xFFFFB347.toInt(); else -> 0xFF8AD0A0.toInt() }
-                    mgText(c, "HEAT ${pw.heat.toInt()}%", w / 2f + 90f * d, hy - 28f * d, 11f, hc)
+                    mgText(c, "HEAT ${pw.heat.toInt()}%" + (if (pw.trusted) "  ·  TRUSTED" else ""), w / 2f + 90f * d, hy - 28f * d, 11f, hc)
                     // what you should be doing
                     val due = pw.dueAt
                     val step = pw.nextStep().first
@@ -584,6 +586,10 @@ internal class DeadDropView(
     }
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); running = true; last = 0L; applyCue(); postOnAnimation(tick) }
+    /** The app went to the background or the screen went off: stop the clock and the sound. */
+    internal fun pauseGame() { running = false; tracks.stop(); music.stop() }
+    /** Back again: carry on where we were. */
+    internal fun resumeGame() { if (!isAttachedToWindow || running) return; running = true; last = 0L; cue = ""; applyCue(); postOnAnimation(tick) }
     override fun onDetachedFromWindow() { running = false; tracks.stop(); music.stop(); super.onDetachedFromWindow() }
 
     private val tick = object : Runnable {

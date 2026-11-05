@@ -691,8 +691,8 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
             for (yy in r[1] + 6 until r[1] + r[3] - 4 step 6) rect(c, r[0] + 6, yy, r[2] - 12, 1, a(PX.K, if (on) 0x30 else 0x50))
         }
         // progress: ten lights
-        for (i in 0 until FinaleWorld.SIMON_GOAL) { val x = 38 + i * 19; val done = i < world.round - 1 || (i == world.round - 1 && !world.showing && world.inputAt > 0 && false); rect(c, x, 330, 12, 6, PX.K); rect(c, x + 1, 331, 10, 4, if (i < world.round) (if (done) K(0xFF3BFF9A) else K(0xFF2A6A4A)) else K(0xFF14181E)) }
-        for (i in 0 until world.inputAt) rect(c, 38 + i * 19 + 3, 338, 6, 2, PX.W)
+        for (i in 0 until FinaleWorld.SIMON_GOAL) { val x = (W - FinaleWorld.SIMON_GOAL * 19) / 2 + 3 + i * 19; val done = i < world.round - 1 || (i == world.round - 1 && !world.showing && world.inputAt > 0 && false); rect(c, x, 330, 12, 6, PX.K); rect(c, x + 1, 331, 10, 4, if (i < world.round) (if (done) K(0xFF3BFF9A) else K(0xFF2A6A4A)) else K(0xFF14181E)) }
+        for (i in 0 until world.inputAt) rect(c, (W - FinaleWorld.SIMON_GOAL * 19) / 2 + 3 + i * 19 + 3, 338, 6, 2, PX.W)
         p.typeface = null
     }
 

@@ -20,7 +20,7 @@ import kotlin.random.Random
  *  DOOR     the door to the last room opens, slowly.
  *  CONTROL  not in your hands: you walk past the great window over the burning city (fire, red and blue lights, lasers, drones,
  *           searchlights), stop and turn to it, a bomb goes off out there, then you walk on to the panel.
- *  SIMON    the uplink: repeat the light sequence, one longer each round, up to 10. Each miss slows it down and drops you back one.
+ *  SIMON    the uplink: repeat the light sequence, one longer each round, up to 8. Each miss slows it down and drops you back one.
  *  BROADCAST the evidence goes out: a living room, a diner, a police station, downtown screens, the state capitol.
  *  END      back in the room. The screens cut out. Silence. "TRANSMISSION RECEIVED." "THANK YOU FOR YOUR ASSISTANCE, TELLEM.
  *           YOUR SERVICES ARE NO LONGER REQUIRED." The red and blue in the window grow and grow, then black. The title.
@@ -55,7 +55,7 @@ internal class FinaleWorld(seed: Int = 6) {
         const val VIGNETTES = 5
         const val END_TITLE = 17.5f
         const val END_TAP = 19.5f
-        const val SIMON_GOAL = 10
+        const val SIMON_GOAL = 8
 
         // the tower: six slanted catwalks (0 at the bottom) and a flat top platform (6)
         const val FLOORS = 6
@@ -321,7 +321,7 @@ internal class FinaleWorld(seed: Int = 6) {
         if (lit >= 0) { litT += dt; if (!showing && litT > 0.3f) lit = -1 }
         if (!showing) return
         showT += dt
-        if (showT < 0f) { lit = -1; return }
+        if (showT < 0f) { if (litT > 0.35f) lit = -1; return }      // let your last press stay lit for a moment
         val i = (showT / stepS).toInt()
         val within = showT - i * stepS
         if (i >= round) { showing = false; lit = -1; inputAt = 0; return }

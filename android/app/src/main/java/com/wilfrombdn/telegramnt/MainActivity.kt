@@ -65,6 +65,7 @@ class MainActivity : Activity() {
     internal var imeWanted = false                        // the screen being shown will open the keyboard itself
     internal var wantSearchIme = false                    // opening search: raise the keyboard (not on every redraw)
     internal var screen = Screen.CHATS
+    internal var deadDropGame: DeadDropView? = null       // the Dead Letter game, while it's on screen (paused when the app goes away)
         set(v) { if (v != field) openCallAt = 0L; field = v }
     internal var chatUser: String? = null
     internal var search = ""
@@ -171,6 +172,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         updatePoll.removeCallbacks(updatePollRun)
         emojiPopup?.dismiss(); emojiPopup = null
+        if (screen == Screen.DEAD_DROP) deadDropGame?.pauseGame()
         super.onPause()
     }
 
@@ -187,6 +189,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (screen == Screen.DEAD_DROP) deadDropGame?.resumeGame()
         updatePoll.removeCallbacks(updatePollRun); updatePoll.postDelayed(updatePollRun, 5_000)   // an update that dropped while the app was away shows within seconds
         // back from "allow installs from Tellem": carry on with the update
         if (newContactPending) { newContactPending = false; Messenger.run({ Texts.forgetNames(); Texts.threads.forEach { t -> t.addresses.forEach { Texts.name(this, it) } } }, { if (screen == Screen.TEXT_THREAD) showTextThread(textThread) else if (screen == Screen.CHATS) showChats() }) }

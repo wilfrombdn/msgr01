@@ -731,6 +731,37 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
     private val guardOutfit = Outfit(PX.SKIN, 0xFF1A1420.toInt(), 0xFF2A303C.toInt(), 0xFF101418.toInt(), 0xFF5E6676.toInt(), null, 0xFF2A303C.toInt(), PX.K, PX.K, badge = true)
 
     private class DItem(val y: Float, val draw: () -> Unit)
+    private val openDoors: List<Pair<Int, Int>> by lazy { val l = ArrayList<Pair<Int, Int>>(); for (r in 0 until world.rows) for (col in 0 until world.cols) if (world.tile(col, r) == 'o') l += col to r; l }
+    private fun coneOf(col: Int, alpha: Int): Bitmap {
+        val len = (PrisonWorld.SEE * S).toInt(); val wid = len * 2
+        val bm = Bitmap.createBitmap(len, wid, Bitmap.Config.ARGB_8888); val pxs = IntArray(len * wid)
+        for (y in 0 until wid) for (x in 0 until len) {
+            val ang = kotlin.math.atan2(y - wid / 2f, x.toFloat()); if (abs(ang) > PrisonWorld.CONE) continue
+            val d = hypot(x.toFloat(), y - wid / 2f) / len; if (d >= 1f) continue
+            val v = (1f - d) * (1f - abs(ang) / PrisonWorld.CONE * 0.6f)
+            if (bayer[(y and 3) * 4 + (x and 3)] / 16f < v * 0.5f) pxs[y * len + x] = a(col, alpha)
+        }
+        bm.setPixels(pxs, 0, len, 0, 0, len, wid); return bm
+    }
+    private val coneSoft by lazy { coneOf(0xFFDCE6FF.toInt(), 0x26) }
+    private val coneRed by lazy { coneOf(0xFFFF5A6A.toInt(), 0x40) }
+    /** A little picture of what you just got, for the pop-up over your head. */
+    private fun itemIcon(c: Canvas, x: Int, y: Int, name: String) {
+        val steel = 0xFFB0BAC6.toInt(); val dk = PX.K
+        when (name) {
+            "SPOON" -> { rect(c, x - 1, y - 6, 3, 4, dk); rect(c, x, y - 5, 1, 2, steel); rect(c, x, y - 2, 1, 7, steel) }
+            "FORK" -> { for (i in 0..2) rect(c, x - 2 + i * 2, y - 6, 1, 4, steel); rect(c, x - 2, y - 2, 5, 1, steel); rect(c, x, y - 1, 1, 6, steel) }
+            "FILE" -> { rect(c, x - 1, y - 6, 3, 9, 0xFF6A7480.toInt()); for (i in 0..3) px(c, x, y - 5 + i * 2, steel); rect(c, x - 1, y + 3, 3, 3, 0xFF6A3A1E.toInt()) }
+            "PIPE" -> { rect(c, x - 5, y - 1, 11, 3, 0xFF6A7480.toInt()); rect(c, x - 5, y - 1, 11, 1, steel) }
+            "SHEET" -> { rect(c, x - 5, y - 4, 10, 8, PX.W); rect(c, x - 5, y, 10, 1, 0xFFB8C8D8.toInt()) }
+            "POSTER" -> { rect(c, x - 4, y - 6, 9, 12, 0xFFE8E4D4.toInt()); rect(c, x - 3, y - 5, 7, 6, 0xFFC84A4A.toInt()); rect(c, x - 3, y + 2, 7, 1, dk) }
+            "UNIFORM" -> { rect(c, x - 5, y - 4, 11, 8, 0xFF5E6676.toInt()); rect(c, x - 1, y - 4, 3, 2, dk); px(c, x + 3, y - 2, PX.GOLD) }
+            "ROPE" -> { for (i in 0..2) rect(c, x - 4 + i, y - 4 + i * 3, 8 - i * 2, 2, 0xFFC8B070.toInt()) }
+            "HOOK" -> { rect(c, x, y - 6, 1, 8, steel); rect(c, x - 3, y + 1, 4, 1, steel); rect(c, x - 3, y - 1, 1, 2, steel) }
+            "HAIRCUT" -> { rect(c, x - 4, y - 3, 3, 3, steel); rect(c, x + 2, y - 3, 3, 3, steel); rect(c, x - 1, y - 1, 3, 6, steel) }
+            else -> { rect(c, x - 3, y - 3, 7, 7, PX.GOLD) }
+        }
+    }
     private val outfitCache = HashMap<Int, Outfit>()
     private fun outfitOf(n: PrisonWorld.Npc): Outfit = outfitCache.getOrPut(n.id) {
         val pr = n.persona ?: return@getOrPut inmates[n.id % inmates.size]
@@ -844,6 +875,23 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
         val tx = (myX + 1) * S + 3; val ty = 13 * S + 6
         for (i in 0 until min(world.day, 15)) { val g = i / 5; val k = i % 5; if (k < 4) rect(c, tx + g * 6 + k, ty, 1, 4, K(0xFF2A2A26)) else rect(c, tx + g * 6 - 1, ty + 2, 5, 1, K(0xFF2A2A26)) }
 
+        val vc0 = cxT.toInt() - 2; val vc1 = cxT.toInt() + VW + 2; val vr0 = cyT.toInt() - 2; val vr1 = cyT.toInt() + VH + 3
+        // first thing in the morning every cell door is shut
+        if (world.cellsShut) for ((oc, orr) in openDoors) if (oc >= vc0 - 1 && oc <= vc1 + 1 && orr >= vr0 - 1 && orr <= vr1 + 1) bars(c, oc * S, orr * S, 0f, false)
+        // your square for the count, pulsing
+        if (world.countStage in 0..2 && !world.onSpot || world.countStage == 1) {
+            val (sc0, sr0) = world.countSpot; val pulse = ((sin(clock * 6f) + 1f) * 0.5f * 0x90).toInt() + 0x50
+            p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = a(PX.GOLD, pulse); c.drawRect(sc0 * S + 1.5f, sr0 * S + 1.5f, sc0 * S + S - 1.5f, sr0 * S + S - 1.5f, p); p.style = Paint.Style.FILL
+            rect(c, sc0 * S + 2, sr0 * S + 2, S - 4, S - 4, a(PX.GOLD, pulse / 4))
+        }
+        // where each guard is looking: a faint cone on the floor (a touch of red when he's watching you)
+        for (n in world.npcs) {
+            if (!n.guard || n.attn != PrisonWorld.WATCH || n in world.clipboards || n == world.enforcer) continue
+            if (n.x < vc0 - 8 || n.x > vc1 + 8 || n.y < vr0 - 8 || n.y > vr1 + 8) continue
+            val seen = n.id in world.watchers
+            c.save(); c.rotate(n.face * 180f / PI.toFloat(), n.x * S, n.y * S + 4f)
+            c.drawBitmap(if (seen) coneRed else coneSoft, n.x * S, n.y * S + 4f - coneSoft.height / 2f, plain); c.restore()
+        }
         laundryNow(c, clock)
         showerWater(c, clock)
         // the broken mirror on the shower-room wall catches the light
@@ -879,7 +927,10 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
                     if (pr.beard && (d0 == 1 || d0 == 3)) rect(c, fx + (if (d0 == 1) 1 else -4), fy - 14, 4, 3, pr.hair)
                     if (pr.tattoo) { px(c, fx - 6, fy - 9, K(0xFF2A4A6A)); px(c, fx + 6, fy - 10, K(0xFF2A4A6A)) }
                 }
-                if (n.guard) rect(c, fx - 6, fy - 8, 2, 6, K(0xFF2A1C14))                                       // the baton
+                if (n.guard && n in world.clipboards) { rect(c, fx + 4, fy - 12, 6, 8, K(0xFF6A4A2E)); rect(c, fx + 5, fy - 11, 4, 6, PX.W); rect(c, fx + 6, fy - 13, 2, 2, STEEL) }   // a clipboard
+                else if (n.guard && n == world.enforcer && world.beatT >= 0f) {                                   // swinging the baton
+                    val sw = sin(world.beatT * 18f); c.save(); c.rotate(sw * 70f - 20f, fx + 4f, fy - 10f); rect(c, fx + 4, fy - 20, 2, 11, K(0xFF2A1C14)); c.restore()
+                } else if (n.guard) rect(c, fx - 6, fy - 8, 2, 6, K(0xFF2A1C14))                                 // the baton
                 noTint()
                 if (n.guard && dark) { val d0 = dirOf(n.face); val tx0 = fx + (if (d0 == 1) 6 else if (d0 == 3) -6 else 5); px(c, tx0, fy - 7, PX.W); px(c, tx0, fy - 6, PX.LAMP) }   // a torch at night
                 // a guard keeping watch shows what he's doing: an open eye when he's watching you, dots when he isn't
@@ -899,7 +950,8 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
                 if (world.t > 0.4f && world.t < 1.6f) for (i in 0..2) { val zt = (world.t * 1.5f + i * 0.33f) % 1f; rect(c, bc * S + 4 + (zt * 8).toInt(), br * S - (zt * 14).toInt(), 3, 1, a(PX.W, ((1f - zt) * 0xC0).toInt())) }   // z z z
             } else {
                 tintAt(fx, fy)
-                folk(c, fx, fy, dirOf(world.face), if (world.moving) 1 + ((clock * 9f).toInt() % 2) else 0, if (world.disguised) guardOutfit else you, false, false)
+                if (world.beatT >= 0f) { lying(c, fx, fy, you, true, false); if ((clock * 12f).toInt() % 2 == 0) rect(c, fx - 10, fy - 9, 21, 9, a(PX.RED, 0x50)) }
+                else folk(c, fx, fy, dirOf(world.face), if (world.moving) 1 + ((clock * 9f).toInt() % 2) else 0, if (world.disguised) guardOutfit else you, false, false)
                 if (dirOf(world.face) != 0) bag(c, fx, fy, world.carry)
                 noTint()
                 if (world.phase == PrisonWorld.Phase.PLAY && (world.t < PrisonWorld.WAKE_END + 6f || world.idle > 3f)) {
@@ -916,6 +968,14 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
             val shown = ((3.2f - n.sayT + n.say.length * 0.035f) * 30f).toInt().coerceAtLeast(1)
             bubble(c, n.say, (n.x * S).roundToInt(), (n.y * S).roundToInt() - 26, shown, (cxT * S).roundToInt() + W)
         }
+        // what you just picked up pops up over your head, with a sparkle
+        if (world.gotT < 1.6f && world.gotItem.isNotEmpty()) {
+            val k = world.gotT / 1.6f; val ix = (world.px * S).roundToInt(); val iy = (world.py * S).roundToInt() - 26 - (k * 10f).toInt()
+            if (k < 0.85f || (clock * 10f).toInt() % 2 == 0) {
+                for (i in 0 until 8) { val an = i * PI.toFloat() / 4f + clock * 2f; val rr = 7f + k * 6f; px(c, ix + (cos(an) * rr).roundToInt(), iy + (sin(an) * rr).roundToInt(), a(PX.GOLD, ((1f - k) * 255).toInt())) }
+                rect(c, ix - 7, iy - 8, 15, 15, a(PX.K, 0xA0)); itemIcon(c, ix, iy, world.gotItem)
+            }
+        }
         // a bouncing arrow over what to do next
         world.nextStep().second?.let { (tc, tr) ->
             if (world.phase == PrisonWorld.Phase.PLAY && (clock * 2f).toInt() % 3 != 2) {
@@ -930,6 +990,9 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
         if (dark && !wake) searchlight(c, clock)
         c.restore()
 
+        // locked in for the night after getting caught
+        if (world.bustStage == 2) { p.color = a(K(0xFF02040A), ((world.bustT / 1.2f).coerceAtMost(1f) * 255).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
+        if (world.beatT in 0f..1.5f && (clock * 30f).toInt() % 4 == 0) { p.color = a(PX.RED, 0x30); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
         // before dawn on day one it's pitch dark
         if (wake && world.lights <= 0f) { p.color = a(K(0xFF02040A), 0xA0); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
         c.drawBitmap(vignette, 0f, 0f, plain)

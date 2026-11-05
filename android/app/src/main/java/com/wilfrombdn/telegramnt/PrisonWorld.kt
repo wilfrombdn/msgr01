@@ -5,6 +5,7 @@ import kotlin.math.atan2
 import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.random.Random
 
 /**
@@ -99,7 +100,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     // ---------- the ways out ----------
     val items = LinkedHashMap<Item, Int>()
     fun has(i: Item, n: Int = 1) = (items[i] ?: 0) >= n
-    private fun give(i: Item) { items[i] = (items[i] ?: 0) + 1 }
+    private fun give(i: Item) { items[i] = (items[i] ?: 0) + 1; gotItem = i.label; gotT = 0f }
     private fun take(i: Item, n: Int = 1) { val v = (items[i] ?: 0) - n; if (v <= 0) items.remove(i) else items[i] = v }
     var haircut = false; private set
     var disguised = false; private set
@@ -272,18 +273,21 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
             if (phase == Phase.SIGNAL && sceneT >= SIGNAL_S) { phase = Phase.PLAY; say("THE BOAT WILL WAIT. NOW GET OUT OF HERE.") }
             return
         }
+        gotT += dt
         if (phase == Phase.WAKE) {
-            doorOpen = ((t - WAKE_DOOR) / (WAKE_END - WAKE_DOOR)).coerceIn(0f, 1f)
+            doorOpen = 0f; doorTarget = 0f
             if (t >= WAKE_STAND) face = -kotlin.math.PI.toFloat() / 2f + 0.01f
-            if (t >= WAKE_END) { phase = Phase.PLAY; doorTarget = 1f; say("6:00 AM. MORNING COUNT. STAND BY YOUR CELL.") }
+            if (t >= WAKE_END) { phase = Phase.PLAY; startCount() }
             moving = false
+        } else if (bustStage >= 0) {
+            bustTick(dt); moving = false
         } else {
-            advanceClock(dt)
+            if (countStage >= 0) countTick(dt) else advanceClock(dt)
             // your door slides at its own pace; if it shuts on you, you end up inside
             doorOpen = if (doorOpen < doorTarget) minOf(doorTarget, doorOpen + dt) else max(doorTarget, doorOpen - dt)
             val (dc, dr) = spec.myDoor
             if (doorOpen < 0.9f && floor(px).toInt() == dc && floor(py).toInt() == dr) py = spec.startY
-            moving = mag > 0.05f && !solitary
+            moving = mag > 0.05f && !solitary && !lockedInSpot && beatT < 0f && enforcer == null
             idle = if (moving) 0f else idle + dt
             if (moving) {
                 val sp = SPEED * (0.35f + 0.65f * mag)
@@ -291,8 +295,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
                 move(ix * sp * dt, iy * sp * dt)
             }
             laundryTick(dt)
-            escortTick(dt)
-            rules(dt)
+            if (countStage < 0) { escortTick(dt); rules(dt) }
             zone.let { if (it.isNotEmpty()) visited += it }
         }
         for (n in npcs) updateNpc(n, dt)
@@ -326,6 +329,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         val p = period
         if (p.place == null) return null
         if (p.work) return if (shiftDone) null else p.place
+        if (trusted && (p == Period.BREAKFAST || p == Period.LUNCH || p == Period.DINNER)) return null
         if (p == Period.LIGHTS_OUT) return if (inMyCell || solitary) null else p.place
         return if (attended) null else p.place
     }
@@ -342,12 +346,13 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         if (solitary) return
         when {
             p.work -> {
-                if (!shiftDone) { heat += 25f; say("YOU DIDN'T FINISH YOUR LOAD. THE GUARDS NOTICED.", true) }
+                if (!shiftDone) { heat += 25f; punish(); say("YOU DIDN'T FINISH YOUR LOAD. THE GUARDS NOTICED.", true) }
                 carry = Carry.NONE; folding = -1f; dirtyBags = 0
                 for (m in machines) { m.left = -1f; m.ready = false }
             }
             p == Period.FREE || p == Period.LIGHTS_OUT -> {}
-            !attended -> { heat += 20f; say("YOU MISSED ${p.label}.", true) }
+            trusted && (p == Period.BREAKFAST || p == Period.LUNCH || p == Period.DINNER) -> {}
+            !attended -> { heat += 20f; punish(); say("YOU MISSED ${p.label}.", true) }
         }
     }
 
@@ -361,8 +366,11 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
                     "CHIP" -> { chipNights++; workTonight = null; startPeriodMsg = if (chipNights >= CHIP_NIGHTS) "THE VENT IS OUT. SQUEEZE THROUGH TONIGHT." else "YOU CHIPPED ALL NIGHT ($chipNights/$CHIP_NIGHTS). THE POSTER HIDES THE HOLE." }
                 }
                 if (solitary) { solitary = false; px = spec.startX; py = spec.startY; heat = 40f }
-                say(startPeriodMsg ?: "6:00 AM. DAY $day. MORNING COUNT: STAND BY YOUR CELL.")
-                startPeriodMsg = null
+                if (cleanToday && !trusted) { trusted = true; startPeriodMsg = "A CLEAN DAY. THE GUARDS EASE OFF: ROAM AT MEALS AND IN FREE TIME." }
+                cleanToday = true
+                doorTarget = 0f
+                startCount()
+                return
             }
             Period.LIGHTS_OUT -> { doorTarget = 0f; if (!solitary) say("LIGHTS OUT. GET IN YOUR CELL.") }
             Period.FREE -> say("FREE TIME. GO WHERE YOU LIKE.")
@@ -376,6 +384,161 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     }
 
     private var startPeriodMsg: String? = null
+
+    // ---------- trust: until you get through a whole day without trouble, a guard walks you everywhere ----------
+    /** A clean day earns it: then you only get escorted to your laundry shifts and the evening count, and you can roam at meals and in free time. */
+    var trusted = false; private set
+    var cleanToday = true; private set
+    /** Anything the guards punish you for: you lose their trust, and today no longer counts as clean. */
+    private fun punish() {
+        if (trusted) say("THE GUARDS DON'T TRUST YOU ANY MORE. ESCORTS EVERYWHERE UNTIL YOU DO A CLEAN DAY.", true)
+        trusted = false; cleanToday = false
+    }
+
+    // ---------- the morning count ----------
+    /** -1 none; 0 doors shut; 1 "please exit your cell" (get on your square); 2 the clipboards walk the halls; 3 count clear. */
+    var countStage = -1; private set
+    private var countT = 0f
+    val countSpot get() = myCell to 17
+    val onSpot get() = floor(px).toInt() == myCell && floor(py).toInt() == 17
+    /** Every cell door is shut (first thing in the morning). */
+    val cellsShut get() = phase == Phase.WAKE || countStage == 0
+    /** Locked on your square till the count's done (after the guards have had to drag you there). */
+    var lockedInSpot = false; private set
+    var beatT = -1f; private set
+    var enforcer: Npc? = null; private set
+    val clipboards = ArrayList<Npc>()
+    private val clipStops = HashMap<Int, Int>()
+    private var clipPause = HashMap<Int, Float>()
+    private val COUNT_ROWS = floatArrayOf(6.5f, 18.5f, 31.5f)
+    /** The spot an inmate stands on for the count: just outside his cell door. */
+    private fun countSpotFor(home: Pair<Int, Int>): Pair<Int, Int> = home.first to when (home.second) { 15 -> 17; 22 -> 20; 9 -> 7; 3 -> 5; 28 -> 30; 34 -> 32; else -> home.second }
+
+    private fun startCount() {
+        countStage = 0; countT = 0f; doorTarget = 0f; doorOpen = 0f; lockedInSpot = false; beatT = -1f; enforcer = null
+        clipboards.clear(); clipStops.clear(); clipPause.clear()
+        if (!inMyCell) { px = spec.startX; py = spec.startY }
+        for (n in npcs) if (!n.guard) { n.x = n.home.first + 0.5f; n.y = n.home.second + 0.5f; n.path.clear(); n.stay = true }
+        for (n in npcs) if (n.guard) { n.post = null; n.escorting = false; n.hold = false }
+        escort = null
+        say(startPeriodMsg ?: "6:00 AM. DAY $day."); startPeriodMsg = null
+    }
+    private fun countTick(dt: Float) {
+        countT += dt
+        when (countStage) {
+            0 -> if (countT > 1.8f) {
+                countStage = 1; countT = 0f; doorTarget = 1f
+                say("INTERCOM: PLEASE EXIT YOUR CELL. STAND FOR ROLL CALL.")
+                for (n in npcs) if (!n.guard) { n.path = route(n.home, countSpotFor(n.home)); n.stay = true }
+            }
+            1 -> if (countT > 6f) {
+                countStage = 2; countT = 0f
+                // three guards with clipboards, one down each hall
+                val free = npcs.filter { it.guard }.sortedBy { it.id }
+                for ((i, row) in COUNT_ROWS.withIndex()) { val g = free.getOrNull(i) ?: break; g.x = PrisonLevel.CX0 - 0.5f; g.y = row; g.path.clear(); g.post = null; g.face = 0f; clipboards += g; clipStops[g.id] = 0; clipPause[g.id] = 0f }
+                if (!onSpot) beatUp()
+            }
+            2 -> {
+                if (!onSpot && !lockedInSpot) beatUp()
+                var allDone = true
+                for (g in clipboards) {
+                    val stops = (0..9).map { PrisonLevel.CX0 + 3 * it + 1 + 0.5f }
+                    val k = clipStops[g.id] ?: 0
+                    if (k >= stops.size) { if (g.x < PrisonLevel.CX1 + 0.5f) { g.x += 4f * dt; allDone = false }; continue }
+                    allDone = false
+                    val pz = clipPause[g.id] ?: 0f
+                    if (pz > 0f) { clipPause[g.id] = pz - dt; if (pz - dt <= 0f) clipStops[g.id] = k + 1; continue }
+                    g.moving = true; g.face = 0f
+                    g.x += 4f * dt
+                    if (g.x >= stops[k]) {
+                        g.x = stops[k]; g.moving = false; clipPause[g.id] = 0.28f
+                        if (abs(g.y - 18.5f) < 0.1f && abs(stops[k] - (myCell + 0.5f)) < 0.1f && onSpot) speak(g, "TELLEM. HERE.")
+                    }
+                }
+                if (allDone) { countStage = 3; countT = 0f; say("COUNT CLEAR.") }
+            }
+            3 -> if (countT > 1.2f) {
+                countStage = -1; lockedInSpot = false; attended = true; clipboards.clear()
+                for (n in npcs) if (n.guard) n.wait = rnd.nextFloat() * 2f
+                assignEscortForNow()
+            }
+        }
+        // the guard sent to deal with you: runs over, beats you with his baton, drags you onto your square
+        val e = enforcer
+        if (e != null) {
+            if (beatT < 0f) {
+                val dx = px - e.x; val dy = py - e.y; val d = hypot(dx, dy)
+                e.moving = true; e.face = kotlin.math.atan2(dy, dx)
+                if (d > 0.8f) { val mv = min(6.5f * dt, d - 0.7f); e.x += dx / d * mv; e.y += dy / d * mv } else { beatT = 0f; speak(e, "WHAT DID I SAY? ON YOUR SQUARE!"); events += "beat" }
+            } else {
+                beatT += dt
+                if ((beatT * 5f).toInt() != ((beatT - dt) * 5f).toInt() && beatT < 1.3f) events += "beat"
+                if (beatT >= 1.5f) {
+                    px = myCell + 0.5f; py = 17.5f; e.x = myCell + 1.5f; e.y = 18.5f; e.moving = false
+                    lockedInSpot = true; beatT = -1f; enforcer = null
+                    say("BEATEN AND DRAGGED TO YOUR SQUARE. YOU STAY THERE TILL THE COUNT'S DONE.", true)
+                }
+            }
+        }
+    }
+    private fun beatUp() {
+        if (enforcer != null || beatT >= 0f || lockedInSpot) return
+        val g = npcs.filter { it.guard && it !in clipboards }.minByOrNull { hypot(it.x - px, it.y - py) } ?: return
+        nearTile(floor(px).toInt() to floor(py).toInt(), 4, 6)?.let { (c, r) -> g.x = c + 0.5f; g.y = r + 0.5f }
+        g.path.clear(); enforcer = g
+        heat += 15f; punish()
+        say("YOU'RE NOT ON YOUR SQUARE. A GUARD IS COMING.", true)
+    }
+    private fun assignEscortForNow() { routineForNpcs(period); assignEscort(period) }
+    /** Sounds for the view to play. */
+    val events = ArrayList<String>()
+
+    // ---------- caught: a guard comes over, takes what you have, and locks you in till morning ----------
+    var bustStage = -1; private set
+    var bustT = 0f; private set
+    var bustTook = ""; private set
+    private var bustBy: Npc? = null
+    /** You got caught. [by] is the guard who saw (or the nearest one); [lost] is the thing you were reaching for, if any. */
+    private fun bust(by: Npc?, lost: Item?) {
+        if (bustStage >= 0) return
+        val g = by ?: npcs.filter { it.guard }.minByOrNull { hypot(it.x - px, it.y - py) } ?: return
+        bustBy = g; bustStage = 0; bustT = 0f; carry = Carry.NONE; folding = -1f
+        // he takes what you were after, or something you're carrying
+        val have = items.keys.toList()
+        val took = if (have.isNotEmpty()) have[rnd.nextInt(have.size)] else null
+        bustTook = when { took != null -> { take(took); took.label }; lost != null -> lost.label; else -> "" }
+        speak(g, "HEY! STOP RIGHT THERE, TELLEM.")
+        punish()
+    }
+    private fun bustTick(dt: Float) {
+        bustT += dt
+        val g = bustBy
+        when (bustStage) {
+            0 -> {
+                if (g == null) { bustStage = 1; bustT = 0f; return }
+                val dx = px - g.x; val dy = py - g.y; val d = hypot(dx, dy)
+                g.face = kotlin.math.atan2(dy, dx); g.moving = d > 0.9f; g.path.clear()
+                if (d > 0.9f) { val mv = min(4f * dt, d - 0.85f); g.x += dx / d * mv; g.y += dy / d * mv }
+                else { bustStage = 1; bustT = 0f; speak(g, if (bustTook.isNotEmpty()) "HAND IT OVER." else "YOU'RE DONE FOR TODAY.") }
+                face = kotlin.math.atan2(-dy, -dx)
+            }
+            1 -> if (bustT > 1.8f) { bustStage = 2; bustT = 0f; if (bustTook.isNotEmpty()) say("HE TAKES YOUR ${bustTook}. THEN HE LOCKS YOU IN YOUR CELL.", true) else say("HE LOCKS YOU IN YOUR CELL.", true) }
+            else -> if (bustT > 1.6f) {
+                // the night passes behind the bars; morning comes
+                bustStage = -1; g?.moving = false
+                px = spec.startX; py = spec.startY; doorOpen = 0f
+                val next = ((clock - 360f) / 1440f).toInt() + 1
+                clock = (next * 1440 + 360).toFloat(); lastPeriod = Period.ROLL_AM
+                heat = 35f; workTonight = null
+                startPeriodMsg = "MORNING. YOU SPENT THE NIGHT LOCKED IN YOUR CELL."
+                startPeriod(Period.ROLL_AM)
+            }
+        }
+    }
+
+    /** The last thing you picked up or made, and how long ago (for the pop-up over your head). */
+    var gotItem = ""; private set
+    var gotT = 9f; private set
 
     // ---------- the escort: a guard comes for you at each part of the day and walks you there, then keeps watch ----------
     var escort: Npc? = null; private set
@@ -395,6 +558,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         escort = null; escortArrived = false; escortGoal = null
         val goal = goalFor(p) ?: return
         if (solitary || disguised || phase != Phase.PLAY) return
+        if (trusted && !(p.work || p == Period.ROLL_PM)) return        // trusted: you make your own way, except to work and the evening count
         val g = npcs.filter { it.guard }.minByOrNull { hypot(it.x - px, it.y - py) } ?: return
         // he turns up a couple of steps from you
         nearTile(floor(px).toInt() to floor(py).toInt(), 2, 3)?.let { (c, r) -> g.x = c + 0.5f; g.y = r + 0.5f }
@@ -423,7 +587,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         if (d > 6f && !there) { heat += 5f * dt; if (g.sayT <= 0f) speak(g, "KEEP UP, TELLEM.") }
         if (d > 12f && !atPlace(p.place)) {                 // too far: he comes and gets you
             px = g.x; py = g.y + 0.6f; if (!walkable(floor(px).toInt(), floor(py).toInt())) { px = g.x; py = g.y }
-            heat += 10f; say("THE GUARD GRABS YOUR ARM AND DRAGS YOU ALONG.", true)
+            heat += 10f; punish(); say("THE GUARD GRABS YOUR ARM AND DRAGS YOU ALONG.", true)
         }
         if (g.path.isEmpty()) { escortArrived = true; g.escorting = false; g.hold = false; g.post = escortGoal; g.attn = WATCH; g.attnT = 7f + rnd.nextFloat() * 3f; speak(g, "IN YOU GO. I'M WATCHING.") }
     }
@@ -442,7 +606,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         // lights out: ten minutes to get in, then the guards drag you
         if (p == Period.LIGHTS_OUT && !solitary && !inMyCell && minute >= Period.LIGHTS_OUT.start + 10) {
             px = spec.startX; py = spec.startY; doorOpen = 0f
-            heat += 20f; say("THE GUARDS DRAG YOU BACK TO YOUR CELL.", true)
+            heat += 20f; punish(); say("THE GUARDS DRAG YOU BACK TO YOUR CELL.", true)
         }
         // a guard who sees you where you shouldn't be gets suspicious
         watchers.clear()
@@ -452,17 +616,10 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
             if (watchers.isNotEmpty()) { heat += 4f * dt; if (msgT <= 0f) say("A GUARD IS WATCHING YOU. YOU SHOULD BE AT THE ${due}.", true) }
         }
         if (watchers.isEmpty()) heat = max(0f, heat - 0.4f * dt)
-        if (heat >= 100f && !solitary) goToSolitary()
+        if (heat >= 100f && !solitary) bust(npcs.firstOrNull { it.guard && sees(it) }, null)
         heat = heat.coerceIn(0f, 100f)
     }
 
-    private fun goToSolitary() {
-        solitary = true; heat = 100f
-        px = PrisonLevel.CX0 + 3 * 6 + 1.5f; py = 34.5f          // a D block cell
-        carry = Carry.NONE; folding = -1f
-        if (!night) clock += Period.LIGHTS_OUT.start - minute      // the rest of the day is gone
-        say("SOLITARY. A NIGHT IN D BLOCK.", true)
-    }
 
     /** Can this guard see you (close enough, and no wall in the way)? */
     fun sees(n: Npc): Boolean {
@@ -487,6 +644,12 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         val p = period
         if (phase != Phase.PLAY) return "" to null
         if (solitary) return "SOLITARY. WAIT FOR MORNING." to null
+        if (bustStage >= 0) return "" to null
+        when (countStage) {
+            0 -> return "WAIT FOR THE DOORS" to null
+            1 -> return (if (onSpot) "STAY ON YOUR SQUARE" else "STEP OUT ONTO YOUR SQUARE") to countSpot
+            2, 3 -> return "STAND STILL FOR THE COUNT" to (if (onSpot) null else countSpot)
+        }
         val g = escort
         if (g != null && !escortArrived) return "FOLLOW THE GUARD" to (floor(g.x).toInt() to floor(g.y).toInt())
         if (p.work && !shiftDone) {
@@ -596,11 +759,11 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     private fun canHideInCart() = period == Period.WORK_PM && shiftDone && carry == Carry.NONE && !solitary
     /** Do something only if no guard is looking; if one is, it costs you. */
     private fun tryUnseen(what: () -> Unit): Boolean {
-        if (guardSees()) { heat += 25f; say("A GUARD IS WATCHING. NOT NOW.", true); return false }
+        npcs.firstOrNull { it.guard && sees(it) }?.let { bust(it, null); return false }
         what(); return true
     }
     private fun steal(i: Item): Boolean {
-        if (guardSees()) { heat += 25f; say("A GUARD SAW YOU REACH FOR IT.", true); return false }
+        npcs.firstOrNull { it.guard && sees(it) }?.let { bust(it, i); return false }
         give(i)
         say(when (i) {
             Item.SPOON -> "A SPOON. THE FLOOR UNDER YOUR BUNK IS SOFT... AT NIGHT."
@@ -633,7 +796,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         if (nearTile("k", "KITCHEN") && !has(Item.FILE)) o += Option("TAKE A FILE") { steal(Item.FILE) }
         if (nearTile("r", "LIBRARY") && !has(Item.POSTER)) o += Option("TAKE A POSTER") { steal(Item.POSTER) }
         if (nearTile("u") && !has(Item.UNIFORM) && !disguised) o += Option("TAKE A UNIFORM") { steal(Item.UNIFORM) }
-        if (p == Period.FREE && !haircut && nearTile("c", "BARBER")) o += Option("GET A GUARD'S HAIRCUT") { haircut = true; say(if (has(Item.UNIFORM)) "SHORT BACK AND SIDES. PUT THE UNIFORM ON IN YOUR CELL." else "SHORT BACK AND SIDES. VERY GUARD-LIKE."); true }
+        if (p == Period.FREE && !haircut && nearTile("c", "BARBER")) o += Option("GET A GUARD'S HAIRCUT") { haircut = true; gotItem = "HAIRCUT"; gotT = 0f; say(if (has(Item.UNIFORM)) "SHORT BACK AND SIDES. PUT THE UNIFORM ON IN YOUR CELL." else "SHORT BACK AND SIDES. VERY GUARD-LIKE."); true }
         // in your cell: make things, and the night's work
         if (inMyCell) {
             if (night) {
@@ -650,7 +813,8 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         }
         // over the yard wall in free time
         if (p == Period.FREE && zone == "RECREATION YARD" && py >= 45.2f && has(Item.HOOK) && has(Item.ROPE)) o += Option("THROW THE HOOK") {
-            if (guardSees()) { take(Item.HOOK); take(Item.ROPE); heat += 40f; say("A GUARD SAW YOU. THEY TOOK THE HOOK AND ROPE.", true); false } else { escape(Route.WALL); true }
+            val seer = npcs.firstOrNull { it.guard && sees(it) }
+            if (seer != null) { take(Item.HOOK); take(Item.ROPE); bust(seer, Item.HOOK); false } else { escape(Route.WALL); true }
         }
         // out the front gate in uniform
         if (disguised && !night && nearTile("X")) o += Option("WALK OUT THE GATE") { escape(Route.GATE); true }
@@ -701,6 +865,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     // for the tests
     internal fun debugGive(i: Item, n: Int = 1) { repeat(n) { give(i) } }
     internal fun debugHaircut() { haircut = true }
+    internal fun debugEndCount() { if (countStage < 0) return; countStage = -1; lockedInSpot = false; enforcer = null; beatT = -1f; attended = true; clipboards.clear(); doorOpen = 1f; doorTarget = 1f; assignEscortForNow() }
 
     private fun laundryTick(dt: Float) {
         for (m in machines) if (m.running) { m.left -= dt; if (m.left < 0f) { m.left = -1f; m.ready = true } }

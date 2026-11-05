@@ -67,7 +67,7 @@ internal class BeltWorld(val spec: BeltSpec) {
     /** Swipe left (-1) or right (+1): leap to the next belt. */
     fun leap(dir: Int) {
         if (phase != Phase.RIDE) return
-        if (leaping) { queued = dir; return }
+        if (leaping) return          // one swipe, one leap: no queueing up a second one
         val to = (lane + dir).coerceIn(0, spec.laneX.size - 1)
         if (to == lane) return
         lane = to; fromX = x; leapT = 0f; leaping = true
