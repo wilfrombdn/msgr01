@@ -32,4 +32,9 @@ class SpriteSheetTest {
     }
     @Test fun people() { val b = Bitmap.createBitmap(112, 72, Bitmap.Config.ARGB_8888); Sheet().draw(Canvas(b)); save(b, "sprites-people", 8) }
     @Test fun descent() { val d = DescentScene(); for (t in listOf(0.6f, 1.6f, 2.8f, 3.4f)) save(d.render(t, t), "l2-descent-${(t * 10).toInt()}", 3) }
+    @Test fun level1Streets() {
+        val spec = StealthLevels.all[0]; val sc = PixelScene(spec, StealthWorld(spec))
+        sc.render(0f, emptySet(), 0f)
+        save(sc.debugBase(), "l1-streets-unlit", 2)
+    }
 }

@@ -26,6 +26,7 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
     val W = world.cols * S
     val H = world.rows * S
     private val base = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)       // ground and buildings
+    internal fun debugBase() = base
     private val glowBase = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)   // lamp and window light that never changes
     private val darkBase = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)   // the night, with the fixed lights cut out of it
     private val dark = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
@@ -209,21 +210,127 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
             if (w) rect(c, x0, y0, 1, S, PX.B1)
             if (e) rect(c, x0 + S - 1, y0, 1, S, PX.N0)
         } else {
-            // roof seen from above and in front: dark gravel, an edge where it is open to the north, vents and boxes on top
-            rect(c, x0, y0, S, S, PX.N0)
-            for (y in 0 until S) for (x in 0 until S) { val v = hash(x0 + x, y0 + y, 12) % 100; if (v < 12) px(c, x0 + x, y0 + y, PX.N1) else if (v < 16) px(c, x0 + x, y0 + y, PX.N2) }
-            if (n) { rect(c, x0, y0, S, 2, PX.B2); rect(c, x0, y0 + 2, S, 1, PX.B1) }
-            if (w) rect(c, x0, y0, 1, S, PX.B1)
-            if (e) rect(c, x0 + S - 1, y0, 1, S, PX.N3)
-            when (hash(col, row, 13) % 7) {
-                0 -> { rect(c, x0 + 3, y0 + 5, 9, 7, PX.K); rect(c, x0 + 4, y0 + 6, 7, 5, PX.N3); rect(c, x0 + 4, y0 + 6, 7, 1, PX.B1) }   // a skylight
-                1 -> { rect(c, x0 + 6, y0 + 2, 4, 11, PX.K); rect(c, x0 + 7, y0 + 3, 2, 9, PX.N3) }                                    // chimney
-                2 -> { rect(c, x0 + 2, y0 + 6, 12, 6, PX.K); rect(c, x0 + 3, y0 + 7, 10, 4, PX.N2); for (i in 0..2) px(c, x0 + 5 + i * 3, y0 + 9, PX.N0) }   // an air unit
-                3 -> { rect(c, x0 + 3, y0 + 3, 10, 10, PX.K); rect(c, x0 + 4, y0 + 4, 8, 8, PX.N2); rect(c, x0 + 4, y0 + 4, 8, 1, PX.B1); for (i in 0..3) px(c, x0 + 5 + i * 2, y0 + 8, PX.N0) }   // a water tank
-                4 -> { rect(c, x0 + 4, y0 + 5, 8, 6, PX.K); rect(c, x0 + 5, y0 + 6, 6, 4, PX.N2); rect(c, x0 + 7, y0 + 6, 2, 4, PX.N0) }   // a roof hatch
-                5 -> { rect(c, x0 + 2, y0 + 8, 12, 4, PX.N3); rect(c, x0 + 2, y0 + 8, 12, 1, PX.B1) }   // a low brick parapet
+            roofTile(c, col, row)
+        }
+    }
+
+    // ---------- roofs: one roof per building, not random clutter per square ----------
+    private fun isRoof(c: Int, r: Int) = r >= 0 && r < kmap.size && c >= 0 && c < kmap[0].size && isWall(c, r) && kmap[r][c] >= 2
+    /**
+     * A roof seen from above and slightly in front. Houses get a pitched roof (rows of slate or clay shingles, a ridge across the middle
+     * with the far slope darker, gutters and trim, a brick chimney); apartment blocks get a flat tar roof with a parapet all round and
+     * one or two things you'd really see up there: a wooden water tower, an air-con unit, a stairwell hut.
+     */
+    private fun roofTile(c: Canvas, col: Int, row: Int) {
+        val x0 = col * S; val y0 = row * S
+        var t = row; while (isRoof(col, t - 1)) t--
+        var b = row; while (isRoof(col, b + 1)) b++
+        var l = col; while (isRoof(l - 1, t)) l--
+        var r = col; while (isRoof(r + 1, t)) r++
+        // a big block of roof is really a row of separate buildings side by side: split it into houses and small apartment blocks
+        val blockKey = hash(l, t, 29)
+        val xs = segments(r - l + 1, blockKey, 3, 5); val ys = segments(b - t + 1, blockKey * 7 + 3, 2, 4)
+        val sx0 = xs.last { it <= col - l }; val sx1 = (xs.firstOrNull { it > col - l } ?: (r - l + 1)) - 1
+        val sy0 = ys.last { it <= row - t }; val sy1 = (ys.firstOrNull { it > row - t } ?: (b - t + 1)) - 1
+        l += sx0; r = l + (sx1 - sx0); t += sy0; b = t + (sy1 - sy0)
+        val bw = r - l + 1; val bh = b - t + 1
+        val key = hash(l, t, 31)
+        val pitched = bh in 2..4 && bw <= 6 && key % 2 == 0          // about half are houses with pitched roofs
+        val ry = (row - t) * S; val rh = bh * S                        // where this square sits in the roof
+        val nE = row == t; val sE = row == b; val wE = col == l; val eE = col == r
+        if (pitched) {
+            val clay = key % 4 == 1
+            val front = if (clay) 0xFF5A3036.toInt() else 0xFF2C3656.toInt(); val back = if (clay) 0xFF3A1E24.toInt() else 0xFF1A2038.toInt()
+            val ridge = (rh * 0.42f).toInt()
+            for (yy in 0 until S) for (xx in 0 until S) {
+                val Y = ry + yy; val X = (col - l) * S + xx
+                val onBack = Y < ridge
+                var cl = if (onBack) back else front
+                val course = if (onBack) (ridge - Y) else (Y - ridge)
+                if (course % 3 == 2) cl = lite(cl, -14)                                                    // the shingle courses
+                else if ((X + (course / 3 % 2) * 3) % 6 == 0) cl = lite(cl, -10)                           // the joints, staggered
+                else if (!onBack && hash(x0 + xx, y0 + yy, 41) % 23 == 0) cl = lite(cl, 14)                // moonlight catching a shingle
+                if (!onBack && course < 2) cl = lite(cl, -6)                                               // just under the ridge, in its shadow
+                px(c, x0 + xx, y0 + yy, cl)
+            }
+            if (ridge in ry until ry + S) { val yl = y0 + ridge - ry; rect(c, x0, yl - 1, S, 2, if (clay) 0xFF8A4A44.toInt() else 0xFF5A6A98.toInt()); rect(c, x0, yl + 1, S, 1, a(PX.K, 0x80)) }   // the ridge cap
+            if (sE) { rect(c, x0, y0 + S - 3, S, 1, lite(front, 18)); rect(c, x0, y0 + S - 2, S, 2, PX.K); px(c, x0 + 2, y0 + S - 2, 0xFF6A7488.toInt()) }   // eaves and the gutter
+            if (nE) rect(c, x0, y0, S, 1, PX.K)
+            if (wE) { rect(c, x0, y0, 1, S, lite(front, 26)); rect(c, x0 + 1, y0, 1, S, a(PX.K, 0x50)) }       // the rake trim
+            if (eE) rect(c, x0 + S - 1, y0, 1, S, PX.K)
+            // one brick chimney per house, on the far slope near the ridge, with its shadow
+            val chimCol = l + 1 + key % maxOf(1, bw - 2)
+            if (col == chimCol && ridge in ry until ry + S + 6) {
+                val cx = x0 + 6; val cy = y0 + (ridge - ry) - 9
+                rect(c, cx + 2, cy + 9, 6, 3, a(PX.K, 0x70))
+                rect(c, cx - 1, cy, 7, 10, PX.K); rect(c, cx, cy + 1, 5, 8, 0xFF6A3A34.toInt())
+                for (i in 0..2) rect(c, cx, cy + 3 + i * 2, 5, 1, 0xFF4A2824.toInt())
+                rect(c, cx - 1, cy, 7, 2, 0xFF8A8A92.toInt()); rect(c, cx + 1, cy - 2, 3, 2, PX.K)                  // the cap and a pot
+            }
+        } else {
+            // a flat tar roof: smooth, with seams; a parapet with a lit coping all round
+            for (yy in 0 until S) for (xx in 0 until S) {
+                val Y = ry + yy
+                var cl = when (key % 3) { 0 -> 0xFF141A2C.toInt(); 1 -> 0xFF181C26.toInt(); else -> 0xFF12202A.toInt() }
+                val v = hash(x0 + xx, y0 + yy, 12) % 100
+                if (v < 7) cl = 0xFF1A2236.toInt() else if (v > 96) cl = 0xFF0E1220.toInt()
+                if (Y % 10 == 0) cl = 0xFF1E2640.toInt()                                                   // the tar seams
+                if (hash((x0 + xx) / 7, (y0 + yy) / 5, 13) % 37 == 0) cl = 0xFF22304A.toInt()              // a puddle of rain
+                px(c, x0 + xx, y0 + yy, cl)
+            }
+            val cope = 0xFF5A6A98.toInt(); val copeD = 0xFF2A3456.toInt()
+            if (nE) { rect(c, x0, y0, S, 2, cope); rect(c, x0, y0 + 2, S, 1, a(PX.K, 0x80)) }
+            if (sE) { rect(c, x0, y0 + S - 3, S, 1, a(PX.K, 0x60)); rect(c, x0, y0 + S - 2, S, 2, copeD) }
+            if (wE) { rect(c, x0, y0, 2, S, cope); rect(c, x0 + 2, y0, 1, S, a(PX.K, 0x60)) }
+            if (eE) { rect(c, x0 + S - 2, y0, 2, S, copeD) }
+            // a few real things, one per building at most of each, never just scattered
+            val tower = bw >= 3 && bh >= 3 && (key / 3) % 3 == 0
+            val tc = l + 1 + key % maxOf(1, bw - 2); val tr = t + 1
+            val acC = if (tower) r - 1 else l + bw / 2; val acR = b - 1
+            val hutC = l + (key / 7) % maxOf(1, bw); val hutR = t
+            when {
+                tower && col == tc && row == tr -> waterTower(c, x0 + 8, y0 + 12)
+                bw >= 2 && bh >= 2 && col == acC && row == acR && !(tower && col == tc) && (key / 5) % 3 != 0 -> acBox(c, x0 + 2 + (key % 3) * 2, y0 + 3)
+                !tower && bh >= 2 && col == hutC && row == hutR && (key / 11) % 4 == 1 -> stairHut(c, x0 + 2, y0 + 4)
             }
         }
+    }
+    /** Splits a run of [n] squares into pieces [lo]..[hi] long (their start offsets), the same way every time for the same [seed]. */
+    private fun segments(n: Int, seed: Int, lo: Int, hi: Int): List<Int> {
+        val out = ArrayList<Int>(); var at = 0; var i = 0
+        while (at < n) { out += at; val len = lo + hash(seed, i, 37) % (hi - lo + 1); at += len; i++; if (n - at in 1 until lo) break }
+        return out
+    }
+    private fun lite(c: Int, d: Int): Int {
+        val r = (((c shr 16) and 0xFF) + d).coerceIn(0, 255); val g = (((c shr 8) and 0xFF) + d).coerceIn(0, 255); val b = ((c and 0xFF) + d).coerceIn(0, 255)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
+    /** The classic wooden water tank on legs, with its cone roof (feet at (cx, fy)). */
+    private fun waterTower(c: Canvas, cx: Int, fy: Int) {
+        rect(c, cx - 4, fy - 1, 14, 4, a(PX.K, 0x70))                                                          // its shadow
+        for (lx in intArrayOf(cx - 6, cx - 2, cx + 2, cx + 5)) rect(c, lx, fy - 8, 1, 8, 0xFF2A2420.toInt())   // the legs
+        rect(c, cx - 6, fy - 5, 12, 1, 0xFF2A2420.toInt())                                                     // a cross brace
+        rect(c, cx - 7, fy - 20, 14, 12, PX.K); rect(c, cx - 6, fy - 19, 12, 10, 0xFF5A4030.toInt())           // the tank
+        for (i in 0..4) rect(c, cx - 5 + i * 2 + (if (i > 2) 1 else 0), fy - 19, 1, 10, 0xFF3E2C20.toInt())    // staves
+        rect(c, cx - 6, fy - 17, 12, 1, 0xFF2A2018.toInt()); rect(c, cx - 6, fy - 12, 12, 1, 0xFF2A2018.toInt())   // iron hoops
+        rect(c, cx - 6, fy - 19, 3, 10, 0xFF6E5038.toInt())                                                    // the lit side
+        for (i in 0 until 5) rect(c, cx - 6 + i, fy - 21 - i, 12 - i * 2, 1, if (i == 0) PX.K else 0xFF3A3A44.toInt())   // the cone roof
+        px(c, cx, fy - 26, 0xFF8A8A92.toInt())
+    }
+    /** An air-conditioning unit with a round fan grille. */
+    private fun acBox(c: Canvas, x: Int, y: Int) {
+        rect(c, x + 2, y + 9, 12, 3, a(PX.K, 0x70))
+        rect(c, x, y, 12, 10, PX.K); rect(c, x + 1, y + 1, 10, 8, 0xFF4A5468.toInt()); rect(c, x + 1, y + 1, 10, 1, 0xFF7A86A0.toInt())
+        for (dy in -3..3) for (dx in -3..3) if (dx * dx + dy * dy <= 9) px(c, x + 6 + dx, y + 5 + dy, if ((dx + dy) % 2 == 0) 0xFF1A2030.toInt() else 0xFF2A3346.toInt())
+        px(c, x + 6, y + 5, 0xFF8A94AC.toInt())
+    }
+    /** A stairwell hut on a flat roof: a little brick box with a door facing you. */
+    private fun stairHut(c: Canvas, x: Int, y: Int) {
+        rect(c, x + 3, y + 10, 12, 3, a(PX.K, 0x70))
+        rect(c, x - 1, y - 1, 13, 13, PX.K); rect(c, x, y, 11, 11, 0xFF4A3038.toInt())
+        rect(c, x, y, 11, 3, 0xFF3A3E52.toInt()); rect(c, x, y, 11, 1, 0xFF6A7290.toInt())                     // its own little roof
+        rect(c, x + 3, y + 4, 5, 7, 0xFF1E1A2A.toInt()); px(c, x + 7, y + 7, PX.GOLD)                          // the door
+        rect(c, x + 4, y + 2, 3, 1, 0xFFCFA350.toInt())                                                        // a bulb over it
     }
 
     private fun door(c: Canvas, x: Int, y: Int) {
