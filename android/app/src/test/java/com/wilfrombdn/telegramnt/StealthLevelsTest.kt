@@ -12,6 +12,9 @@ class StealthLevelsTest {
     private val horizon = 900   // 3 minutes
 
     /** Seconds the safe route takes, or -1 if there is none. */
+    internal fun withGuards(s: LevelSpec, g: List<GuardSpec>) = LevelSpec(s.building, s.objective, s.situation, s.tip, s.contact, s.line, s.reveal, s.heat, s.pal, s.map, g, s.cams, s.lasers, s.props, s.armed, s.cover)
+    internal fun planFor(spec: LevelSpec) = plan(spec)
+
     private fun plan(spec: LevelSpec, speedMul: Float = 1f): Float {
         val ghost = StealthWorld(spec, speedMul, ghost = true)
         val eyes = ArrayList<List<Eye>>(); val lasersOn = ArrayList<BooleanArray>()
@@ -104,5 +107,48 @@ class StealthNaiveTest {
             val run = (0 until 12).count { naive(spec, it * 1.1f, 1.0f) == "WON" }
             println("NAIVE ${n + 1} ${spec.building}: sneaking wins $sneak/12, running wins $run/12")
         }
+    }
+}
+
+class StealthDiagnoseTest {
+    @Test fun level1PerGuard() {
+        val t = StealthLevelsTest()
+        val s = StealthLevels.all[0]
+        println("DIAG no guards: " + t.planFor(t.withGuards(s, emptyList())))
+        for ((i, g) in s.guards.withIndex()) println("DIAG only guard $i: " + t.planFor(t.withGuards(s, listOf(g))))
+        println("DIAG all: " + t.planFor(s))
+    }
+}
+
+class StealthChaseTest {
+    private fun run(levelIdx: Int, px: Float, py: Float, secs: Float): StealthWorld {
+        val w = StealthWorld(StealthLevels.all[levelIdx])
+        w.px = px; w.py = py
+        for (g in w.guards) { g.lockOn() }
+        var t = 0f
+        while (t < secs && w.state == StealthWorld.State.PLAY) { w.update(0.05f, 0f, 0f, 0f); t += 0.05f }
+        return w
+    }
+
+    @Test fun anArmedContactShootsTheGuardsChasingYou() {
+        // level 1: stand near the newspaper vendor with every guard locked on from far away
+        val w = StealthWorld(StealthLevels.all[0]); w.px = 2.5f; w.py = 1.5f
+        for (g in w.guards) { g.lockOn(); g.x = 7.5f; g.y = 1.5f }   // all of them far along the top corridor
+        repeat(60) { w.update(0.05f, 0f, 0f, 0f) }
+        assertTrue("every chaser should be shot", w.guards.all { it.dead })
+    }
+
+    @Test fun thePriestWillNotShoot() {
+        val w = StealthWorld(StealthLevels.all[4]); w.px = 2.5f; w.py = 1.5f
+        for (g in w.guards) { g.lockOn(); g.x = 7.5f; g.y = 1.5f }
+        repeat(40) { w.update(0.05f, 0f, 0f, 0f) }
+        assertTrue("the priest is unarmed", w.guards.none { it.dead })
+    }
+
+    @Test fun aChaserWhoReachesYouCatchesYou() {
+        val w = StealthWorld(StealthLevels.all[4]); w.px = 4.5f; w.py = 6.5f
+        val g = w.guards[0]; g.lockOn(); g.x = 4.5f; g.y = 5.8f
+        repeat(10) { w.update(0.05f, 0f, 0f, 0f) }
+        assertTrue(w.state == StealthWorld.State.CAUGHT)
     }
 }

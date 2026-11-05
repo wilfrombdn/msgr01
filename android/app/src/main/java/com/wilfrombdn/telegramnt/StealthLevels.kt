@@ -16,34 +16,47 @@ internal object StealthLevels {
     val all: List<LevelSpec> = listOf(
         // ------------------------------------------------------------------ 1
         LevelSpec(
-            "The Backstreets", "Deliver letter I to the newspaper vendor.", "You are newly wanted. The police are looking, but they do not know where you are yet.",
-            "Touch and drag to walk. A gentle drag is quiet; a hard drag runs and is loud. Stay out of the light.",
+            "The Backstreets", "Deliver letter I to the newspaper vendor.",
+            "You are newly wanted: \"Mr. Tellem\", terrorist. Officers are working the alleys, and every window has a radio.",
+            "Touch the screen and he walks toward your finger. Keep it close to him to sneak quietly; pull it far away and he sprints, loudly.",
             "Newspaper vendor", "I thought you were dead.", "Someone inside the government helped you escape.", 0,
-            pal(0xFF0E161D, 0xFF15212B, 0xFF080C10, 0xFF2A3A48, 0xFF6FB7FF, 0xFFFFE2A8, 0xFFFFB84D),
+            pal(0xFF0B1230, 0xFF121D47, 0xFF03050A, 0xFF1B2B66, 0xFF29F0FF, 0xFFDCEBFF, 0xFFFF3B55),
             listOf(
                 "#########",
                 "#...C...#",
-                "#.......#",
-                "#.c...c.#",
-                "#.......#",
+                "#.#####.#",
+                "#.#...#.#",
+                "#.#.c.#.#",
+                "#.#...#.#",
+                "#.##.##.#",
                 "#...L...#",
-                "#.......#",
-                "#.c...c.#",
-                "#.......#",
+                "#..c.c..#",
+                "##.###.##",
                 "#...L...#",
-                "#.......#",
                 "#.c...c.#",
-                "#.......#",
+                "#...d...#",
                 "#...S...#",
                 "#########",
             ),
-            guards = listOf(GuardSpec(listOf(1 to 9, 7 to 9), speed = 1.3f, pause = 1.2f)),
+            guards = listOf(
+                // the street officer: walks the bottom plaza
+                GuardSpec(listOf(1 to 10, 7 to 10), speed = 1.3f, pause = 1.4f),
+                // the bin inspector: checks behind each bin in the middle alley
+                GuardSpec(listOf(2 to 8, 6 to 8), speed = 1.2f, faces = listOf(0f, 180f), pauses = listOf(2.6f, 2.6f)),
+                // a patrol officer who circles the whole block: up the right alley, across the top, down the left alley, back across
+                GuardSpec(listOf(7 to 6, 7 to 1, 1 to 1, 1 to 7), speed = 1.25f, pause = 1.2f),
+            ),
+            cover = "bin", pixel = true,
             props = listOf(
-                Prop("poster", 0.5f, 3.5f, text = "WANTED. Terrorism. That is your face, pasted up fresh."),
-                Prop("poster", 8.5f, 7.5f), Prop("poster", 0.5f, 11.5f),
-                Prop("news", 6.5f, 12.5f, text = "HEADLINE: CLERK BEHIND CITY BOMBING. There was no bombing."),
-                Prop("radio", 2.5f, 4.5f, text = "Police radio: \"...suspect is a former city clerk. Name confirmed...\""),
-                Prop("stuff", 1.5f, 12.5f, text = "Your old apartment. Everything you owned, on the floor."),
+                Prop("window", 0.5f, 4.5f, text = "[CHANNEL 9 NEWS] ...authorities are hunting a man identified only as Mr. Tellem, wanted on terrorism charges after last night's bombing. Citizens are urged not to approach."),
+                Prop("window", 8.5f, 3.5f, text = "[TALK RADIO 880] ...Mr. Tellem. Remember the name, folks. The man who bit the hand that fed him. Fifty thousand reward. Lines are open."),
+                Prop("window", 0.5f, 11.5f, text = "[POLICE DISPATCH] All units, suspect Tellem is on foot in the alleys behind Fourth Street. Detain on sight. Repeat, on sight."),
+                Prop("window", 8.5f, 11.5f, text = "[MORNING SHOW] ...and the weather is cold, with a chance of Mr. Tellem! Ha! Kidding, folks. Seriously, lock your doors."),
+                Prop("window", 4.5f, 2.5f, text = "[OLD KITCHEN RADIO] I never met this Mr. Tellem. Seems an awful lot of fuss for one clerk."),
+                Prop("poster", 8.5f, 7.5f, text = "WANTED: Mr. Tellem. Terrorism. That is your face, pasted up fresh."),
+                Prop("poster", 0.5f, 7.5f),
+                Prop("news", 6.5f, 13.5f, text = "HEADLINE: CLERK BEHIND CITY BOMBING. There was no bombing."),
+                Prop("stuff", 1.5f, 13.5f, text = "Your old apartment is two streets over. Everything you owned, on the floor."),
             ),
         ),
         // ------------------------------------------------------------------ 2
@@ -155,7 +168,7 @@ internal object StealthLevels {
         // ------------------------------------------------------------------ 5
         LevelSpec(
             "The Old Quarter", "Deliver letter V to the priest.", "Martial law has been declared. Your face is on every channel in the city.",
-            "Guards hear running. If you hear \"?\", freeze in the dark and let them look.",
+            "The priest will not fight for you. Do not get caught: guards hear running, and a chase here ends badly.",
             "Priest", "I know what happened to your father.", "Your family was part of the original operation. Your discovery was expected.", 4,
             pal(0xFF17120C, 0xFF241B12, 0xFF0B0805, 0xFF4F3A24, 0xFFFFC25A, 0xFFFFC27A, 0xFFFF5A4F),
             listOf(
@@ -181,6 +194,7 @@ internal object StealthLevels {
                 GuardSpec(listOf(7 to 6, 1 to 6), speed = 1.5f, pause = 1.0f),
                 GuardSpec(listOf(1 to 11, 7 to 11), speed = 1.5f, pause = 1.0f),
             ),
+            armed = false,
             props = listOf(
                 Prop("barricade", 2.5f, 5.5f, text = "Barricaded streets. Martial law."),
                 Prop("barricade", 6.5f, 5.5f), Prop("barricade", 2.5f, 10.5f), Prop("barricade", 6.5f, 10.5f),

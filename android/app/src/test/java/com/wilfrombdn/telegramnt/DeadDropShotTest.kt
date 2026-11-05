@@ -32,7 +32,7 @@ class DeadDropShotTest {
 
     @Test fun draw() {
         val v = view()
-        for (i in StealthLevels.all.indices) { v.debugLevel(i); v.debugAdvance(2.5f); shot(v, "deadletter-${i + 1}") }
+        for (i in StealthLevels.all.indices) { v.debugLevel(i); v.debugAdvance(0.6f); shot(v, "deadletter-${i + 1}") }
         v.debugLevel(0); v.debugIntro(); shot(v, "deadletter-intro")
         // walk toward the first clue to see the caption, and the win and ending screens
         v.debugLevel(0); v.debugWorld().px = 1.5f; v.debugWorld().py = 11.6f; v.debugAdvance(0.3f); shot(v, "deadletter-clue")
@@ -40,5 +40,12 @@ class DeadDropShotTest {
         v.debugLevel(5); v.debugWorld().px = 7.5f; v.debugWorld().py = 1.5f; v.debugAdvance(5.0f); shot(v, "deadletter-ending-a")
         v.debugAdvance(4.0f); shot(v, "deadletter-ending-b")
         v.debugAdvance(5f); shot(v, "deadletter-ending-c")
+        // level 1: a radio window being read, then a chase that the vendor ends
+        v.debugLevel(0); v.debugWorld().px = 1.5f; v.debugWorld().py = 4.5f; v.debugAdvance(1.6f); shot(v, "deadletter-window")
+        v.debugLevel(0); val w = v.debugWorld(); w.px = 2.5f; w.py = 1.5f
+        w.guards[2].x = 6.5f; w.guards[2].y = 1.5f; w.guards[2].lockOn(); w.guards[1].x = 7.5f; w.guards[1].y = 1.5f; w.guards[1].lockOn()
+        v.debugAdvance(0.35f); shot(v, "deadletter-aim")
+        v.debugAdvance(0.8f); shot(v, "deadletter-shot")
+        v.debugAdvance(1.2f); shot(v, "deadletter-dead")
     }
 }

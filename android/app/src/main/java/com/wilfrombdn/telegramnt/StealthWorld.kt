@@ -10,13 +10,22 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-// The rules of the Dead Drop easter egg (no Android code here, so tests can run it). A top-down stealth game:
-// sneak through a dark office building, past guards, cameras and lasers, to your contact. Light and loud steps get you spotted.
+// The rules of Dead Letter (no Android code here, so tests can run it). A top-down stealth game: sneak through a dark
+// city past guards, cameras and lasers to your contact. Light and loud steps get you spotted; once a guard locks on,
+// he chases you, and only a contact with a gun (anyone but the priest) can stop a chase.
 
-internal class GuardSpec(val path: List<Pair<Int, Int>>, val speed: Float = 1.5f, val pause: Float = 1.0f, val range: Float = 4.2f, val half: Float = 0.55f)
+/**
+ * A patrolling guard. He walks between the waypoints (column, row). At each one he stops for [pauses] (or [pause]) and, if
+ * [faces] has an angle in degrees for it, stares that way (an officer checking behind a bin); otherwise he looks around.
+ */
+internal class GuardSpec(
+    val path: List<Pair<Int, Int>>, val speed: Float = 1.5f, val pause: Float = 1.0f, val range: Float = 4.2f, val half: Float = 0.55f,
+    val faces: List<Float?> = emptyList(), val pauses: List<Float> = emptyList(),
+)
 internal class CamSpec(val x: Float, val y: Float, val baseDeg: Float, val sweepDeg: Float, val period: Float, val phase: Float = 0f, val range: Float = 4.6f, val half: Float = 0.5f)
 internal class LaserSpec(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val on: Float, val off: Float, val phase: Float = 0f)
 internal class Palette(val floor: Int, val floorLine: Int, val wall: Int, val wallTop: Int, val accent: Int, val lamp: Int, val cone: Int)
+
 /** Something to look at in the world (a poster, a radio, a police car...). With [text] it becomes a clue: walk close to read it. */
 internal class Prop(val kind: String, val x: Float, val y: Float, val w: Int = 1, val text: String? = null, val rot: Float = 0f)
 
@@ -32,6 +41,9 @@ internal class LevelSpec(
     val pal: Palette, val map: List<String>,
     val guards: List<GuardSpec> = emptyList(), val cams: List<CamSpec> = emptyList(), val lasers: List<LaserSpec> = emptyList(),
     val props: List<Prop> = emptyList(),
+    val armed: Boolean = true,   // does the contact shoot the guards chasing you? (the priest won't)
+    val cover: String = "cabinet",   // what the tall cover blocks look like: "cabinet" or "bin"
+    val pixel: Boolean = false,      // draw this level as night-time pixel art (see DeadDropPixel.kt)
 )
 
 /** Something that can see: a guard or a camera at one moment. */
@@ -42,6 +54,8 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
 
     class Key(val x: Float, val y: Float, val ch: Char, var taken: Boolean = false)
     class Foot(val x: Float, val y: Float, var age: Float)
+    /** A shot from the contact's gun, kept for a moment so it can be drawn. */
+    class Shot(val x1: Float, val y1: Float, val x2: Float, val y2: Float, var age: Float = 0f)
 
     val cols = spec.map[0].length
     val rows = spec.map.size
@@ -60,8 +74,14 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
     var noise = 0f                    // how far my steps carry, in tiles
     var spotter = ""                  // who caught me
     var stateT = 0f
+    var wonDelay = 0f                 // after winning: how long the contact takes to deal with anyone still chasing me
     val feet = ArrayList<Foot>()
+    val shots = ArrayList<Shot>()
     private var stepDist = 0f
+    private var shotCd = 0f
+    private var alarmCd = 0f
+    var contactAim = 0f               // angle the contact is pointing his gun, when he is
+    var contactAiming = false
 
     init {
         for (r in 0 until rows) for (c in 0 until cols) when (grid[r][c]) {
@@ -85,6 +105,14 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
             solidAt(floor(x - r).toInt(), floor(y + r).toInt()) || solidAt(floor(x + r).toInt(), floor(y + r).toInt())
     }
 
+    /** Is there a clear line of sight between two points (walls and cover in the way)? */
+    fun lineClear(x1: Float, y1: Float, x2: Float, y2: Float): Boolean {
+        val dx = x2 - x1; val dy = y2 - y1; val d = hypot(dx, dy)
+        var s = 0.3f
+        while (s < d) { if (blocksSightAt(x1 + dx / d * s, y1 + dy / d * s)) return false; s += 0.12f }
+        return true
+    }
+
     /** Can [eye] see the point (x, y)? Needs a clear line through the walls, being inside the cone, and being close enough. */
     fun sees(e: Eye, x: Float, y: Float): Boolean {
         val dx = x - e.x; val dy = y - e.y
@@ -95,9 +123,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
             while (diff > PI) diff -= 2 * PI.toFloat(); while (diff < -PI) diff += 2 * PI.toFloat()
             if (abs(diff) > e.half) return false
         }
-        var s = 0.3f
-        while (s < d) { if (blocksSightAt(e.x + dx / d * s, e.y + dy / d * s)) return false; s += 0.12f }
-        return true
+        return lineClear(e.x, e.y, x, y)
     }
 
     /** How far a ray from [e] along [ang] gets before a wall (for drawing the cone). */
@@ -144,8 +170,15 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         var pause = 0f
         var scanT = 0f
         var baseFace = 0f
+        var scanAmp = 0.75f
         var hearCool = 0f
         var pauseKind = PATROL
+        var seenNow = false            // did he see me on the last step?
+        var lastX = 0f; var lastY = 0f // where he last saw me
+        var loseT = 0f
+        var repath = 0f
+        val dead get() = mode == DEAD
+        val chasing get() = mode == CHASE
 
         init {
             if (spec.path.size > 1) {
@@ -164,6 +197,10 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
             face += diff.coerceIn(-m, m)
         }
 
+        fun lockOn() {
+            mode = CHASE; lastX = px; lastY = py; loseT = 0f; repath = 0f; pause = 0f; path.clear()
+        }
+
         fun hear(): Boolean {
             if (ghost || noise <= 0f || hearCool > 0f) return false
             var eff = hypot(px - x, py - y)
@@ -180,8 +217,35 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
             return eff < noise
         }
 
+        /** Walk along [path]; returns true if he moved this step. */
+        private fun follow(dt: Float, sp: Float, turnRate: Float): Boolean {
+            if (path.isEmpty()) return false
+            val tgt = path.first()
+            val tx = tgt.first + 0.5f; val ty = tgt.second + 0.5f
+            val dx = tx - x; val dy = ty - y
+            val d = hypot(dx, dy)
+            if (d > 0.01f) turn(atan2(dy, dx), dt, turnRate)
+            val mv = min(sp * dt, d)
+            if (d > 0.001f) { x += dx / d * mv; y += dy / d * mv }
+            if (d - mv < 0.02f) path.removeFirst()
+            return true
+        }
+
         fun step(dt: Float) {
+            if (dead) return
             hearCool -= dt
+            if (mode == CHASE) {
+                if (seenNow) { lastX = px; lastY = py; loseT = 0f } else loseT += dt
+                if (loseT > 5f) { mode = INVESTIGATE; meter = 0f; path.clear(); path.addAll(route(tileOf(), floor(lastX).toInt() to floor(lastY).toInt())); return }
+                repath -= dt
+                if (repath <= 0f || path.isEmpty()) {
+                    repath = 0.25f
+                    path.clear(); path.addAll(route(tileOf(), floor(lastX).toInt() to floor(lastY).toInt()))
+                }
+                if (path.isEmpty()) turn(atan2(lastY - y, lastX - x), dt, 8f)
+                follow(dt, max(CHASE_SPEED, spec.speed * 1.9f) * speedMul, 9f)
+                return
+            }
             if (meter > 0.25f) { turn(atan2(py - y, px - x), dt, 6f); return }   // something's off: stop and stare
             if (hear()) {
                 mode = INVESTIGATE; hearCool = 0.7f; pause = 0f
@@ -189,26 +253,20 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
             }
             if (pause > 0f) {
                 pause -= dt; scanT += dt
-                face = baseFace + sin(scanT * 2.4f) * 0.75f
+                turn(baseFace + sin(scanT * 2.4f) * scanAmp, dt, 5f)
                 if (pause <= 0f) endPause()
                 return
             }
-            if (path.isNotEmpty()) {
-                val tgt = path.first()
-                val tx = tgt.first + 0.5f; val ty = tgt.second + 0.5f
-                val dx = tx - x; val dy = ty - y
-                val d = hypot(dx, dy)
-                val sp = spec.speed * speedMul * (if (mode == INVESTIGATE) 1.5f else 1f)
-                if (d > 0.01f) turn(atan2(dy, dx), dt, 7f)
-                val mv = min(sp * dt, d)
-                if (d > 0.001f) { x += dx / d * mv; y += dy / d * mv }
-                if (d - mv < 0.02f) path.removeFirst()
-                return
-            }
+            if (follow(dt, spec.speed * speedMul * (if (mode == INVESTIGATE) 1.5f else 1f), 7f)) return
             // arrived somewhere
             when (mode) {
-                PATROL -> { pause = spec.pause; baseFace = face; scanT = 0f; pauseKind = PATROL }
-                INVESTIGATE -> { mode = LOOK; pause = 1.8f; baseFace = face; scanT = 0f; pauseKind = LOOK }
+                PATROL -> {
+                    val look = spec.faces.getOrNull(wp)
+                    pause = spec.pauses.getOrNull(wp) ?: spec.pause
+                    scanT = 0f; pauseKind = PATROL
+                    if (look != null) { baseFace = look * PI.toFloat() / 180f; scanAmp = 0.3f } else { baseFace = face; scanAmp = 0.75f }
+                }
+                INVESTIGATE -> { mode = LOOK; pause = 1.8f; baseFace = face; scanAmp = 0.75f; scanT = 0f; pauseKind = LOOK }
                 else -> { mode = PATROL; path.addAll(route(tileOf(), spec.path[wp])) }
             }
         }
@@ -242,19 +300,51 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
     val cams = spec.cams.map { Cam(it) }
     val lasers = spec.lasers.map { Laser(it) }
 
-    /** Everything that can see right now (used by the level-checking test). */
-    fun eyes(): List<Eye> = guards.map { it.eye() } + cams.map { it.eye() }
+    /** Everything that can see right now (used by the level-checking test). Guards who have been shot see nothing. */
+    fun eyes(): List<Eye> = guards.filter { !it.dead }.map { it.eye() } + cams.map { it.eye() }
 
     /** Highest "being noticed" value, 0..1 (drives the red edge glow). */
-    fun alert(): Float = max(guards.maxOfOrNull { it.meter } ?: 0f, cams.maxOfOrNull { it.meter } ?: 0f)
+    fun alert(): Float = max(guards.filter { !it.dead }.maxOfOrNull { it.meter } ?: 0f, cams.maxOfOrNull { it.meter } ?: 0f)
+
+    /** How many guards are locked onto me right now. */
+    fun chasers(): Int = guards.count { it.chasing }
+
+    /** An alarm (a camera or a laser): every guard knows where I am and comes running. */
+    private fun alarm() {
+        if (alarmCd > 0f) return
+        alarmCd = 2f
+        for (g in guards) if (!g.dead && !g.chasing) { g.lockOn(); g.meter = 0.6f }
+    }
+
+    /** The contact (if armed) shoots guards who are chasing me, once I'm close to him (or have reached him). */
+    private fun contactShoot(dt: Float) {
+        contactAiming = false
+        if (!spec.armed) return
+        val chasing = guards.filter { it.chasing }
+        if (chasing.isEmpty()) { shotCd = max(shotCd, 0.15f); return }
+        val inZone = state == State.WON || (hypot(px - contactX, py - contactY) < ZONE && lineClear(contactX, contactY, px, py))
+        if (!inZone) return
+        val tgt = chasing.minByOrNull { hypot(it.x - contactX, it.y - contactY) } ?: return
+        contactAim = atan2(tgt.y - contactY, tgt.x - contactX); contactAiming = true
+        shotCd -= dt
+        if (shotCd <= 0f) {
+            tgt.mode = DEAD; tgt.meter = 0f; tgt.path.clear()
+            shots += Shot(contactX, contactY, tgt.x, tgt.y)
+            shotCd = if (state == State.WON) 0.4f else 0.6f
+        }
+    }
 
     // ---------- one step of the game ----------
     fun update(dt: Float, ix: Float, iy: Float, mag: Float) {
         stateT += dt
         for (f in feet) f.age += dt
         feet.removeAll { it.age > 2.2f }
+        for (s in shots) s.age += dt
+        shots.removeAll { it.age > 0.6f }
+        if (state == State.WON) { contactShoot(dt); speed = 0f; noise = 0f; return }
         if (state != State.PLAY) { speed = 0f; noise = 0f; return }
         t += dt
+        alarmCd -= dt
 
         // my feet: a gentle drag is a quiet sneak, a full drag is a loud run
         speed = if (mag < 0.5f) SNEAK * (mag / 0.5f) else SNEAK + (mag - 0.5f) / 0.5f * (RUN - SNEAK)
@@ -282,21 +372,36 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
 
         if (ghost) return
 
-        // being seen
+        // being seen: a guard who has watched me long enough locks on and chases; his radio calls the ones nearby
         val lf = lightAt(px, py)
         for (g in guards) {
+            if (g.dead) continue
             val seen = sees(g.eye(), px, py)
+            g.seenNow = seen
             g.meter = (g.meter + (if (seen) DETECT * lf * dt else -RECOVER * dt)).coerceIn(0f, 1f)
-            if (g.meter >= 1f) { state = State.CAUGHT; spotter = "A guard"; stateT = 0f }
+            if (g.meter >= 1f && !g.chasing) {
+                g.lockOn()
+                for (o in guards) if (!o.dead && !o.chasing && hypot(o.x - g.x, o.y - g.y) < RADIO) { o.lockOn(); o.meter = 0.6f }
+            }
         }
         for (c in cams) {
             val seen = sees(c.eye(), px, py)
             c.meter = (c.meter + (if (seen) DETECT * lf * dt else -RECOVER * dt)).coerceIn(0f, 1f)
-            if (c.meter >= 1f) { state = State.CAUGHT; spotter = "A camera"; stateT = 0f }
+            if (c.meter >= 1f) { c.meter = 0.35f; alarm() }
         }
-        for (l in lasers) if (l.on(t) && l.near(px, py, PR + 0.07f)) { state = State.CAUGHT; spotter = "A laser"; stateT = 0f }
+        for (l in lasers) if (l.on(t) && l.near(px, py, PR + 0.07f)) alarm()
 
-        if (state == State.PLAY && hypot(px - contactX, py - contactY) < 0.85f) { state = State.WON; stateT = 0f }
+        // the contact helps, if he can
+        contactShoot(dt)
+
+        // a guard who gets hold of me ends it
+        for (g in guards) if (g.chasing && hypot(g.x - px, g.y - py) < CATCH) { state = State.CAUGHT; spotter = "A guard caught you."; stateT = 0f }
+
+        if (state == State.PLAY && hypot(px - contactX, py - contactY) < 0.85f) {
+            state = State.WON; stateT = 0f
+            wonDelay = if (spec.armed && chasers() > 0) 0.6f + 0.4f * chasers() else 0f
+            shotCd = 0.2f
+        }
     }
 
     companion object {
@@ -309,7 +414,11 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         const val NOISE_MAX = 3.4f
         const val DETECT = 2.4f
         const val RECOVER = 1.1f
-        const val PATROL = 0; const val INVESTIGATE = 1; const val LOOK = 2
+        const val CHASE_SPEED = 3.4f
+        const val CATCH = 0.55f
+        const val RADIO = 6f            // a guard who locks on calls others this close
+        const val ZONE = 7f             // how far from his contact you can be and still be covered
+        const val PATROL = 0; const val INVESTIGATE = 1; const val LOOK = 2; const val CHASE = 3; const val DEAD = 4
         val DIRS4 = listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)
     }
 }

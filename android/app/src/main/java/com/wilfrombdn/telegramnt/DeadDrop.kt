@@ -58,11 +58,14 @@ internal class DeadDropView(
     private var clueText: String? = null
     private var clueAlpha = 0f
     private val music = DeadLetterMusic()
+    private var pixelScene: PixelScene? = null
+    private val nearest = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
 
-    // thumb
+    // thumb: the courier walks toward your finger. Close to him = a quiet sneak; far from him = a loud sprint.
     private var touching = false; private var soundTap = false
-    private var ox0 = 0f; private var oy0 = 0f; private var tx = 0f; private var ty = 0f
+    private var tx = 0f; private var ty = 0f
     private var ix = 0f; private var iy = 0f; private var mag = 0f
+    private var clueT = 0f
 
     // screen -> tiles
     private var T = 1f; private var offX = 0f; private var offY = 0f
@@ -70,7 +73,8 @@ internal class DeadDropView(
     private val spec get() = levels[levelIdx]
     private val lastLevel get() = levelIdx == levels.size - 1
     /** 0..1: how far the final broadcast has changed the city (posters, screens, radios). */
-    private val bc get() = if (lastLevel && world.state == StealthWorld.State.WON) ((world.stateT - 1.2f) / 2.5f).coerceIn(0f, 1f) else 0f
+    private val wt get() = max(0f, world.stateT - world.wonDelay)   // time since the win screen could start (the contact may be busy first)
+    private val bc get() = if (lastLevel && world.state == StealthWorld.State.WON) ((wt - 1.2f) / 2.5f).coerceIn(0f, 1f) else 0f
 
     init { load(false) }
 
@@ -82,6 +86,7 @@ internal class DeadDropView(
 
     private fun load(retry: Boolean) {
         world = StealthWorld(spec)
+        pixelScene = if (spec.pixel) PixelScene(spec, world) else null
         sinceLoad = if (retry) 99f else 0f
         if (!retry) { attempt = 1; read.clear() }
         touching = false; mag = 0f; clueText = null; clueAlpha = 0f
@@ -99,6 +104,7 @@ internal class DeadDropView(
                 val raw = ((now - last) / 1e9f).coerceAtMost(0.05f)
                 var dt = raw
                 clock += dt; sinceLoad += dt
+                aimAtFinger()
                 while (dt > 0f) { val s = min(dt, 0.025f); world.update(s, ix, iy, if (sinceLoad < 0.4f) 0f else mag); dt -= s }
                 updateClue(raw)
                 if (lastLevel && world.state == StealthWorld.State.WON) music.setCalm(true)
@@ -109,32 +115,41 @@ internal class DeadDropView(
         }
     }
 
+    /** The courier follows the finger: how far it is from him sets how fast (and how loudly) he moves. */
+    private fun aimAtFinger() {
+        if (!touching || world.state != StealthWorld.State.PLAY) { mag = 0f; return }
+        val sx = offX + world.px * T; val sy = offY + world.py * T
+        val dist = hypot(tx - sx, ty - sy) / T          // in tiles
+        if (dist < 0.45f) { mag = 0f; return }
+        ix = (tx - sx) / (dist * T); iy = (ty - sy) / (dist * T)
+        mag = ((dist - 0.45f) / 3.2f).coerceIn(0f, 1f)
+    }
+
     private fun updateClue(dt: Float) {
-        var best: Prop? = null; var bd = 1.15f; var bi = -1
+        var best: Prop? = null; var bd = 99f; var bi = -1
         if (world.state == StealthWorld.State.PLAY) for ((i, pr) in spec.props.withIndex()) {
             if (pr.text == null) continue
+            val reach = if (pr.kind == "window") 2.1f else 1.15f      // you can hear a radio from further off
             val dd = hypot(world.px - pr.x, world.py - pr.y)
-            if (dd < bd) { bd = dd; best = pr; bi = i }
+            if (dd < reach && dd < bd) { bd = dd; best = pr; bi = i }
         }
-        if (best != null) { clueText = best.text; read += bi; clueAlpha = min(1f, clueAlpha + dt * 5f) } else clueAlpha = max(0f, clueAlpha - dt * 2.5f)
+        clueT += dt
+        if (best != null) {
+            if (clueText != best.text) clueT = 0f
+            clueText = best.text; read += bi; clueAlpha = min(1f, clueAlpha + dt * 5f)
+        } else clueAlpha = max(0f, clueAlpha - dt * 2.5f)
     }
 
     // ---------- thumb ----------
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        val R = 56f * d
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (e.x > width - 52f * d && e.y < 46f * d) { soundTap = true; return true }
-                ox0 = e.x; oy0 = e.y; tx = e.x; ty = e.y; touching = true; ix = 0f; iy = 0f; mag = 0f
+                tx = e.x; ty = e.y; touching = true
             }
             MotionEvent.ACTION_MOVE -> {
                 if (soundTap) return true
                 tx = e.x; ty = e.y
-                var dx = tx - ox0; var dy = ty - oy0
-                val len = hypot(dx, dy)
-                if (len > R) { ox0 += dx / len * (len - R); oy0 += dy / len * (len - R); dx = tx - ox0; dy = ty - oy0 }
-                val l2 = hypot(dx, dy); val dead = 6f * d
-                if (l2 > dead) { ix = dx / l2; iy = dy / l2; mag = ((l2 - dead) / (R - dead)).coerceIn(0f, 1f) } else { mag = 0f }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (soundTap) {
@@ -146,8 +161,8 @@ internal class DeadDropView(
                 if (e.actionMasked == MotionEvent.ACTION_UP) when (world.state) {
                     StealthWorld.State.CAUGHT -> if (world.stateT > 0.5f) { attempt++; load(true) }
                     StealthWorld.State.WON -> if (lastLevel) {
-                        if (world.stateT > 12f) { saveLevel(0); music.stop(); onExit() }
-                    } else if (world.stateT > 0.8f) { levelIdx++; saveLevel(levelIdx); load(false) }
+                        if (wt > 12f) { saveLevel(0); music.stop(); onExit() }
+                    } else if (wt > 0.8f) { levelIdx++; saveLevel(levelIdx); load(false) }
                     else -> {}
                 }
             }
@@ -175,6 +190,16 @@ internal class DeadDropView(
         offX = (w - T * world.cols) / 2; offY = top + (h - top - bottom - T * world.rows) / 2
 
         val fade = 1f - bc
+        val pix = pixelScene
+        if (pix != null) {
+            // pixel-art level: the scene is drawn small and scaled up by a whole number so every pixel is the same size
+            val sc = max(1, (min(w / world.cols, (h - top - bottom) / world.rows) / 16f).toInt())
+            T = 16f * sc
+            offX = ((w - T * world.cols) / 2f).toInt().toFloat(); offY = (top + (h - top - bottom - T * world.rows) / 2f).toInt().toFloat()
+            c.drawColor(0xFF03050A.toInt())
+            rect.set(offX, offY, offX + T * world.cols, offY + T * world.rows)
+            c.drawBitmap(pix.render(clock, read, bc), null, rect, nearest)
+        } else {
         c.save(); c.translate(offX, offY); c.scale(T, T)
         drawFloor(c, pal)
         drawLamps(c, pal)
@@ -183,7 +208,7 @@ internal class DeadDropView(
         drawWalls(c, pal)
         drawProps(c, pal)
         drawLasers(c)
-        for (g in world.guards) drawCone(c, g.eye(), pal.cone, g.meter, fade)
+        for (g in world.guards) if (!g.dead) drawCone(c, g.eye(), pal.cone, g.meter, fade)
         for (cm in world.cams) drawCone(c, cm.eye(), pal.cone, cm.meter, fade)
         for (cm in world.cams) drawCamera(c, cm, pal)
         drawFeet(c)
@@ -191,6 +216,7 @@ internal class DeadDropView(
         for (g in world.guards) drawGuard(c, g, pal)
         drawPlayer(c, pal)
         c.restore()
+        }
 
         drawMarks(c)
         drawLight(c, w, h, pal)
@@ -228,7 +254,9 @@ internal class DeadDropView(
         for (r in 0 until world.rows) for (col in 0 until world.cols) {
             val ch = world.tile(col, r)
             val x = col.toFloat(); val y = r.toFloat()
-            if (ch == 'c') {
+            if (ch == 'c' && spec.cover == "bin") {
+                drawBin(c, x, y)
+            } else if (ch == 'c') {
                 p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x70); rect.set(x + 0.1f, y + 0.14f, x + 1.02f, y + 1.06f); c.drawRoundRect(rect, 0.1f, 0.1f, p)
                 p.color = mix(pal.wallTop, Color.BLACK, 0.25f); rect.set(x + 0.04f, y + 0.04f, x + 0.96f, y + 0.96f); c.drawRoundRect(rect, 0.1f, 0.1f, p)
                 p.color = mix(pal.wallTop, pal.accent, 0.12f); rect.set(x + 0.1f, y + 0.1f, x + 0.9f, y + 0.9f); c.drawRoundRect(rect, 0.08f, 0.08f, p)
@@ -243,6 +271,19 @@ internal class DeadDropView(
                 p.style = Paint.Style.STROKE; p.strokeWidth = 0.025f; p.color = a(Color.BLACK, 0x55); c.drawLine(x + 0.1f, y + 0.5f, x + 0.9f, y + 0.5f, p)
             }
         }
+    }
+
+    /** A big alley dumpster: you can hide behind it. */
+    private fun drawBin(c: Canvas, x: Float, y: Float) {
+        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x70); rect.set(x + 0.1f, y + 0.16f, x + 1.02f, y + 1.06f); c.drawRoundRect(rect, 0.08f, 0.08f, p)
+        p.color = 0xFF1F3A2E.toInt(); rect.set(x + 0.04f, y + 0.06f, x + 0.96f, y + 0.94f); c.drawRoundRect(rect, 0.08f, 0.08f, p)
+        p.color = 0xFF2D5440.toInt(); rect.set(x + 0.08f, y + 0.1f, x + 0.92f, y + 0.5f); c.drawRoundRect(rect, 0.06f, 0.06f, p)          // lid
+        p.color = 0xFF204534.toInt(); rect.set(x + 0.08f, y + 0.54f, x + 0.92f, y + 0.9f); c.drawRoundRect(rect, 0.06f, 0.06f, p)
+        p.style = Paint.Style.STROKE; p.strokeWidth = 0.025f; p.color = a(Color.BLACK, 0x66)
+        c.drawLine(x + 0.08f, y + 0.5f, x + 0.92f, y + 0.5f, p)
+        for (i in 1..3) c.drawLine(x + 0.08f + i * 0.21f, y + 0.56f, x + 0.08f + i * 0.21f, y + 0.88f, p)
+        p.style = Paint.Style.FILL; p.color = a(Color.WHITE, 0x22); c.drawRect(x + 0.1f, y + 0.1f, x + 0.9f, y + 0.125f, p)
+        p.color = 0xFF14181C.toInt(); c.drawCircle(x + 0.3f, y + 0.12f, 0.09f, p); c.drawCircle(x + 0.55f, y + 0.1f, 0.07f, p)           // bin bags poking out
     }
 
     private fun solidWall(col: Int, r: Int) = world.tile(col, r).let { it == '#' || it == ' ' }
@@ -325,7 +366,7 @@ internal class DeadDropView(
                 val ph = (clock * 0.9f + i * 0.37f) % 1f
                 p.style = Paint.Style.STROKE; p.strokeWidth = 0.025f; p.color = a(pal.accent, ((1f - ph) * 0x55).toInt()); c.drawCircle(x, y, 0.3f + ph * 0.35f, p)
             }
-            c.save(); c.rotate(jitter(pr) + pr.rot, x, y)
+            c.save(); c.rotate(if (pr.kind == "window") 0f else jitter(pr) + pr.rot, x, y)
             when (pr.kind) {
                 "poster", "notice" -> drawPoster(c, x, y, pr.kind == "notice")
                 "news" -> {
@@ -350,6 +391,7 @@ internal class DeadDropView(
                     p.color = 0xFF14171C.toInt(); c.drawOval(x - 0.22f, y + 0.14f, x - 0.08f, y + 0.22f, p); c.drawOval(x - 0.04f, y + 0.18f, x + 0.1f, y + 0.26f, p)
                 }
                 "screen" -> drawScreen(c, x, y, pal)
+                "window" -> drawWindow(c, x, y, i, pal)
                 "sign" -> {
                     p.style = Paint.Style.FILL; p.color = 0xFF14171C.toInt(); rect.set(x - 0.26f, y - 0.1f, x + 0.26f, y + 0.1f); c.drawRect(rect, p)
                     p.style = Paint.Style.STROKE; p.strokeWidth = 0.025f; p.color = a(0xFFFFC857.toInt(), 0xE0); c.drawRect(rect, p)
@@ -407,6 +449,25 @@ internal class DeadDropView(
                 }
             }
             c.restore()
+        }
+    }
+
+    /** An open window with a radio on the sill, blasting. Sound waves roll out of it; walk close to read what it says. */
+    private fun drawWindow(c: Canvas, x: Float, y: Float, i: Int, pal: Palette) {
+        val flick = 0.9f + 0.1f * sin(clock * 6f + i)
+        p.style = Paint.Style.FILL
+        p.shader = RadialGradient(x, y, 1.0f, intArrayOf(a(0xFFFFD79A.toInt(), (0x55 * flick).toInt()), 0), null, Shader.TileMode.CLAMP); c.drawCircle(x, y, 1.0f, p); p.shader = null
+        p.color = 0xFF07090C.toInt(); rect.set(x - 0.32f, y - 0.36f, x + 0.32f, y + 0.36f); c.drawRect(rect, p)
+        p.color = a(0xFFFFD79A.toInt(), (0xE0 * flick).toInt()); rect.set(x - 0.27f, y - 0.31f, x + 0.27f, y + 0.31f); c.drawRect(rect, p)
+        p.color = a(0xFF3B2A22.toInt(), 0xCC); rect.set(x - 0.27f, y - 0.31f, x - 0.1f, y + 0.31f); c.drawRect(rect, p); rect.set(x + 0.1f, y - 0.31f, x + 0.27f, y + 0.31f); c.drawRect(rect, p)   // curtains
+        p.style = Paint.Style.STROKE; p.strokeWidth = 0.025f; p.color = 0xFF07090C.toInt(); c.drawLine(x, y - 0.31f, x, y + 0.31f, p); c.drawLine(x - 0.27f, y, x + 0.27f, y, p)
+        p.style = Paint.Style.FILL; p.color = 0xFF14171C.toInt(); rect.set(x - 0.13f, y + 0.1f, x + 0.13f, y + 0.28f); c.drawRoundRect(rect, 0.03f, 0.03f, p)         // the radio on the sill
+        p.color = a(Color.WHITE, 0x66); for (k in 0..2) c.drawCircle(x - 0.06f + k * 0.06f, y + 0.19f, 0.018f, p)
+        // sound rolling out into the alley
+        p.style = Paint.Style.STROKE
+        for (k in 0..2) {
+            val ph = (clock * 0.8f + k / 3f + i * 0.21f) % 1f
+            p.strokeWidth = 0.03f; p.color = a(0xFFFFD79A.toInt(), ((1f - ph) * 0x70).toInt()); c.drawCircle(x, y, 0.4f + ph * 1.3f, p)
         }
     }
 
@@ -515,6 +576,19 @@ internal class DeadDropView(
     }
 
     private fun drawGuard(c: Canvas, g: StealthWorld.Guard, pal: Palette) {
+        if (g.dead) {   // shot: lying where he fell
+            c.save()
+            p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawOval(g.x - 0.4f, g.y - 0.2f, g.x + 0.4f, g.y + 0.3f, p)
+            p.color = 0xFF1A2030.toInt(); rect.set(g.x - 0.34f, g.y - 0.14f, g.x + 0.3f, g.y + 0.14f); c.save(); c.rotate(g.face * 180f / PI.toFloat(), g.x, g.y); c.drawRoundRect(rect, 0.12f, 0.12f, p); c.restore()
+            p.style = Paint.Style.STROKE; p.strokeWidth = 0.04f; p.color = a(danger, 0xCC)
+            c.drawLine(g.x - 0.12f, g.y - 0.12f, g.x + 0.12f, g.y + 0.12f, p); c.drawLine(g.x + 0.12f, g.y - 0.12f, g.x - 0.12f, g.y + 0.12f, p)
+            c.restore()
+            return
+        }
+        if (g.chasing) {   // locked on: a pulsing red ring
+            val ph = (clock * 3f) % 1f
+            p.style = Paint.Style.STROKE; p.strokeWidth = 0.05f; p.color = a(danger, ((1f - ph) * 0xCC).toInt()); c.drawCircle(g.x, g.y, 0.4f + ph * 0.5f, p)
+        }
         drawPerson(c, g.x, g.y, g.face, 0xFF222B3B.toInt(), 0xFF0E1118.toInt(), pal.cone)
         c.save(); c.rotate(g.face * 180f / PI.toFloat(), g.x, g.y)
         p.style = Paint.Style.FILL; p.color = a(0xFFFFE9A8.toInt(), (255 * (1f - bc)).toInt()); c.drawCircle(g.x + 0.34f, g.y - 0.22f, 0.06f, p)
@@ -534,8 +608,24 @@ internal class DeadDropView(
         p.style = Paint.Style.STROKE; p.strokeWidth = 0.04f; p.color = a(green, ((1f - pulse) * 0xAA).toInt()); c.drawCircle(x, y, 0.4f + pulse * 0.6f, p)
         p.shader = RadialGradient(x, y, 0.9f, intArrayOf(a(green, 0x55), a(green, 0x00)), null, Shader.TileMode.CLAMP)
         p.style = Paint.Style.FILL; c.drawCircle(x, y, 0.9f, p); p.shader = null
-        val face = if (world.state == StealthWorld.State.WON) atan2f(world.py - y, world.px - x) else sin(clock * 0.9f) * 0.5f + 1.2f
+        val face = if (world.contactAiming) world.contactAim else if (world.state == StealthWorld.State.WON) atan2f(world.py - y, world.px - x) else sin(clock * 0.9f) * 0.5f + 1.2f
         drawPerson(c, x, y, face, 0xFF1E3D2D.toInt(), 0xFF0E1118.toInt(), green)
+        if (world.contactAiming) {   // the gun
+            c.save(); c.rotate(face * 180f / PI.toFloat(), x, y)
+            p.style = Paint.Style.FILL; p.color = 0xFF0A0C10.toInt(); rect.set(x + 0.12f, y - 0.05f, x + 0.5f, y + 0.03f); c.drawRoundRect(rect, 0.02f, 0.02f, p)
+            c.restore()
+        }
+        // shots: a bright line and a flash at the muzzle
+        for (s in world.shots) {
+            val f = (1f - s.age / 0.3f).coerceIn(0f, 1f)
+            p.style = Paint.Style.STROKE; p.strokeCap = Paint.Cap.ROUND; p.strokeWidth = 0.06f; p.color = a(0xFFFFF2B0.toInt(), (f * 255).toInt()); c.drawLine(s.x1, s.y1, s.x2, s.y2, p)
+            p.strokeWidth = 0.02f; p.color = a(Color.WHITE, (f * 255).toInt()); c.drawLine(s.x1, s.y1, s.x2, s.y2, p)
+            p.strokeCap = Paint.Cap.BUTT
+            val fl = (1f - s.age / 0.14f).coerceIn(0f, 1f)
+            p.style = Paint.Style.FILL
+            p.shader = RadialGradient(s.x1, s.y1, 0.7f, intArrayOf(a(0xFFFFE08A.toInt(), (fl * 0xCC).toInt()), 0), null, Shader.TileMode.CLAMP); c.drawCircle(s.x1, s.y1, 0.7f, p); p.shader = null
+            p.color = a(danger, (fl * 0xAA).toInt()); c.drawCircle(s.x2, s.y2, 0.18f * fl + 0.05f, p)
+        }
     }
 
     private fun atan2f(y: Float, x: Float) = Math.atan2(y.toDouble(), x.toDouble()).toFloat()
@@ -574,9 +664,10 @@ internal class DeadDropView(
         if (bc > 0.5f) return
         p.style = Paint.Style.FILL; p.typeface = monoBold; p.textAlign = Paint.Align.CENTER; p.textSize = T * 0.7f
         for (g in world.guards) {
+            if (g.dead) continue
             val sx = offX + g.x * T; val sy = offY + (g.y - 0.62f) * T
             when {
-                g.meter > 0.6f -> { p.color = danger; c.drawText("!", sx, sy, p) }
+                g.chasing || g.meter > 0.6f -> { p.color = danger; c.drawText("!", sx, sy, p) }
                 g.meter > 0.12f -> { p.color = 0xFFFFC857.toInt(); c.drawText("?", sx, sy, p) }
                 g.mode != StealthWorld.PATROL -> { p.color = a(Color.WHITE, 0xB0); c.drawText("?", sx, sy, p) }
             }
@@ -586,7 +677,7 @@ internal class DeadDropView(
     private fun drawLight(c: Canvas, w: Float, h: Float, pal: Palette) {
         val calm = 1f - bc
         p.style = Paint.Style.FILL
-        p.shader = RadialGradient(w / 2, h / 2, max(w, h) * 0.75f, intArrayOf(0x00000000, 0x00000000, 0xA0000000.toInt()), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        p.shader = RadialGradient(w / 2, h / 2, max(w, h) * 0.75f, intArrayOf(0x00000000, 0x00000000, (if (spec.pixel) 0x60000000 else 0xA0000000).toInt()), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, p); p.shader = null
         // the city's mood: the hotter the manhunt, the redder the edges; the last levels flash like sirens
         val heat = spec.heat
@@ -636,6 +727,16 @@ internal class DeadDropView(
         var kx = w - 40f * d
         for (k in world.held) { drawKeyIcon(c, kx - 8f * d, 14f * d, 12f * d, keyColor(k)); kx -= 28f * d }
         drawSpeaker(c, w - 22f * d, 14f * d, 7f * d, soundOn)
+        // locked on: say so, and what to do about it
+        val n = world.chasers()
+        if (n > 0 && world.state == StealthWorld.State.PLAY && clueAlpha < 0.05f) {
+            p.textAlign = Paint.Align.CENTER; p.typeface = monoBold; p.textSize = 13f * d
+            p.color = a(danger, (0x80 + 0x7F * (0.5f + 0.5f * sin(clock * 8f))).toInt())
+            c.drawText(if (n == 1) "1 GUARD IS CHASING YOU" else "$n GUARDS ARE CHASING YOU", w / 2, h - 52f * d, p)
+            p.typeface = mono; p.textSize = 11.5f * d; p.color = a(Color.WHITE, 0xB0)
+            c.drawText(if (spec.armed) "Run to your contact. He will cover you." else "Break line of sight. Hide.", w / 2, h - 34f * d, p)
+            p.textAlign = Paint.Align.LEFT
+        }
     }
 
     private fun drawSpeaker(c: Canvas, x: Float, y: Float, s: Float, on: Boolean) {
@@ -655,30 +756,47 @@ internal class DeadDropView(
         return y + lines.size * lineH
     }
 
+    /** Wraps [t] into lines no wider than [maxW] pixels (with the "> " prompt on the first). */
+    private fun clueLines(t: String, maxW: Float): List<String> {
+        val out = ArrayList<String>(); var cur = "> "
+        for (wd in t.split(' ')) { val s = if (cur == "> ") "> $wd" else "$cur $wd"; if (p.measureText(s) > maxW && cur != "> ") { out += cur; cur = wd } else cur = s }
+        out += cur
+        return out
+    }
+
     private fun drawClue(c: Canvas, w: Float, h: Float, pal: Palette) {
         val t = clueText ?: return
         val f = clueAlpha
         if (f <= 0.02f) return
         p.style = Paint.Style.FILL; p.typeface = mono; p.textSize = 13f * d; p.textAlign = Paint.Align.LEFT; p.letterSpacing = 0f
-        val maxW = w - 60f * d
-        val words = t.split(' '); var lines = 1; var cur = "> "
-        for (wd in words) { val s = if (cur == "> ") "> $wd" else "$cur $wd"; if (p.measureText(s) > maxW && cur != "> ") { lines++; cur = wd } else cur = s }
-        val ph = lines * 18f * d + 18f * d
+        val lines = clueLines(t, w - 60f * d)
+        val ph = lines.size * 18f * d + 18f * d
         val y0 = h - 24f * d - ph
         p.color = a(0xFF05070A.toInt(), (f * 0xD0).toInt()); rect.set(18f * d, y0, w - 18f * d, y0 + ph); c.drawRoundRect(rect, 4f * d, 4f * d, p)
         p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(pal.accent, (f * 0x90).toInt()); c.drawRoundRect(rect, 4f * d, 4f * d, p)
         p.style = Paint.Style.FILL; p.color = a(Color.WHITE, (f * 0xF0).toInt())
-        var yy = y0 + 22f * d; cur = "> "
-        for (wd in words) { val s = if (cur == "> ") "> $wd" else "$cur $wd"; if (p.measureText(s) > maxW && cur != "> ") { c.drawText(cur, 30f * d, yy, p); yy += 18f * d; cur = wd } else cur = s }
-        c.drawText(cur, 30f * d, yy, p)
+        // typed out like a radio or a terminal: a few letters at a time
+        var left = (clueT * 70f).toInt()
+        var yy = y0 + 22f * d
+        for (ln in lines) {
+            if (left <= 0) break
+            c.drawText(ln.take(left), 30f * d, yy, p)
+            left -= ln.length; yy += 18f * d
+        }
     }
 
+    /** The finger: a line from the courier to where you are touching, and a ring showing the sneak zone. */
     private fun drawThumb(c: Canvas) {
-        p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f * d; p.color = a(Color.WHITE, 0x30); c.drawCircle(ox0, oy0, 56f * d, p)
-        p.style = Paint.Style.FILL; p.color = a(Color.WHITE, if (mag > 0.5f) 0x55 else 0x35)
-        var dx = tx - ox0; var dy = ty - oy0; val l = hypot(dx, dy)
-        if (l > 56f * d) { dx = dx / l * 56f * d; dy = dy / l * 56f * d }
-        c.drawCircle(ox0 + dx, oy0 + dy, 20f * d, p)
+        if (world.state != StealthWorld.State.PLAY) return
+        val sx = offX + world.px * T; val sy = offY + world.py * T
+        val run = mag > 0.5f
+        val col = if (run) 0xFFFF8A4D.toInt() else Color.WHITE
+        // inside this ring he sneaks quietly; beyond it he runs
+        p.style = Paint.Style.STROKE; p.strokeWidth = 1.2f * d; p.color = a(Color.WHITE, 0x22)
+        p.pathEffect = DashPathEffect(floatArrayOf(5f * d, 7f * d), 0f); c.drawCircle(sx, sy, 2.05f * T, p)
+        p.strokeWidth = 1.6f * d; p.color = a(col, if (run) 0x70 else 0x50); c.drawLine(sx, sy, tx, ty, p); p.pathEffect = null
+        p.style = Paint.Style.FILL; p.color = a(col, if (run) 0x66 else 0x40); c.drawCircle(tx, ty, 18f * d, p)
+        p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f * d; p.color = a(col, 0x90); c.drawCircle(tx, ty, 18f * d, p)
     }
 
     private fun drawBigLetter(c: Canvas, cx: Float, cy: Float, n: Int, alpha: Float) {
@@ -719,11 +837,11 @@ internal class DeadDropView(
                 if (world.stateT < 0.18f) { p.color = a(0xFFFF2D3D.toInt(), ((0.18f - world.stateT) / 0.18f * 0x90).toInt()); c.drawRect(0f, 0f, w, h, p) }
                 p.typeface = monoBold; p.letterSpacing = 0.2f; p.textSize = 30f * d; p.color = a(danger, (f * 255).toInt()); c.drawText("SPOTTED", w / 2, h / 2 - 8f * d, p)
                 p.typeface = mono; p.letterSpacing = 0f; p.textSize = 14f * d; p.color = a(Color.WHITE, (f * 0xC0).toInt())
-                c.drawText("${world.spotter} noticed you.", w / 2, h / 2 + 20f * d, p)
+                c.drawText(world.spotter, w / 2, h / 2 + 20f * d, p)
                 if (world.stateT > 0.5f) { p.color = a(Color.WHITE, 0x90); c.drawText("Tap to try again", w / 2, h / 2 + 52f * d, p) }
             }
             StealthWorld.State.WON -> if (lastLevel) drawEnding(c, w, h, pal) else {
-                val f = (world.stateT / 0.5f).coerceIn(0f, 1f)
+                val f = (wt / 0.5f).coerceIn(0f, 1f)
                 p.style = Paint.Style.FILL; p.color = a(0xFF04060A.toInt(), (f * 0xE0).toInt()); c.drawRect(0f, 0f, w, h, p)
                 drawBigLetter(c, w / 2, h * 0.28f, levelIdx, f)
                 p.style = Paint.Style.FILL; p.typeface = monoBold; p.letterSpacing = 0.2f; p.textSize = 14f * d; p.color = a(pal.accent, (f * 255).toInt())
@@ -731,11 +849,11 @@ internal class DeadDropView(
                 p.typeface = mono; p.letterSpacing = 0f; p.textSize = 12f * d; p.color = a(Color.WHITE, (f * 0x90).toInt()); c.drawText(spec.contact.uppercase(), w / 2, h * 0.28f + 80f * d, p)
                 p.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.ITALIC); p.textSize = 18f * d; p.color = a(Color.WHITE, (f * 255).toInt())
                 val yy = wrap(c, "“" + spec.line + "”", w / 2, h * 0.28f + 118f * d, w - 56f * d, 24f * d)
-                val f2 = ((world.stateT - 0.9f) / 0.6f).coerceIn(0f, 1f)
+                val f2 = ((wt - 0.9f) / 0.6f).coerceIn(0f, 1f)
                 p.typeface = mono; p.textSize = 11f * d; p.letterSpacing = 0.12f; p.color = a(pal.accent, (f2 * 0xC0).toInt()); c.drawText("THE LETTER REVEALS", w / 2, yy + 24f * d, p)
                 p.letterSpacing = 0f; p.textSize = 14f * d; p.color = a(Color.WHITE, (f2 * 0xF0).toInt())
                 wrap(c, spec.reveal, w / 2, yy + 50f * d, w - 56f * d, 20f * d)
-                if (world.stateT > 2f) { p.textSize = 12f * d; p.color = a(Color.WHITE, 0x90); c.drawText("Tap to continue", w / 2, h - 50f * d, p) }
+                if (wt > 2f) { p.textSize = 12f * d; p.color = a(Color.WHITE, 0x90); c.drawText("Tap to continue", w / 2, h - 50f * d, p) }
             }
             else -> {}
         }
@@ -743,7 +861,7 @@ internal class DeadDropView(
 
     /** The last level has no "next": the broadcast goes out. The city changes (see [bc]); then the screen goes dark. */
     private fun drawEnding(c: Canvas, w: Float, h: Float, pal: Palette) {
-        val t = world.stateT
+        val t = wt
         p.style = Paint.Style.FILL; p.typeface = mono; p.textAlign = Paint.Align.LEFT; p.textSize = 13f * d; p.letterSpacing = 0f
         val lines = listOf(0.4f to "> \"${spec.line}\"", 2.2f to "> The letter goes out.", 3.4f to "> Every screen in the city changes.", 4.6f to "> Wanted posters: replaced.", 5.8f to "> Police radios: silence.")
         val fadeOut = 1f - ((t - 7.4f) / 1.2f).coerceIn(0f, 1f)
