@@ -173,6 +173,17 @@ internal class FinaleWorld(seed: Int = 6) {
             else -> {}
         }
     }
+    /** The skip arrow: on to the next scene (from the climb straight to the control room, past the shot and the door). */
+    fun skip() {
+        val to = when (stage) {
+            Stage.BEACH -> Stage.INTRO; Stage.INTRO -> Stage.CLIMB
+            Stage.CLIMB, Stage.EXECUTE, Stage.DOOR -> Stage.CONTROL
+            Stage.CONTROL -> Stage.SIMON; Stage.SIMON -> Stage.BROADCAST; Stage.BROADCAST -> Stage.END
+            Stage.END -> return
+        }
+        debugEnter(to)
+    }
+
     /** Skip straight to a stage (for tests and the skip arrow). */
     internal fun debugEnter(s: Stage) { next = null; fade = 0f; enter(s) }
 

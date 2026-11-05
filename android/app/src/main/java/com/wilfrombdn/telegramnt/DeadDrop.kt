@@ -35,7 +35,7 @@ internal fun MainActivity.showDeadDrop() {
     val game = DeadDropView(this, prefs.getInt("level", 0), prefs.getBoolean("sound", true),
         saveLevel = { prefs.edit().putInt("level", it).apply() }, saveSound = { prefs.edit().putBoolean("sound", it).apply() }, onExit = { showSettings() })
     // on the right: restart (tap = this level, hold = back to level 1) next to exit
-    val skip = icon(R.drawable.ic_skip) { game.skipLevel(); toast("Skipped") }
+    val skip = icon(R.drawable.ic_skip) { game.skip() }
     val again = icon(R.drawable.ic_restart) { game.restart() }.apply { setOnLongClickListener { game.restartAll(); toast("Back to level 1"); true } }
     // edge to edge: the game fills the whole screen and the title bar floats over it, see-through (the game blurs behind it)
     val tb = topBar("Dead Letter", "Six letters. One truth.", null, skip, again, icon(R.drawable.ic_close) { showSettings() })
@@ -439,6 +439,8 @@ internal class DeadDropView(
     internal fun debugMgAdvance(sec: Float) { var t = sec; while (t > 0f) { val s = min(t, 0.025f); clock += s; mgUpdate(s); t -= s } }
     internal fun debugMgIdx() = mgIdx
     internal fun debugLevelIdx() = levelIdx
+    internal fun debugFinale() = finale
+    internal fun debugBannerUp() = bannerUp
 
     // screen -> tiles
     private var T = 1f; private var offX = 0f; private var offY = 0f
@@ -457,8 +459,26 @@ internal class DeadDropView(
     /** Is a Spotted / Delivered style screen showing (so that any tap should dismiss it)? */
     private fun overlayUp(): Boolean = world.state != StealthWorld.State.PLAY || pac?.phase == PacWorld.Phase.CAUGHT || pac?.phase == PacWorld.Phase.WON
 
-    /** The skip arrow: on to the next level. */
+    /** The level's title banner is showing (you can't move until it's gone). */
+    private val bannerUp get() = mgIdx < 0 && stage == 0 && sinceLoad < 4.2f && attempt == 1 && world.state == StealthWorld.State.PLAY
+
+    /** On to the next level. */
     internal fun skipLevel() { if (levelIdx < levels.size - 1) { levelIdx++; saveLevel(levelIdx); load(false) } }
+
+    /**
+     * The skip arrow (for building the game): on to the next room or scene, not the next level. Level 1 goes straight to the sewer maze;
+     * level 2: maze > maintenance room; level 3: belts > jetpack > cop cutscene; level 4: arrival > shoot-out; level 5 is one place;
+     * level 6: beach > tower > climb > (skips the shot and the door) control room > uplink > broadcast > the end.
+     */
+    internal fun skip() {
+        finale?.let { fw -> fw.skip(); return }
+        val stages = stagesOf(spec)
+        if (mgIdx >= 0 && stages != null) { if (mgIdx + 1 < stages.size) { fade = 0f; fadeDir = 0; mgPending = -9; startMg(mgIdx + 1) } else skipLevel(); return }
+        if (levelIdx == 0) { skipLevel(); toStage(1); return }
+        if (spec.pac != null && stage < 2) { toStage(stage + 1); return }
+        skipLevel()
+    }
+    private fun toStage(s: Int) { if (spec.pac == null) return; pendingStage = s; switchStage(); fade = 0f; fadeDir = 0 }
 
     /** Hold the restart button: back to level one. */
     internal fun restartAll() { levelIdx = 0; saveLevel(0); load(false) }
@@ -504,7 +524,7 @@ internal class DeadDropView(
                 while (mgIdx < 0 && left > 0f) {
                     val s = min(left, 0.025f)
                     val pw = pac
-                    if (pw != null) { if (fadeDir <= 0) pw.update(s, pacWant) } else world.update(s, ix, iy, if (sinceLoad < 0.4f) 0f else mag)
+                    if (pw != null) { if (fadeDir <= 0) pw.update(s, pacWant) } else world.update(s, ix, iy, if (sinceLoad < 0.4f || bannerUp) 0f else mag)
                     left -= s
                 }
                 updateClue(raw)
@@ -1232,6 +1252,12 @@ internal class DeadDropView(
     }
 
     /** Draws [text] wrapped to [maxW] pixels, starting at [y]; returns the next free y. */
+    /** How many lines [wrap] would use for this text at the current text size. */
+    private fun wrapLines(text: String, maxW: Float): Int {
+        var n = 0; var cur = ""
+        for (wd in text.split(' ')) { val t = if (cur.isEmpty()) wd else "$cur $wd"; if (p.measureText(t) > maxW && cur.isNotEmpty()) { n++; cur = wd } else cur = t }
+        return n + (if (cur.isNotEmpty()) 1 else 0)
+    }
     private fun wrap(c: Canvas, text: String, cx: Float, y: Float, maxW: Float, lineH: Float): Float {
         val words = text.split(' '); val lines = ArrayList<String>(); var cur = ""
         for (wd in words) { val t = if (cur.isEmpty()) wd else "$cur $wd"; if (p.measureText(t) > maxW && cur.isNotEmpty()) { lines += cur; cur = wd } else cur = t }
@@ -1344,14 +1370,19 @@ internal class DeadDropView(
         p.textAlign = Paint.Align.CENTER
         if (sinceLoad < 4.2f && attempt == 1 && world.state == StealthWorld.State.PLAY) {
             val f = if (sinceLoad < 0.3f) sinceLoad / 0.3f else if (sinceLoad > 3.4f) (4.2f - sinceLoad) / 0.8f else 1f
-            val y0 = h * 0.22f; val ph = h * 0.46f
-            p.style = Paint.Style.FILL; p.color = a(0xFF04060A.toInt(), (f * 0xE0).toInt()); c.drawRect(0f, y0, w, y0 + ph, p)
-            p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(pal.accent, (f * 0x80).toInt()); c.drawLine(24f * d, y0 + 1f, w - 24f * d, y0 + 1f, p); c.drawLine(24f * d, y0 + ph - 1f, w - 24f * d, y0 + ph - 1f, p)
-            drawBigLetter(c, w / 2, y0 + 44f * d, levelIdx, f)
-            p.style = Paint.Style.FILL; p.typeface = monoBold; p.letterSpacing = 0.2f; p.textSize = 11f * d; p.color = a(pal.accent, (f * 255).toInt()); c.drawText("LETTER ${roman[levelIdx]} OF VI", w / 2, y0 + 92f * d, p)
-            p.letterSpacing = 0.04f; p.textSize = 25f * d; p.color = a(Color.WHITE, (f * 255).toInt()); c.drawText(spec.building.uppercase(), w / 2, y0 + 124f * d, p)
+            // measure the words first so the dark band only reaches a little above and below them, then centre it on the screen
+            p.typeface = mono; p.letterSpacing = 0f; p.textSize = 13f * d; val n1 = wrapLines(spec.objective, w - 56f * d)
+            p.textSize = 12f * d; val n2 = wrapLines(spec.situation, w - 56f * d)
+            val lastBase = 129f * d + n1 * 18f * d + 10f * d + (n2 - 1) * 17f * d          // from the top of the letter icon
+            val pad = 14f * d; val bandH = lastBase + 5f * d + pad * 2
+            val y0 = h / 2f - bandH / 2f; val top = y0 + pad
+            p.style = Paint.Style.FILL; p.color = a(0xFF04060A.toInt(), (f * 0xE0).toInt()); c.drawRect(0f, y0, w, y0 + bandH, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(pal.accent, (f * 0x80).toInt()); c.drawLine(24f * d, y0 + 1f, w - 24f * d, y0 + 1f, p); c.drawLine(24f * d, y0 + bandH - 1f, w - 24f * d, y0 + bandH - 1f, p)
+            drawBigLetter(c, w / 2, top + 21f * d, levelIdx, f)
+            p.style = Paint.Style.FILL; p.typeface = monoBold; p.letterSpacing = 0.2f; p.textSize = 11f * d; p.color = a(pal.accent, (f * 255).toInt()); c.drawText("LETTER ${roman[levelIdx]} OF VI", w / 2, top + 69f * d, p)
+            p.letterSpacing = 0.04f; p.textSize = 25f * d; p.color = a(Color.WHITE, (f * 255).toInt()); c.drawText(spec.building.uppercase(), w / 2, top + 101f * d, p)
             p.typeface = mono; p.letterSpacing = 0f; p.textSize = 13f * d; p.color = a(Color.WHITE, (f * 0xE0).toInt())
-            val yy = wrap(c, spec.objective, w / 2, y0 + 152f * d, w - 56f * d, 18f * d)
+            val yy = wrap(c, spec.objective, w / 2, top + 129f * d, w - 56f * d, 18f * d)
             p.color = a(Color.WHITE, (f * 0x80).toInt()); p.textSize = 12f * d
             wrap(c, spec.situation, w / 2, yy + 10f * d, w - 56f * d, 17f * d)
         } else if (sinceLoad in 4.2f..9f && attempt == 1 && world.state == StealthWorld.State.PLAY) {
