@@ -196,6 +196,20 @@ internal open class PixelSprites {
             rect(c, sx, fy - 15 - (ph * 20f).toInt(), 2, 2, a(0xFFC8D0E0.toInt(), ((1f - ph) * 0xA0).toInt()))
         }
     }
+
+    /** A person lying on the floor, seen from the side. [right]: head on the left (true) or on the right (false). */
+    protected fun lying(c: Canvas, fx: Int, fy: Int, o: Outfit, right: Boolean, letter: Boolean) {
+        rect(c, fx - 13, fy - 1, 27, 3, a(PX.K, 0x70))
+        c.save()
+        if (!right) c.scale(-1f, 1f, fx.toFloat() + 0.5f, 0f)
+        rect(c, fx + 4, fy - 5, 8, 4, o.pants); rect(c, fx + 11, fy - 5, 3, 4, o.shoes)
+        rect(c, fx - 5, fy - 7, 10, 6, o.coat ?: o.shirt); rect(c, fx - 5, fy - 7, 10, 1, (o.coat ?: o.shirt) + 0x00181818)
+        rect(c, fx - 11, fy - 7, 7, 6, o.skin); rect(c, fx - 11, fy - 7, 4, 6, o.hair); px(c, fx - 6, fy - 5, PX.K)
+        if (o.hat != null) rect(c, fx - 11, fy - 8, 6, 2, o.hat)
+        rect(c, fx - 3, fy - 2, 7, 2, (o.coat ?: o.shirt) - 0x00101010)
+        if (letter) { rect(c, fx + 1, fy - 9, 5, 3, PX.W); px(c, fx + 3, fy - 8, PX.RED) }
+        c.restore()
+    }
     protected fun dirOf(face: Float): Int {
         val dx = cos(face); val dy = sin(face)
         return if (abs(dx) > abs(dy)) (if (dx > 0) 1 else 3) else (if (dy > 0) 2 else 0)

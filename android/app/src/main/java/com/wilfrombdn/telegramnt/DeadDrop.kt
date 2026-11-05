@@ -32,8 +32,9 @@ internal fun MainActivity.showDeadDrop() {
     val game = DeadDropView(this, prefs.getInt("level", 0), prefs.getBoolean("sound", false),
         saveLevel = { prefs.edit().putInt("level", it).apply() }, saveSound = { prefs.edit().putBoolean("sound", it).apply() }, onExit = { showSettings() })
     // on the right: restart (tap = this level, hold = back to level 1) next to exit
+    val skip = icon(R.drawable.ic_skip) { game.skipLevel(); toast("Skipped") }
     val again = icon(R.drawable.ic_restart) { game.restart() }.apply { setOnLongClickListener { game.restartAll(); toast("Back to level 1"); true } }
-    setContentView(page(topBar("Dead Letter", "Six letters. One truth.", null, again, icon(R.drawable.ic_close) { showSettings() }), game))
+    setContentView(page(topBar("Dead Letter", "Six letters. One truth.", null, skip, again, icon(R.drawable.ic_close) { showSettings() }), game))
 }
 
 internal class DeadDropView(
@@ -66,6 +67,7 @@ internal class DeadDropView(
 
     // the joystick at the bottom left: how far you push sets how fast (and how loudly) the courier moves; in the maze it picks a direction
     private var joyActive = false; private var soundTap = false; private var touchWasJoy = false
+    private var overlayAtDown = false
     private var knobX = 0f; private var knobY = 0f
     private var ix = 0f; private var iy = 0f; private var mag = 0f
     private var pacWant = -1
@@ -77,6 +79,163 @@ internal class DeadDropView(
     private var fade = 0f; private var fadeDir = 0; private var pendingStage = -1
     private var clueT = 0f
     private var scrollY = 0f                       // pixel levels taller than the screen: the first tile row on screen
+
+    // ---------- levels 3 and 4: conveyor, jetpack, cutscenes and the town-hall shoot-out ----------
+    private var mgIdx = -1
+    private var belt: BeltWorld? = null; private var beltScene: BeltScene? = null
+    private var fly: FlyWorld? = null; private var flyScene: FlyScene? = null
+    private var shoot: ShootWorld? = null; private var shootScene: ShootScene? = null
+    private var cine: CineScene? = null
+    private var mgPending = -9                    // where the fade goes: a stage number, -2 next level, -3 redo this part
+    private var aimId = -1; private var joyId = -1; private var thrustId = -1
+    private var aimDx = 0f; private var aimDy = 0f; private var aimMag = 0f; private var aimKX = 0f; private var aimKY = 0f
+    private var carryFade = false
+    private var deadT = 0f
+
+    private fun stagesOf(s: LevelSpec): List<String>? = when (s.building) {
+        "The Industrial District" -> listOf("belt", "fly", "cine0")
+        "The Administration" -> listOf("cine1", "shoot")
+        else -> null
+    }
+    private val mgName get() = if (mgIdx < 0) null else stagesOf(spec)?.getOrNull(mgIdx)
+    private val aimCx get() = width - joyCx
+
+    private fun startMg(i: Int) {
+        mgIdx = i; belt = null; beltScene = null; fly = null; flyScene = null; shoot = null; shootScene = null; cine = null
+        joyId = -1; aimId = -1; thrustId = -1; joyActive = false; mag = 0f; aimMag = 0f; knobX = 0f; knobY = 0f; aimKX = 0f; aimKY = 0f; deadT = 0f; mgPending = -9
+        when (mgName) {
+            "belt" -> { belt = BeltWorld(BeltLevel.warehouse); beltScene = BeltScene(belt!!); music.setHeat(3) }
+            "fly" -> { fly = FlyWorld(FlySpec()); flyScene = FlyScene(fly!!); music.setHeat(4) }
+            "cine0" -> { cine = CineScene(0); music.setHeat(1) }
+            "cine1" -> { cine = CineScene(1); music.setHeat(2) }
+            "shoot" -> { shoot = ShootWorld(ShootLevel.townHall()); shootScene = ShootScene(shoot!!); music.setHeat(5) }
+        }
+    }
+
+    private fun mgGo(to: Int) { if (fadeDir == 0 && mgPending == -9) { mgPending = to; fadeDir = 1 } }
+
+    private fun mgApply() {
+        val to = mgPending; mgPending = -9
+        val n = stagesOf(spec)?.size ?: 0
+        when {
+            to == -3 -> startMg(mgIdx)
+            to >= n || to == -2 -> { if (levelIdx < levels.size - 1) { carryFade = true; levelIdx++; saveLevel(levelIdx); load(false) } else startMg(mgIdx) }
+            else -> startMg(to)
+        }
+    }
+
+    private fun mgUpdate(dt: Float) {
+        if (fadeDir > 0) { fade += dt / 0.7f; if (fade >= 1f) { mgApply(); fade = 1f; fadeDir = -1 }; return }
+        if (fadeDir < 0) { fade -= dt / 0.7f; if (fade <= 0f) { fade = 0f; fadeDir = 0 } }
+        belt?.let { b ->
+            b.update(dt, ix, iy, mag)
+            if (b.fell) mgGo(-3) else if (b.phase == BeltWorld.Phase.DONE && b.phaseT > 0.8f) mgGo(mgIdx + 1)
+        }
+        fly?.let { f -> f.thrust = thrustId >= 0; f.update(dt); if (f.finished) mgGo(mgIdx + 1) }
+        cine?.let { cn -> cn.t += dt; if (cn.t >= cn.fadeStart) mgGo(mgIdx + 1) }
+        shoot?.let { sw ->
+            sw.update(dt, ix, iy, mag, aimDx, aimDy, aimMag)
+            if (sw.phase == ShootWorld.Phase.DEAD) deadT += dt
+            if (sw.phase == ShootWorld.Phase.DONE) mgGo(mgIdx + 1)
+        }
+    }
+
+    private fun readAim(x: Float, y: Float) {
+        val dx = x - aimCx; val dy = y - joyCy; val len = hypot(dx, dy); val shown = min(len, joyR)
+        if (len > 0.001f) { aimKX = dx / len * shown; aimKY = dy / len * shown } else { aimKX = 0f; aimKY = 0f }
+        val dead = 7f * d
+        if (len < dead) { aimMag = 0f; return }
+        aimDx = dx / len; aimDy = dy / len; aimMag = ((shown - dead) / (joyR - dead)).coerceIn(0f, 1f)
+    }
+
+    private fun mgTouch(e: MotionEvent): Boolean {
+        val act = e.actionMasked; val idx = e.actionIndex; val id = e.getPointerId(idx)
+        when (act) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                val x = e.getX(idx); val y = e.getY(idx)
+                if (act == MotionEvent.ACTION_DOWN && x > width - 52f * d && y < 46f * d) { soundTap = true; return true }
+                val sw = shoot
+                if (sw != null && sw.phase == ShootWorld.Phase.DEAD) { if (deadT > 0.5f) startMg(mgIdx); return true }
+                val m = mgName
+                if ((m == "belt" || m == "shoot") && hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) }
+                else if (m == "shoot" && hypot(x - aimCx, y - joyCy) < joyR * 1.7f) { aimId = id; readAim(x, y) }
+                else if (m == "fly") thrustId = id
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (soundTap) return true
+                for (i in 0 until e.pointerCount) {
+                    val pid = e.getPointerId(i)
+                    if (pid == joyId) readJoystick(e.getX(i), e.getY(i)) else if (pid == aimId) readAim(e.getX(i), e.getY(i))
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+                if (soundTap && act != MotionEvent.ACTION_POINTER_UP) {
+                    soundTap = false
+                    if (act == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); if (soundOn) music.start() else music.stop() }
+                    return true
+                }
+                if (act == MotionEvent.ACTION_CANCEL) { joyId = -1; aimId = -1; thrustId = -1 }
+                if (id == joyId) { joyId = -1; joyActive = false; mag = 0f; knobX = 0f; knobY = 0f }
+                if (id == aimId) { aimId = -1; aimMag = 0f; aimKX = 0f; aimKY = 0f }
+                if (id == thrustId) thrustId = -1
+                if (act == MotionEvent.ACTION_CANCEL || act == MotionEvent.ACTION_UP) { joyActive = false; if (joyId < 0) mag = 0f }
+            }
+        }
+        return true
+    }
+
+    private fun mgText(c: Canvas, text: String, x: Float, y: Float, size: Float, color: Int, bold: Boolean = true) {
+        p.style = Paint.Style.FILL; p.typeface = if (bold) monoBold else mono; p.textAlign = Paint.Align.CENTER; p.textSize = size * d; p.color = color; p.letterSpacing = 0.05f
+        c.drawText(text, x, y, p); p.letterSpacing = 0f
+    }
+
+    private fun drawMg(c: Canvas) {
+        val w = width.toFloat(); val h = height.toFloat()
+        c.drawColor(0xFF03050A.toInt())
+        val top = 44f * d; val bottom = 14f * d
+        val bmp = beltScene?.render(clock) ?: flyScene?.render(clock) ?: cine?.render(clock) ?: shootScene?.render(clock)
+        if (bmp != null) {
+            val sc = max(1, min(w / bmp.width, (h - top - bottom) / bmp.height).toInt())
+            val ox = ((w - bmp.width * sc) / 2f).toInt().toFloat(); val oy = (top + (h - top - bottom - bmp.height * sc) / 2f).toInt().toFloat()
+            rect.set(ox, oy, ox + bmp.width * sc, oy + bmp.height * sc)
+            c.drawBitmap(bmp, null, rect, nearest)
+            val bt = oy + bmp.height * sc
+            belt?.let { b ->
+                mgText(c, "LIVES  " + "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
+                if (b.phase == BeltWorld.Phase.FALL) mgText(c, "YOU FELL", w / 2f, oy + bmp.height * sc / 2f, 22f, danger)
+                if (b.phase == BeltWorld.Phase.PICKUP) mgText(c, "GRAB THE JETPACK", w / 2f, oy - 10f * d - 18f * d, 12f, 0xFFFFD84D.toInt())
+                if (b.t < 6f) mgText(c, "Dodge boxes, tools, cables, machines.", w / 2f, bt + 14f * d, 10.5f, a(Color.WHITE, 0x99), false)
+            }
+            fly?.let { f ->
+                mgText(c, "COINS  ${f.coins} / ${f.spec.coinGoal}", w / 2f, oy - 10f * d, 14f, 0xFFFFD84D.toInt())
+                if (f.t < 6f) mgText(c, "HOLD ANYWHERE TO FLY UP. LET GO TO FALL. AVOID THE ZAPPERS.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
+            }
+            cine?.caption()?.let { mgText(c, it, w / 2f, bt - 16f * d, 13f, a(Color.WHITE, 0xEE)) }
+            shoot?.let { sw ->
+                if (sw.clearedT > 0f) mgText(c, "ROOM CLEAR. THE DOOR IS OPEN.", w / 2f, oy - 10f * d, 13f, 0xFF3BFF9A.toInt())
+                if (sw.phase == ShootWorld.Phase.PLAY && sw.phaseT < 6f) mgText(c, "Left stick walks. Right stick aims and shoots. One hit kills.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
+                if (sw.phase == ShootWorld.Phase.FINALE && sw.fade > 0f) { p.style = Paint.Style.FILL; p.color = a(Color.BLACK, (sw.fade * 255).toInt()); c.drawRect(0f, 0f, w, h, p) }
+                if (sw.phase == ShootWorld.Phase.DEAD) {
+                    p.style = Paint.Style.FILL; p.color = a(0xFFB01020.toInt(), (min(1f, deadT * 2f) * 0x88).toInt()); c.drawRect(0f, 0f, w, h, p)
+                    if (deadT > 0.3f) { mgText(c, "SHOT.", w / 2f, h / 2f - 10f * d, 26f, Color.WHITE); mgText(c, "Tap anywhere to try again.", w / 2f, h / 2f + 16f * d, 12f, a(Color.WHITE, 0xCC), false) }
+                }
+            }
+        }
+        if (mgName == "belt" || mgName == "shoot") drawJoystick(c)
+        if (mgName == "shoot" && shoot?.phase == ShootWorld.Phase.PLAY) {
+            val cx = aimCx; val cy = joyCy; val r = joyR
+            p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(cx, cy, r + 4f * d, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; p.color = a(0xFFFF6A6A.toInt(), 0x66); c.drawCircle(cx, cy, r, p)
+            p.style = Paint.Style.FILL; p.color = a(0xFFFF6A6A.toInt(), if (aimId >= 0) 0x99 else 0x55); c.drawCircle(cx + aimKX, cy + aimKY, 22f * d, p)
+        }
+        drawFade(c, w, h)
+    }
+
+
+    internal fun debugMg(i: Int) { startMg(i) }
+    internal fun debugMgAdvance(sec: Float) { var t = sec; while (t > 0f) { val s = min(t, 0.025f); clock += s; mgUpdate(s); t -= s } }
+    internal fun debugMgIdx() = mgIdx
+    internal fun debugLevelIdx() = levelIdx
 
     // screen -> tiles
     private var T = 1f; private var offX = 0f; private var offY = 0f
@@ -91,6 +250,12 @@ internal class DeadDropView(
 
     /** Start the level you are on again from the beginning. */
     internal fun restart() { load(false) }
+
+    /** Is a Spotted / Delivered style screen showing (so that any tap should dismiss it)? */
+    private fun overlayUp(): Boolean = world.state != StealthWorld.State.PLAY || pac?.phase == PacWorld.Phase.CAUGHT || pac?.phase == PacWorld.Phase.WON
+
+    /** The skip arrow: on to the next level. */
+    internal fun skipLevel() { if (levelIdx < levels.size - 1) { levelIdx++; saveLevel(levelIdx); load(false) } }
 
     /** Hold the restart button: back to level one. */
     internal fun restartAll() { levelIdx = 0; saveLevel(0); load(false) }
@@ -116,6 +281,8 @@ internal class DeadDropView(
         if (!retry) { attempt = 1; read.clear() }
         mag = 0f; clueText = null; clueAlpha = 0f
         music.setHeat(spec.heat); music.setCalm(false)
+        mgIdx = -1; if (stagesOf(spec) != null) startMg(0)
+        if (carryFade) { carryFade = false; fade = 1f; fadeDir = -1 }
     }
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); running = true; last = 0L; if (soundOn) music.start(); postOnAnimation(tick) }
@@ -129,9 +296,9 @@ internal class DeadDropView(
                 val raw = ((now - last) / 1e9f).coerceAtMost(0.05f)
                 var dt = raw
                 clock += dt; sinceLoad += dt
-                stageTick(raw)
+                if (mgIdx >= 0) mgUpdate(raw) else stageTick(raw)
                 var left = dt
-                while (left > 0f) {
+                while (mgIdx < 0 && left > 0f) {
                     val s = min(left, 0.025f)
                     val pw = pac
                     if (pw != null) { if (fadeDir <= 0) pw.update(s, pacWant) } else world.update(s, ix, iy, if (sinceLoad < 0.4f) 0f else mag)
@@ -212,10 +379,12 @@ internal class DeadDropView(
 
     // ---------- thumb ----------
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (mgIdx >= 0) return mgTouch(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (e.x > width - 52f * d && e.y < 46f * d) { soundTap = true; return true }
-                touchWasJoy = hypot(e.x - joyCx, e.y - joyCy) < joyR * 1.7f
+                overlayAtDown = overlayUp()                       // a tap anywhere dismisses a Spotted / Delivered screen
+                touchWasJoy = !overlayAtDown && hypot(e.x - joyCx, e.y - joyCy) < joyR * 1.7f
                 if (touchWasJoy) { joyActive = true; readJoystick(e.x, e.y) }
             }
             MotionEvent.ACTION_MOVE -> {
@@ -229,7 +398,7 @@ internal class DeadDropView(
                     return true
                 }
                 joyActive = false; mag = 0f; knobX = 0f; knobY = 0f
-                if (e.actionMasked == MotionEvent.ACTION_UP && !touchWasJoy) when (world.state) {
+                if (e.actionMasked == MotionEvent.ACTION_UP && overlayAtDown) when (world.state) {
                     StealthWorld.State.CAUGHT -> if (world.stateT > 0.5f) { attempt++; if (stage == 1) restartPac() else load(true) }
                     StealthWorld.State.WON -> if (lastLevel) {
                         if (wt > 12f) { saveLevel(0); music.stop(); onExit() }
@@ -252,6 +421,7 @@ internal class DeadDropView(
     private val danger = 0xFFFF4D4D.toInt()
 
     override fun onDraw(c: Canvas) {
+        if (mgIdx >= 0) { drawMg(c); return }
         val w = width.toFloat(); val h = height.toFloat()
         val s = world.spec
         val pal = s.pal
