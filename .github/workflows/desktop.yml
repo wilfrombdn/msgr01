@@ -1,0 +1,40 @@
+# Builds the Tellem desktop app for Windows and Linux and attaches the installers to each run.
+name: desktop
+
+on:
+  push:
+    branches: [main]
+    paths: ["desktop/**", "android/app/src/main/java/com/wilfrombdn/telegramnt/**"]
+  workflow_dispatch:
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm binutils
+      - name: Build installers
+        run: bash ./gradlew packageDistributionForCurrentOS --console=plain
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tellem-desktop-${{ runner.os }}
+          path: |
+            desktop/build/compose/binaries/main/msi/*.msi
+            desktop/build/compose/binaries/main/exe/*.exe
+            desktop/build/compose/binaries/main/deb/*.deb
+            desktop/build/compose/binaries/main/app

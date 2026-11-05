@@ -56,10 +56,39 @@ internal class BlobAvatar(private val seed: String) : Drawable() {
         c.drawRect(0f, 0f, 48f, 48f, paint)
         paint.shader = RadialGradient(6f + next() * 36f, 6f + next() * 36f, 22f, 0x44000000, Color.TRANSPARENT, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, 48f, 48f, paint)
+        drawStreak(c)
         c.restore()
         paint.shader = null; paint.style = Paint.Style.STROKE; paint.strokeWidth = 1.2f; paint.color = 0x55FFFFFF
         c.drawCircle(24f, 24f, 23.4f, paint)
         paint.style = Paint.Style.FILL
+    }
+
+    /**
+     * One soft colourful streak (a line or a blob) across the disc, for a marble look. Its numbers come from their own 64-bit hash of the seed,
+     * apart from the random numbers above, so the grey look stays exactly as it was and two contacts essentially never share a streak.
+     */
+    private fun drawStreak(c: Canvas) {
+        var x = -0x340d631b7bdddcdbL   // FNV-1a, 64 bit
+        for (ch in seed) { x = x xor ch.code.toLong(); x *= 0x100000001b3L }
+        x = x xor (x ushr 29); x *= -0x61c8864680b583ebL; x = x xor (x ushr 32)
+        fun bits(shift: Int, n: Int) = ((x ushr shift) and ((1L shl n) - 1)).toInt()
+        val angle = (bits(0, 9) % 360).toFloat()
+        val offset = (bits(9, 6) / 63f - 0.5f) * 22f
+        val thick = 4f + bits(15, 5) / 31f * 8f
+        val hueA = (bits(20, 9) % 360).toFloat()
+        val hueB = (hueA + 70f + bits(29, 8) % 160) % 360f
+        val blob = bits(37, 1) == 1
+        val second = bits(38, 1) == 1
+        fun band(deg: Float, off: Float, t: Float, alpha: Int) {
+            c.save(); c.rotate(deg, 24f, 24f); c.translate(0f, off)
+            paint.shader = LinearGradient(0f, 0f, 48f, 0f,
+                Color.HSVToColor(alpha, floatArrayOf(hueA, 0.6f, 1f)), Color.HSVToColor(alpha, floatArrayOf(hueB, 0.6f, 1f)), Shader.TileMode.CLAMP)
+            if (blob) c.drawOval(4f, 24f - t, 44f, 24f + t, paint) else c.drawRect(-10f, 24f - t / 2, 58f, 24f + t / 2, paint)
+            c.restore()
+        }
+        band(angle, offset, thick, 0x60)
+        if (second) band(angle + 25f + bits(46, 6), -offset * 0.8f - 2f, thick * 0.45f, 0x40)
+        paint.shader = null
     }
 
     /** A rounded organic shape in greys with the faintest colour, and a glow behind it. */

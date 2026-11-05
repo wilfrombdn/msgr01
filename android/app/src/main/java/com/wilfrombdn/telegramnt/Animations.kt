@@ -25,8 +25,8 @@ internal fun snapshotOf(v: View): android.graphics.Bitmap? {
     return runCatching { android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888).also { v.draw(android.graphics.Canvas(it)) } }.getOrNull()
 }
 
-private fun View.lift() = setLayerType(View.LAYER_TYPE_HARDWARE, null)
-private fun View.drop() = setLayerType(View.LAYER_TYPE_NONE, null)
+internal fun View.lift() = setLayerType(View.LAYER_TYPE_HARDWARE, null)
+internal fun View.drop() = setLayerType(View.LAYER_TYPE_NONE, null)
 
 /** Holds the leaving picture while it slides out, and swallows touches so the stale screen can't be tapped. */
 private class Shield(ctx: Context) : FrameLayout(ctx) {

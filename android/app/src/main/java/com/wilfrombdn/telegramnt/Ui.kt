@@ -454,8 +454,8 @@ internal fun MainActivity.settingSwitch(label: String, on: Boolean, change: (Boo
     textSize = 16f * look.ui
     isChecked = on
     val st = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-    thumbTintList = android.content.res.ColorStateList(st, intArrayOf(white, pick("#9AA4AE", "#FFFFFF")))
-    trackTintList = android.content.res.ColorStateList(st, intArrayOf((white and 0x00FFFFFF) or (0x80 shl 24), pick("#3A4654", "#C4C4CA")))
+    thumbTintList = android.content.res.ColorStateList(st, intArrayOf(green, pick("#9AA4AE", "#FFFFFF")))
+    trackTintList = android.content.res.ColorStateList(st, intArrayOf((green and 0x00FFFFFF) or (0x80 shl 24), pick("#3A4654", "#C4C4CA")))
     setPadding(dp(20), dp(14), dp(20), dp(14))
     setOnCheckedChangeListener { _, checked -> change(checked) }
 }

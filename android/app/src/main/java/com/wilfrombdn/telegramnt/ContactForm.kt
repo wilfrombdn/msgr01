@@ -105,7 +105,7 @@ private fun MainActivity.showContactForm(detail: Phone.Detail?, number: String?,
     fun refreshAvatar() {
         val name = "${first.text} ${last.text}".trim()
         avatarHolder.removeAllViews()
-        avatarHolder.addView(avatar(name.ifEmpty { "?" }, 96, newPhoto ?: detail?.photo))
+        avatarHolder.addView(avatar(name.ifEmpty { "?" }, 96, newPhoto ?: detail?.photo, detail?.phones?.firstOrNull()?.number?.let { numberSeed(it) } ?: "sms:n$name"))
         avatarHolder.addView(tv("Tap to add a photo", 13.5f, blue, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) }, LinearLayout.LayoutParams(-2, -2))
     }
     avatarHolder.setOnClickListener {

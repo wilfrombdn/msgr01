@@ -74,26 +74,44 @@ internal fun MainActivity.rebuildTextScreen() = when (screen) {
 
 internal fun MainActivity.textsUnread() = Texts.threads.filter { !it.spam }.sumOf { it.unread }
 
+/** Where the Contacts / Calls / Texts underline was last, so on the next screen it glides from there to the new tab. */
+private var lastSubIdx = -1
+
 /** Chats | Phone under the top bar; Phone has its own row: Texts · Calls · Contacts (carrier things, not private). */
 internal fun MainActivity.textTabs(chatsUnread: Int, mixed: Boolean): View = LinearLayout(this).apply {
     orientation = LinearLayout.VERTICAL
     setBackgroundColor(bar)
-    fun row() = LinearLayout(context)
-    fun LinearLayout.tab(label: String, n: Int, on: Boolean, size: Float, go: () -> Unit) = addView(LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        background = pressable()
-        setOnClickListener { go() }
-        addView(tv(label + if (n > 0) "  $n" else "", size, if (on) white else dim, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(8)) }, LinearLayout.LayoutParams(-1, -2))
-        addView(View(context).apply { setBackgroundColor(if (on) white else Color.TRANSPARENT) }, LinearLayout.LayoutParams(-1, dp(2)))
-    }, LinearLayout.LayoutParams(0, -2, 1f))
     if (textsTab) {
-        val sub = row().apply { setBackgroundColor(listBg) }
+        val row = LinearLayout(context)
         fun go(k: String) { if (phoneSub != k) { val o = phoneTabOrder(); gotoPhoneTab(k, if (o.indexOf(k) > o.indexOf(phoneSub)) 1 else -1) } }
-        sub.tab("Contacts", 0, phoneSub == "contacts", 14f) { go("contacts") }
-        sub.tab("Calls", 0, phoneSub == "calls", 14f) { go("calls") }
-        if (!mixed) sub.tab("Texts", textsUnread(), phoneSub == "texts", 14f) { go("texts") }
-        if (folderPlace() == "tab") sub.tab("Folders", 0, phoneSub == "folders", 14f) { go("folders") }
-        addView(sub)
+        fun tab(label: String, n: Int, key: String) = row.addView(tv(label + if (n > 0) "  $n" else "", 14f, if (phoneSub == key) white else dim, true).apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(12)); background = pressable(); setOnClickListener { go(key) }
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        tab("Contacts", 0, "contacts")
+        tab("Calls", 0, "calls")
+        if (!mixed) tab("Texts", textsUnread(), "texts")
+        if (folderPlace() == "tab") tab("Folders", 0, "folders")
+        val count = row.childCount
+        val cur = phoneTabOrder().indexOf(phoneSub).coerceAtLeast(0)
+        val from = if (lastSubIdx in 0 until count) lastSubIdx else cur
+        lastSubIdx = cur
+        // one underline for the whole row: it slides to the chosen tab with the same curve and time as the list under it
+        val line = View(context).apply { setBackgroundColor(white) }
+        val wrap = FrameLayout(context).apply { setBackgroundColor(listBg) }
+        wrap.addView(row, FrameLayout.LayoutParams(-1, -2))
+        wrap.addView(line, FrameLayout.LayoutParams(0, dp(2), Gravity.BOTTOM))
+        wrap.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+            override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, or: Int, ob: Int) {
+                if (r - l <= 0) return
+                wrap.removeOnLayoutChangeListener(this)
+                val w = (r - l) / count
+                line.layoutParams = (line.layoutParams as FrameLayout.LayoutParams).apply { width = w }
+                val x0 = from * w.toFloat(); val x1 = cur * w.toFloat()
+                line.translationX = if (animationsOn()) x0 else x1
+                if (animationsOn() && x0 != x1) { line.lift(); Tween(300, SMOOTH, { f -> line.translationX = x0 + (x1 - x0) * f }) { line.drop() }.start() }
+            }
+        })
+        addView(wrap)
     }
 }
 
