@@ -124,7 +124,7 @@ internal object StealthLevels {
             cover = "bin", pixel = true, walk = true,
             lead = LeadSpec(
                 listOf(4.5f to 27.5f, 3.5f to 23.5f, 3.5f to 19.5f, 7.5f to 19.5f, 7.5f to 15.5f, 7.5f to 11.5f, 7.5f to 9.5f),
-                8.5f, 9.5f, "God keep you down there. I will pray for you.",
+                8.5f, 9.5f, "Be safe down there. God bless.",
             ),
             pac = PacMaze.sewer,
             pacTip = "Steer with the joystick. Collect every key fragment, then reach the door at the top. The police hunt the way the old arcade ghosts did.",

@@ -40,7 +40,7 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
     private inline fun big(x: Int, y: Int, s: Float = 2f, what: () -> Unit) { fc.save(); fc.scale(s, s, x.toFloat(), y.toFloat()); what(); fc.restore() }
 
     // the cast
-    private val you = Outfit(PX.SKIN, 0xFF4A2E1B.toInt(), null, null, 0xFF6E96CC.toInt(), null, 0xFF8A8670.toInt(), 0xFF1A1410.toInt(), null, glasses = true)
+    private val you = Outfit(PX.SKIN, 0xFFE8C860.toInt(), null, null, 0xFF6E96CC.toInt(), null, 0xFF8A8670.toInt(), 0xFF1A1410.toInt(), null, glasses = true)
     private val boatman = Outfit(0xFFC89A78.toInt(), 0xFF2A1A10.toInt(), 0xFF3A2A3A.toInt(), null, 0xFF2A3A2A.toInt(), 0xFF3A4436.toInt(), 0xFF22261E.toInt(), PX.K, null)
     private val patrol get() = police
     private val mayorSkin = PX.SKIN

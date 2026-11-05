@@ -377,7 +377,7 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
         // everything standing in the scene, sorted so people pass in front of and behind things
         val list = ArrayList<Item>(items)
         val pxx = (world.px * S).roundToInt(); val pyy = (world.py * S).roundToInt() + 6
-        val walkFrame = if (world.speed > 0.05f) ((clock * (3f + world.speed * 2.2f)).toInt() % 2) else 0
+        val walkFrame = if (world.speed > 0.05f) ((clock * (3f + world.speed * 2.2f)).toInt() % 2) else if (world.autoWalk) ((clock * 7f).toInt() % 2) else 0
         val climbing = world.state == StealthWorld.State.WON && spec.worker != null
         val rise = if (climbing) min(30, (world.stateT * 18f).toInt()) else 0
         list += Item(pyy.toFloat() + (if (climbing) 40f else 0f)) { cv -> folk(cv, pxx, pyy - rise, if (climbing) 0 else dirOf(world.face), if (climbing) ((world.stateT * 6f).toInt() % 2) else walkFrame, clerk, false, !world.letterGiven) }
@@ -392,7 +392,7 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
         world.cop?.let { cop ->
             if (cop.visible) {
                 val fx = (cop.x * S).roundToInt(); val fy = (cop.y * S).roundToInt() + 6
-                list += Item(fy.toFloat()) { cv -> folk(cv, fx, fy, dirOf(cop.face), if (cop.walking) ((clock * 2.2f).toInt() % 2) else 0, police, cop.torch, false, if (cop.headDown) 2 else 0) }
+                list += Item(fy.toFloat()) { cv -> folk(cv, fx, fy, dirOf(cop.face), if (cop.walking) ((clock * 2.2f).toInt() % 2) else 0, police, cop.torch, false, sorrow = cop.headDown) }
             }
         }
         for (g in world.guards) if (!g.dead) {

@@ -87,7 +87,7 @@ class Level2FlowTest {
         val w = v.debugWorld()
         var guard = 0
         while (!w.enteredManhole && guard++ < 600) {
-            if (w.leadStage < 3) { w.px = w.contactX; w.py = w.contactY + 1.2f } else { w.px = 8.5f; w.py = 9.5f }
+            when (w.leadStage) { 3 -> { w.px = 8.5f; w.py = 9.5f }; 2, 5 -> {}; else -> { w.px = w.contactX; w.py = w.contactY + 1.2f } }   // the goodbye walks you up itself
             v.debugAdvance(0.25f)
         }
         assertTrue("walked down the manhole", w.enteredManhole)

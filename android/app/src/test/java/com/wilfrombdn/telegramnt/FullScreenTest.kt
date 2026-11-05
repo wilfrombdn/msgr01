@@ -26,7 +26,7 @@ class FullScreenTest {
     @Test fun everyScene() {
         val v = DeadDropView(RuntimeEnvironment.getApplication(), 0, false, { }, { }, { })
         v.measure(View.MeasureSpec.makeMeasureSpec(W, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(H, View.MeasureSpec.EXACTLY)); v.layout(0, 0, W, H)
-        val names = listOf("l1", "l2-maze", "l2-room", "l3-belt", "l3-fly", "l3-cine", "l4-cine", "l4-shoot", "l5-prison", "l6-beach", "l6-intro", "l6-climb", "l6-control", "l6-simon", "l6-broadcast", "l6-end")
+        val names = listOf("l1", "l2-maze", "l2-room", "l3-belt", "l3-fly", "l3-cine", "l4-cine", "l4-shoot", "l4-mayor", "l5-prison", "l6-beach", "l6-intro", "l6-climb", "l6-control", "l6-simon", "l6-broadcast", "l6-end")
         for ((i, n) in names.withIndex()) {
             if (i > 0) v.skip()
             v.debugMgAdvance(if (n == "l5-prison") 5f else 2.5f)

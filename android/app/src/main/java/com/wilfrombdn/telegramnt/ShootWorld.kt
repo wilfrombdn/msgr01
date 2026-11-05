@@ -581,6 +581,9 @@ internal class ShootWorld(val spec: ShootSpec) {
     private var finaleX = 0f; private var finaleY = 0f
     private var finStartX = 0f; private var finStartY = 0f
 
+    /** The skip arrow: straight to the mayor's office and the end of the level. */
+    fun skipToMayor() { if (phase == Phase.FINALE || phase == Phase.DONE) return; mayorUnlocked = true; px = 7.5f; py = 12.2f; startFinale() }
+
     private fun startFinale() {
         phase = Phase.FINALE; phaseT = 0f; ft = 0f; bullets.clear(); grenadesAir.clear(); moving = false
         finStartX = px; finStartY = py

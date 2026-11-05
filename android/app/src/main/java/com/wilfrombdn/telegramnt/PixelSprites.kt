@@ -69,13 +69,15 @@ internal open class PixelSprites {
         val skin: Int, val hair: Int, val hat: Int?, val brim: Int?, val shirt: Int, val coat: Int?, val pants: Int, val shoes: Int,
         val belt: Int?, val badge: Boolean = false, val glasses: Boolean = false, val tie: Boolean = false, val apron: Int? = null,
         val radio: Boolean = false,
+        val straps: Int? = null,      // braces over the shirt
     )
     protected val police = Outfit(PX.SKIN, 0xFF1A1420.toInt(), 0xFF111B45.toInt(), 0xFF05081A.toInt(), 0xFF2F58C8.toInt(), null, 0xFF0E1736.toInt(), PX.K, PX.K, badge = true, radio = true)
-    protected val clerk = Outfit(PX.SKIN, 0xFF4A2E1B.toInt(), null, null, PX.W, 0xFF8AA0C4.toInt(), 0xFF2A3350.toInt(), 0xFF150F10.toInt(), null, glasses = true, tie = true)
+    /** You: an old-timey clerk. Blond hair, round glasses, a white shirt with braces, khaki trousers, brown shoes. */
+    protected val clerk = Outfit(PX.SKIN, 0xFFE8C860.toInt(), null, null, 0xFFF4F0E6.toInt(), null, 0xFFB8A070.toInt(), 0xFF4A2E1B.toInt(), null, glasses = true, straps = 0xFF5A3A22.toInt())
     protected val vendor = Outfit(PX.SKIN, 0xFF59647A.toInt(), 0xFF59647A.toInt(), 0xFF3A4458.toInt(), 0xFFE8E0C8.toInt(), null, 0xFF3A4458.toInt(), PX.K, null, apron = 0xFF2E8F66.toInt())
 
     /** Draws one person standing with their feet at (fx, fy). [dir]: 0 away from you, 1 right, 2 toward you, 3 left. */
-    protected fun folk(c: Canvas, fx: Int, fy: Int, dir: Int, frame: Int, o: Outfit, torch: Boolean, letter: Boolean, hd: Int = 0, cross: Int = -1, pose: Int = 0, pdir: Int = 0) {
+    protected fun folk(c: Canvas, fx: Int, fy: Int, dir: Int, frame: Int, o: Outfit, torch: Boolean, letter: Boolean, hd: Int = 0, cross: Int = -1, pose: Int = 0, pdir: Int = 0, sorrow: Boolean = false) {
         rect(c, fx - 5, fy - 1, 11, 3, a(PX.K, 0x70))     // shadow
         c.save()
         if (dir == 3) c.scale(-1f, 1f, fx.toFloat() + 0.5f, 0f)
@@ -95,12 +97,22 @@ internal open class PixelSprites {
             if (o.apron != null && dir == 2) rect(c, fx - 3, fy - 10, 7, 6, o.apron)
             if (o.belt != null) rect(c, fx - 4, fy - 7, 9, 1, o.belt)
             if (o.badge && dir == 2) { px(c, fx + 2, fy - 10, PX.GOLD); px(c, fx + 2, fy - 9, PX.GOLD) }
+            if (o.straps != null && o.coat == null) {
+                rect(c, fx - 3, fy - 12, 1, 6, o.straps); rect(c, fx + 3, fy - 12, 1, 6, o.straps)
+                if (dir == 2) { px(c, fx - 3, fy - 7, PX.GOLD); px(c, fx + 3, fy - 7, PX.GOLD) } else { rect(c, fx - 2, fy - 10, 5, 1, o.straps) }   // buttons, or the cross at the back
+                rect(c, fx - 4, fy - 7, 9, 1, lite0(o.pants, -30))                                                                                       // the waistband
+            }
             if (o.radio) { rect(c, fx - 4, fy - 12, 2, 3, PX.K); px(c, fx - 3, fy - 12, PX.RED) }
             // arms
             val sleeve = o.coat ?: o.shirt
             val swing = if (frame == 1) 1 else 0
-            rect(c, fx - 6, fy - 12 + swing, 2, 6, sleeve); rect(c, fx - 6, fy - 6 + swing, 2, 1, o.skin)
-            if (pose != 0) poseArm(c, fx, fy, pose, pdir, sleeve, o)
+            if (sorrow) {   // shoulders down, hands clasped in front of him
+                rect(c, fx - 6, fy - 11, 2, 4, sleeve); rect(c, fx - 5, fy - 8, 3, 2, sleeve); rect(c, fx + 5, fy - 11, 2, 4, sleeve); rect(c, fx + 3, fy - 8, 3, 2, sleeve)
+                rect(c, fx - 2, fy - 8, 5, 2, o.skin)
+            } else rect(c, fx - 6, fy - 12 + swing, 2, 6, sleeve)
+            if (!sorrow) rect(c, fx - 6, fy - 6 + swing, 2, 1, o.skin)
+            if (sorrow) Unit                                               // both hands are already drawn, clasped
+            else if (pose != 0) poseArm(c, fx, fy, pose, pdir, sleeve, o)
             else if (cross < 0 || dir != 2) { rect(c, fx + 5, fy - 12 - swing, 2, 6, sleeve); rect(c, fx + 5, fy - 6 - swing, 2, 1, o.skin) }
             else {   // crossing himself: forehead, chest, left shoulder, right shoulder
                 val hx = intArrayOf(fx, fx, fx - 4, fx + 4)[cross]; val hy = intArrayOf(fy - 16, fy - 9, fy - 11, fy - 11)[cross]
@@ -117,10 +129,16 @@ internal open class PixelSprites {
                 if (o.glasses) { rect(c, fx - 3, fy - 15 + hd, 3, 1, PX.ICE); rect(c, fx + 1, fy - 15 + hd, 3, 1, PX.ICE); px(c, fx - 2, fy - 15 + hd, PX.K); px(c, fx + 2, fy - 15 + hd, PX.K) }
                 px(c, fx, fy - 13 + hd, o.skin - 0x00301818)
             }
+            if (sorrow && dir == 2) {   // eyes shut, looking at the ground
+                px(c, fx - 2, fy - 15 + hd, o.skin); px(c, fx + 2, fy - 15 + hd, o.skin); px(c, fx, fy - 13 + hd, o.skin)
+                rect(c, fx - 3, fy - 14 + hd, 2, 1, lite0(o.skin, -70)); rect(c, fx + 2, fy - 14 + hd, 2, 1, lite0(o.skin, -70))
+            }
+            if (sorrow && dir == 0) rect(c, fx - 2, fy - 12 + hd, 5, 1, o.skin)          // the back of his neck as his head bows
+            val hb = if (sorrow) 1 else 0                                                  // his hat tips forward
             if (o.hat != null) {
-                rect(c, fx - 4, fy - 20 + hd, 9, 3, o.hat); rect(c, fx - 4, fy - 20 + hd, 9, 1, o.hat + 0x00101820)
-                if (dir == 2 && o.brim != null) rect(c, fx - 4, fy - 17 + hd, 9, 1, o.brim)
-                if (o.badge && dir == 2) px(c, fx, fy - 19 + hd, PX.GOLD)
+                rect(c, fx - 4, fy - 20 + hd + hb, 9, 3, o.hat); rect(c, fx - 4, fy - 20 + hd + hb, 9, 1, o.hat + 0x00101820)
+                if (dir == 2 && o.brim != null) rect(c, fx - 4, fy - 17 + hd + hb, 9, 1 + hb, o.brim)
+                if (o.badge && dir == 2) px(c, fx, fy - 19 + hd + hb, PX.GOLD)
             }
             if (torch && dir == 2) { rect(c, fx + 5, fy - 7, 2, 3, PX.K); px(c, fx + 5, fy - 4, PX.W); px(c, fx + 6, fy - 4, PX.LAMP) }
             if (pose == 2 && dir == 2) cigarette(c, fx, fy)
@@ -298,6 +316,10 @@ internal open class PixelSprites {
         if (glint && sx > 0.7f) { px(c, cx - (r * sx * 0.45f).roundToInt(), cy - r / 2, PX.W); if (((animT * 3f + cx * 0.1f).toInt() % 5) == 0) { px(c, cx - 3, cy - r - 2, PX.W); px(c, cx - 3, cy - r - 3, 0x99FFFFFF.toInt()); px(c, cx - 4, cy - r - 2, 0x99FFFFFF.toInt()); px(c, cx - 2, cy - r - 2, 0x99FFFFFF.toInt()) } }
     }
 
+    private fun lite0(c: Int, d: Int): Int {
+        val r = (((c shr 16) and 0xFF) + d).coerceIn(0, 255); val g = (((c shr 8) and 0xFF) + d).coerceIn(0, 255); val b = ((c and 0xFF) + d).coerceIn(0, 255)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
     protected fun dirOf(face: Float): Int {
         val dx = cos(face); val dy = sin(face)
         return if (abs(dx) > abs(dy)) (if (dx > 0) 1 else 3) else (if (dy > 0) 2 else 0)

@@ -506,6 +506,7 @@ internal class DeadDropView(
      */
     internal fun skip() {
         finale?.let { fw -> fw.skip(); return }
+        shoot?.let { sw -> if (sw.phase != ShootWorld.Phase.FINALE && sw.phase != ShootWorld.Phase.DONE) { sw.skipToMayor(); return } }   // the shoot-out: to the mayor first
         val stages = stagesOf(spec)
         if (mgIdx >= 0 && stages != null) { if (mgIdx + 1 < stages.size) { fade = 0f; fadeDir = 0; mgPending = -9; startMg(mgIdx + 1) } else skipLevel(); return }
         if (levelIdx == 0) { skipLevel(); toStage(1); return }
@@ -533,7 +534,7 @@ internal class DeadDropView(
     private fun load(retry: Boolean) {
         world = StealthWorld(spec)
         pixelScene = if (spec.pixel) PixelScene(spec, world) else null
-        stage = 0; pac = null; pacScene = null; fade = 0f; fadeDir = 0; pendingStage = -1; pacWant = -1; joyActive = false
+        stage = 0; pac = null; pacScene = null; fade = 0f; fadeDir = 0; pendingStage = -1; pacWant = -1; joyActive = false; descentT = -1f; descent = null
         sinceLoad = if (retry) 99f else 0f
         if (!retry) { attempt = 1; read.clear() }
         mag = 0f; clueText = null; clueAlpha = 0f
@@ -558,7 +559,7 @@ internal class DeadDropView(
                 while (mgIdx < 0 && left > 0f) {
                     val s = min(left, 0.025f)
                     val pw = pac
-                    if (pw != null) { if (fadeDir <= 0) pw.update(s, pacWant) } else world.update(s, ix, iy, if (sinceLoad < 0.4f || bannerUp) 0f else mag)
+                    if (pw != null) { if (fadeDir <= 0) pw.update(s, pacWant) } else world.update(s, ix, iy, if (sinceLoad < 0.4f || bannerUp || descentT >= 0f) 0f else mag)
                     left -= s
                 }
                 updateClue(raw)
@@ -590,10 +591,34 @@ internal class DeadDropView(
     }
 
     /** Moves level 2 from one part to the next, with a fade to black between. */
+    // level 2: climbing down the manhole between the street and the maze (DescentScene)
+    private var descentT = -1f
+    private var descent: DescentScene? = null
+    private fun descentTick(dt: Float) {
+        val t0 = descentT; descentT += dt
+        fun at(s: Float) = t0 < s && descentT >= s
+        if (soundOn) { if (descentT in DescentScene.CLIMB0..DescentScene.CLIMB1 && (descentT * 4f).toInt() != (t0 * 4f).toInt()) DeadLetterSfx.play("type"); if (at(DescentScene.LID0 + 0.4f)) DeadLetterSfx.play("clank") }
+        if (at(DescentScene.BLACK) && stage == 0) { pendingStage = 1; switchStage() }
+        if (descentT >= DescentScene.END) { descentT = -1f; descent = null }
+    }
+    private fun drawDescent(c: Canvas, w: Float, h: Float) {
+        val ds = descent ?: return
+        val t = descentT
+        // into the shaft (the street fades out), then, after the black, the maze glows up underneath
+        val alpha = when { t < 0.45f -> t / 0.45f; t > DescentScene.BLACK -> 1f - (t - DescentScene.BLACK) / (DescentScene.END - DescentScene.BLACK); else -> 1f }.coerceIn(0f, 1f)
+        if (alpha <= 0f) return
+        val bmp = ds.render(t, clock)
+        val sc = max(1, ceil(w / ds.W).toInt()); val ox = (w - ds.W * sc) / 2f; val oy = (h - ds.H * sc) / 2f
+        val pa = Paint(nearest).apply { this.alpha = (alpha * 255).toInt() }
+        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, (alpha * 255).toInt()); c.drawRect(0f, 0f, w, h, p)
+        if (t < DescentScene.BLACK) { rect.set(ox, oy, ox + ds.W * sc, oy + ds.H * sc); c.drawBitmap(bmp, null, rect, pa) }
+    }
+
     private fun stageTick(dt: Float) {
+        if (descentT >= 0f) { descentTick(dt); if (descentT >= 0f && stage == 0) return }
         if (fadeDir > 0) { fade += dt / 0.8f; if (fade >= 1f) { fade = 1f; switchStage(); fadeDir = -1 } }
         else if (fadeDir < 0) { fade -= dt / 0.8f; if (fade <= 0f) { fade = 0f; fadeDir = 0 } }
-        else if (stage == 0 && world.enteredManhole && spec.pac != null) { pendingStage = 1; fadeDir = 1 }
+        else if (stage == 0 && world.enteredManhole && spec.pac != null) { world.sayText = null; descent = DescentScene(); descentT = 0f }
         else if (stage == 1) {
             val pw = pac
             if (pw != null) {
@@ -764,6 +789,7 @@ internal class DeadDropView(
         drawClue(c, w, h, pal)
         drawSay(c, w, h, pal)
         drawOverlays(c, w, h, pal)
+        if (descentT >= 0f) drawDescent(c, w, h)
         drawFade(c, w, h)
     }
 

@@ -727,7 +727,7 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
         Outfit(0xFFA87858.toInt(), 0xFF2A1A10.toInt(), null, null, 0xFF6A8CBC.toInt(), null, 0xFF8A8670.toInt(), PX.K, null),
         Outfit(0xFF6A4434.toInt(), 0xFF0A0808.toInt(), null, null, 0xFF52769E.toInt(), null, 0xFF7E7A66.toInt(), PX.K, null),
     )
-    private val you = Outfit(PX.SKIN, 0xFF4A2E1B.toInt(), null, null, 0xFF6E96CC.toInt(), null, 0xFF8A8670.toInt(), 0xFF1A1410.toInt(), null, glasses = true)
+    private val you = Outfit(PX.SKIN, 0xFFE8C860.toInt(), null, null, 0xFF6E96CC.toInt(), null, 0xFF8A8670.toInt(), 0xFF1A1410.toInt(), null, glasses = true)
     private val guardOutfit = Outfit(PX.SKIN, 0xFF1A1420.toInt(), 0xFF2A303C.toInt(), 0xFF101418.toInt(), 0xFF5E6676.toInt(), null, 0xFF2A303C.toInt(), PX.K, PX.K, badge = true)
 
     private class DItem(val y: Float, val draw: () -> Unit)
@@ -1022,7 +1022,7 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
         rect(c, -14, -6, 2, 3, K(0xFFD8DCE4)); rect(c, 12, -8, 3, 4, K(0xFFD8DCE4))                          // the bow lifts
         rect(c, -6, -11, 10, 5, K(0xFF3A404C)); rect(c, -5, -10, 4, 2, K(0xFF8AB8D8))                        // the cabin
         rect(c, 6, -13, 2, 7, K(0xFF1A1C22)); rect(c, 5, -16, 4, 3, PX.SKIN); rect(c, 5, -17, 4, 1, K(0xFF2A1A10))   // the one who came for you
-        if (withYou) { rect(c, -11, -12, 3, 6, K(0xFF6E96CC)); rect(c, -11, -15, 3, 3, PX.SKIN); rect(c, -11, -16, 3, 1, K(0xFF4A2E1B)) }
+        if (withYou) { rect(c, -11, -12, 3, 6, K(0xFF6E96CC)); rect(c, -11, -15, 3, 3, PX.SKIN); rect(c, -11, -16, 3, 1, K(0xFFE8C860)) }
         if (lamp && (clock * 2.5f).toInt() % 2 == 0) { px(c, 0, -13, PX.WARM); c.restore(); c.drawBitmap(boatGlow, x - 10f, y - 13f * scale - 10f, plain); return }
         c.restore()
     }

@@ -31,7 +31,7 @@ class SkipTest {
         fun where() = "L${v.debugLevelIdx()} stage${v.debugStage()} mg${v.debugMgIdx()} ${v.debugFinale()?.stage ?: ""}".trim()
         val seen = ArrayList<String>()
         seen += where()
-        repeat(17) { v.skip(); seen += where() }
+        repeat(18) { v.skip(); seen += where() }
         assertEquals(listOf(
             "L0 stage0 mg-1",
             "L1 stage1 mg-1",           // level 1 > straight to the sewer maze
@@ -41,6 +41,7 @@ class SkipTest {
             "L2 stage0 mg2",            // cop cutscene
             "L3 stage0 mg0",            // level 4: arrival
             "L3 stage0 mg1",            // shoot-out
+            "L3 stage0 mg1",            // > straight to the mayor's office
             "L4 stage0 mg0",            // level 5: the prison
             "L5 stage0 mg0 BEACH",      // level 6
             "L5 stage0 mg0 INTRO",
