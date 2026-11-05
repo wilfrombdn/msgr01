@@ -78,8 +78,8 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
             FinaleWorld.Stage.SIMON -> simon(c, clock)
             FinaleWorld.Stage.BROADCAST -> broadcast(c, clock)
         }
-        world.bubble()?.let { (who, what) -> speech(c, who, what) }
         c.drawBitmap(vignette, 0f, 0f, plain)
+        world.bubble()?.let { (who, what) -> speech(c, who, what) }
         if (world.fade > 0f) { p.style = Paint.Style.FILL; p.color = a(PX.K, (world.fade * 255).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
         return frame
     }
@@ -98,7 +98,7 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
     private var heads = HashMap<String, Pair<Int, Int>>()
     private fun speech(c: Canvas, who: String, what: String) {
         val (hx, hy) = heads[who] ?: return
-        val stT = when (world.stage) { FinaleWorld.Stage.BEACH -> when (who) { "boat" -> if (world.t < 7f) 4.0f else 8.6f; else -> 6.6f }; FinaleWorld.Stage.INTRO -> if (world.t < 7f) 4.7f else 7.9f; else -> 0.4f }
+        val stT = when (world.stage) { FinaleWorld.Stage.BEACH -> when (who) { "boat" -> if (world.t < 7f) 4.0f else 8.6f; else -> 6.6f }; FinaleWorld.Stage.INTRO -> if (world.t < 7f) 4.7f else 7.9f; FinaleWorld.Stage.CLIMB -> (world.t / 9f).toInt() * 9f + 3f; else -> 0.4f }
         val shown = ((world.t - stT) * 30f).toInt().coerceAtLeast(1)
         if (what == "!") { rect(c, hx - 2, hy - 20, 5, 12, PX.K); rect(c, hx - 1, hy - 19, 3, 7, PX.RED); rect(c, hx - 1, hy - 11, 3, 2, PX.RED); return }
         bubble(c, what, hx, hy, shown, W)
@@ -262,8 +262,9 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         // the terminal screen (typing the code)
         val ty = FinaleWorld.base(FinaleWorld.TOP).toInt() - 16
         if (st == FinaleWorld.Stage.INTRO && t in 4.7f..6.1f) { for (i in 0 until ((t - 4.7f) * 5).toInt().coerceAtMost(4)) rect(c, 96 + i * 3, ty + 3, 2, 3, K(0xFF3BFF9A)) } else rect(c, 96, ty + 3, 12, 1, a(PX.CYAN, 0x80))
-        // spools
+        // spools, and a sparkle where you cleared one
         for (s in world.spools) spool(c, s.x, s.y, s.spin)
+        if (st == FinaleWorld.Stage.CLIMB && world.clearT < 0.6f) { val k = world.clearT / 0.6f; for (i in 0 until 6) { val an = i * 1.047f + k; val r = 4f + k * 10f; px(c, (world.clearX + cos(an) * r).roundToInt(), (world.clearY + sin(an) * r - k * 6f).roundToInt(), a(PX.GOLD, ((1f - k) * 255).toInt())) } }
         heads.clear()
         // the patrol
         val gxI = world.gx.roundToInt(); val gyI = world.gy.roundToInt()

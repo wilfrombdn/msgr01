@@ -71,6 +71,7 @@ internal class FinaleWorld(seed: Int = 6) {
         const val JUMP_S = 0.62f
         const val JUMP_H = 17f
         const val SPOOL_R = 6f
+        val TAUNTS = listOf("NOBODY'S LISTENING, TELLEM.", "THE MAYOR SENDS HIS REGARDS.", "YOU'RE ALREADY DEAD. IT'S ON FILE.", "GO HOME. OH WAIT.", "THEY'LL NEVER BELIEVE YOU.")
     }
 
     // ---------------------------------------------------------------------------------------------------------------- the tower
@@ -106,6 +107,9 @@ internal class FinaleWorld(seed: Int = 6) {
         var gone = false
     }
     val spools = ArrayList<Spool>()
+    /** Where you last cleared a spool, and how long ago (for the sparkle). */
+    var clearX = 0f; var clearY = 0f; var clearT = 9f; private set
+    private val cleared = HashSet<Spool>()
     private var nextThrow = 1.2f
 
     // ---------------------------------------------------------------------------------------------------------------- simon
@@ -213,7 +217,7 @@ internal class FinaleWorld(seed: Int = 6) {
     private fun throwGap() = 2.3f * (1f + 0.18f * min(fails, 5))
 
     private fun climbTick(dt: Float, ix: Float, iy: Float, mag: Float) {
-        throwT += dt
+        throwT += dt; clearT += dt
         if (hitT >= 0f) {
             hitT += dt
             if (hitT > 1.6f) { lives--; if (lives <= 0) { lives = 3; fails++ }; resetClimb() }
@@ -230,6 +234,7 @@ internal class FinaleWorld(seed: Int = 6) {
             val sy = s.y; val feet = py - jumpH
             val dx = abs(s.x - px); val dy = abs((sy + SPOOL_R) - feet)
             if (dx < 7f && dy < 9f) { hitT = 0f; events += "hit"; return }
+            if (dx < 5f && jumpH > 8f && s.floor == floor && s.fallTo < 0 && s !in cleared) { cleared += s; clearX = px; clearY = py - 24f; clearT = 0f; events += "over" }
         }
         if (floor == TOP) go(Stage.EXECUTE)
     }
@@ -343,6 +348,7 @@ internal class FinaleWorld(seed: Int = 6) {
         }
         Stage.INTRO -> if (t in 4.7f..6.0f) "patrol" to "4 · 7 · 1 · 1" else if (t in 7.9f..9.2f) "patrol" to "COME ON UP." else null
         Stage.EXECUTE -> if (t in 0.4f..2.4f) "patrol" to "WAIT! WAIT!" else null
+        Stage.CLIMB -> if (hitT < 0f && t % 9f in 3f..5.2f) "patrol" to TAUNTS[(t / 9f).toInt() % TAUNTS.size] else null
         else -> null
     }
     fun caption(): String = when (stage) {

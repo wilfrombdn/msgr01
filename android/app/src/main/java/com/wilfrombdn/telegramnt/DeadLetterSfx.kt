@@ -59,6 +59,7 @@ internal object DeadLetterSfx {
         "boom" -> noise(2.2f, 0.8f, 1.6f, 0.04f, 9)
         "throw" -> sweep(200f, 120f, 0.12f, 0.12f)
         "static" -> noise(0.5f, 0.25f, 3f, 0.9f, 11)
+        "over" -> tone(listOf(1046.5f, 1568f), 0.22f, 0.18f, 9f)
         else -> null
     }
 
