@@ -7,8 +7,8 @@ import kotlin.math.min
 import kotlin.math.sin
 
 // The conveyor run of Dead Letter level 3 (no Android code here, so tests can run it). Three belts run side by side, high above the
-// warehouse floor with a gap between them. Tap the left or right half of the screen to LEAP to the next belt, swipe up to JUMP.
-// Collect 100 coins (high ones only when you are in the air). The belts start quick and speed up to about double. Once you have
+// warehouse floor with a gap between them. SWIPE left or right to LEAP to the next belt, swipe up to JUMP.
+// Collect 100 coins (high ones only when you are in the air; a jump takes every coin hanging over what you jump). The belts start quick and speed up to about double. Once you have
 // 100 coins the belt runs out at a kicker that throws you hard onto the jetpack platform; if you have fewer, the belts keep going.
 
 internal class BeltObs(
@@ -18,7 +18,7 @@ internal class BeltObs(
     var curS = s; var armed = false; var t0 = 0f
 }
 
-internal class BeltCoin(val s: Float, val lane: Int, val high: Boolean) { var taken = false }
+internal class BeltCoin(val s: Float, val lane: Int, val high: Boolean) { var taken = false; var claimed = false }
 
 /** The level: obstacles and coins are made ahead of you on demand by [extend], so the belts can run on until you have your coins. */
 internal class BeltSpec(
@@ -64,7 +64,7 @@ internal class BeltWorld(val spec: BeltSpec) {
     fun isLow(o: BeltObs) = o.kind == BOX || o.kind == TOOL || o.kind == PRESS || o.kind == BARREL || o.kind == SMALL || o.kind == GAP
     private fun inAir() = air > 0.55f || jumpAir > 0.2f
 
-    /** Tap left (-1) or right (+1): leap to the next belt. */
+    /** Swipe left (-1) or right (+1): leap to the next belt. */
     fun leap(dir: Int) {
         if (phase != Phase.RIDE) return
         if (leaping) { queued = dir; return }
@@ -74,7 +74,13 @@ internal class BeltWorld(val spec: BeltSpec) {
     }
 
     /** Swipe up: jump (over crates, barriers and holes in the belt). */
-    fun jump() { if (phase == Phase.RIDE && jumpK < 0f) jumpK = 0f }
+    fun jump() {
+        if (phase != Phase.RIDE || jumpK >= 0f) return
+        jumpK = 0f
+        // every coin hanging in the air over the stretch you'll be in the air for is yours (they fly to you as you pass)
+        val reach = speedAt(s) * 0.8f + 3.5f
+        for (c in spec.coins) if (!c.taken && c.high && c.s >= s - 0.8f && c.s <= s + reach) c.claimed = true
+    }
 
     fun update(dt: Float, ix: Float = 0f, iy: Float = 0f, mag: Float = 0f) {
         t += dt; phaseT += dt
@@ -117,6 +123,7 @@ internal class BeltWorld(val spec: BeltSpec) {
         }
         // coins
         for (c in spec.coins) {
+            if (c.claimed && !c.taken && c.s <= s + 0.7f) { c.taken = true; coins++; coinFlash = 0.25f; continue }
             if (c.taken || abs(c.s - s) > 0.7f) continue
             if (abs(spec.laneX[c.lane] - x) > 0.95f) continue
             if (c.high && !(jumpAir > 0.3f || air > 0.5f)) continue

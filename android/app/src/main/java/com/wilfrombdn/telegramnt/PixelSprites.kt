@@ -264,6 +264,40 @@ internal open class PixelSprites {
         if (letter) { rect(c, fx + 1, fy - 9, 5, 3, PX.W); px(c, fx + 3, fy - 8, PX.RED) }
         c.restore()
     }
+    /**
+     * A spinning gold coin, centred on (cx, cy), radius [r] (5 or 6 looks right). [spin] is an angle: the coin turns edge-on and back.
+     * Round face shaded from a warm highlight (top left) to deep gold (bottom right), an inner ring, a stamped star, a dark outline so
+     * it reads on any background, the thick rim showing as it turns, and a glint that catches now and then.
+     */
+    protected fun coin(c: Canvas, cx: Int, cy: Int, r: Int, spin: Float, glint: Boolean = true) {
+        val sx = abs(cos(spin)).coerceAtLeast(0.16f)
+        val edgeSide = if (cos(spin) >= 0f) 1 else -1
+        val out = 0xFF4A2E06.toInt(); val rimD = 0xFFA06A0C.toInt(); val rimL = 0xFFD89A1A.toInt()
+        val hi = 0xFFFFF0A0.toInt(); val face = 0xFFF8C431.toInt(); val mid = 0xFFE8A81E.toInt(); val low = 0xFFC0800E.toInt()
+        val rr = r + 0.5f
+        for (dy in -r..r) {
+            val half = kotlin.math.sqrt(maxOf(0f, rr * rr - dy * dy))
+            val hw = (half * sx).roundToInt().coerceAtLeast(1)
+            val thick = ((1f - sx) * 2.4f).roundToInt()                     // the rim shows as the coin turns
+            // outline
+            rect(c, cx - hw - 1 - (if (edgeSide < 0) thick else 0), cy + dy, hw * 2 + 3 + thick, 1, out)
+            if (thick > 0) rect(c, if (edgeSide > 0) cx + hw + 1 else cx - hw - thick, cy + dy, thick, 1, if (dy < 0) rimL else rimD)
+            for (dx in -hw..hw) {
+                val nx = dx / maxOf(1f, hw.toFloat()); val ny = dy / rr
+                val d = kotlin.math.sqrt(nx * nx + ny * ny)
+                val light = -nx * 0.55f - ny * 0.75f                         // lit from the top left
+                var col = when { d > 0.86f -> if (light > 0f) rimL else rimD; light > 0.45f -> hi; light > 0.05f -> face; light > -0.4f -> mid; else -> low }
+                if (d in 0.62f..0.74f && sx > 0.45f) col = if (light > 0f) mid else low       // the inner ring
+                px(c, cx + dx, cy + dy, col)
+            }
+        }
+        rect(c, cx - (rr * sx).roundToInt(), cy - r - 1, ((rr * sx).roundToInt()) * 2 + 1, 1, out); rect(c, cx - (rr * sx).roundToInt(), cy + r + 1, ((rr * sx).roundToInt()) * 2 + 1, 1, out)
+        // the stamped star
+        if (sx > 0.55f) { val st = 0xFFB07410.toInt(); px(c, cx, cy - 2, st); rect(c, cx - 2, cy - 1, 5, 1, st); px(c, cx, cy, st); px(c, cx - 1, cy + 1, st); px(c, cx + 1, cy + 1, st); px(c, cx, cy - 1, hi) }
+        // a glint
+        if (glint && sx > 0.7f) { px(c, cx - (r * sx * 0.45f).roundToInt(), cy - r / 2, PX.W); if (((animT * 3f + cx * 0.1f).toInt() % 5) == 0) { px(c, cx - 3, cy - r - 2, PX.W); px(c, cx - 3, cy - r - 3, 0x99FFFFFF.toInt()); px(c, cx - 4, cy - r - 2, 0x99FFFFFF.toInt()); px(c, cx - 2, cy - r - 2, 0x99FFFFFF.toInt()) } }
+    }
+
     protected fun dirOf(face: Float): Int {
         val dx = cos(face); val dy = sin(face)
         return if (abs(dx) > abs(dy)) (if (dx > 0) 1 else 3) else (if (dy > 0) 2 else 0)

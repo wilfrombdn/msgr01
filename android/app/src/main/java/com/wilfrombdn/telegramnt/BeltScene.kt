@@ -8,9 +8,9 @@ import kotlin.math.floor
 import kotlin.math.roundToInt
 
 /**
- * The warehouse conveyors in pixel art, seen from above: three belts raised high over a dark, busy factory floor (you can see the
- * girders between them, their shadows and the machinery far below). Crates, tools, cables, presses, sparks and thrown barrels come
- * down them. 14 tiles wide, 24 tall.
+ * The warehouse conveyors in pixel art, seen from above: three narrow belts (just wider than you) on legs, high over a dark warehouse
+ * floor lined with rows of stocked pallet racks. The floor and racks scroll slower than the belts, so you feel how high up you are.
+ * Crates, tools, cables, presses, sparks and thrown barrels come down the belts. 14 tiles wide, 24 tall.
  */
 internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
     private val S = 16
@@ -47,7 +47,17 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
 
     private fun sy(sw: Float): Int = H - ((sw * S).roundToInt() - camWy)
     private fun sx(xw: Float): Int = (xw * S).roundToInt()
-    private val laneHalf = 1.45f
+    private val laneHalf = 0.68f            // the belts: just wider than you
+    private val DEPTH = 0.62f                // the floor far below scrolls at this fraction of the belts' speed
+    private fun fy(sw: Float): Int = H - ((sw * S).roundToInt() - (camWy * DEPTH).roundToInt())   // a floor row on screen
+    private val floorGlow = glowBitmap(44, 0xFFFFD28A.toInt(), 40)
+    private val coinGlow = glowBitmap(10, 0xFFFFD84D.toInt(), 0x38)
+    private val boxCols = intArrayOf(0xFFA8803E.toInt(), 0xFF8A6A3A.toInt(), 0xFFB89058.toInt(), 0xFF6E8AA0.toInt(), 0xFF8A3A3A.toInt(), 0xFF4A6A4A.toInt())
+    private fun lite(c: Int, d: Int): Int {
+        val r = (((c shr 16) and 0xFF) + d).coerceIn(0, 255); val g = (((c shr 8) and 0xFF) + d).coerceIn(0, 255); val b = ((c and 0xFF) + d).coerceIn(0, 255)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
+    private val rackX = floatArrayOf(0.95f, 5.1f, 8.9f, 13.05f)           // pallet racks: at the sides and under the gaps between belts
     private fun laneX(l: Int) = world.spec.laneX[l.coerceIn(0, 2)]
 
     fun render(clock: Float): Bitmap {
@@ -63,39 +73,56 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
         val r0 = floor(botS).toInt() - 2; val r1 = floor(topS).toInt() + 2
         val endS = world.endS
 
-        // 1. the floor far below, and the sides
-        for (r in r0..r1) {
-            val y = sy(r.toFloat() + 1f)
+        // 1. the warehouse floor far below: concrete, painted aisle lines, tyre marks, stains, pools of lamp light
+        val fr0 = floor((camWy * DEPTH) / S).toInt() - 2; val fr1 = fr0 + ROWS + 4
+        rect(c, 0, 0, W, H, 0xFF080C10.toInt())
+        for (r in fr0..fr1) {
+            val y = fy(r.toFloat() + 1f)
             for (cx in 0 until 14) {
-                val v = hash(cx, r, 4) % 11
-                c.drawBitmap(when { v == 0 -> floorTile2; v == 1 && cx != 0 -> floorTile3; else -> floorTile }, (cx * S).toFloat(), y.toFloat(), plain)
+                val v = hash(cx, r, 4) % 13
+                c.drawBitmap(when { v == 0 -> floorTile2; v == 1 -> floorTile3; else -> floorTile }, (cx * S).toFloat(), y.toFloat(), plain)
             }
+            // aisle lines down the floor between the racks, dashed where forklifts cross
+            for (ax in floatArrayOf(3.0f, 7.0f, 11.0f)) if (r % 6 != 0) rect(c, sx(ax) - 1, y, 2, S, 0xFF6A5A1E.toInt())
+            if (r % 11 == 3) { val tx = sx(2.2f + (hash(r, 1, 3) % 9)); for (k in 0 until S step 2) { px(c, tx, y + k, 0xFF05080A.toInt()); px(c, tx + 6, y + k, 0xFF05080A.toInt()) } }   // tyre marks
+            if (r % 9 == 5) for (i in 0 until 14 * 2) rect(c, i * 8, y + 6, 4, 3, if (i % 2 == 0) 0xFF7A6420.toInt() else 0xFF14161A.toInt())          // a painted crossing
         }
-        for (r in r0..r1) {
-            val y = sy(r.toFloat() + 1f)
-            if (r.toFloat() > endS - 1f && r < endS + 15) continue
-            if (r % 9 == 4) for (i in 0 until 14 * 2) rect(c, i * 8, y + 6, 4, 4, if (i % 2 == 0) hazard else hazardD)
-            sideProps(c, r, y)
-        }
-        // 2. the girders under the belts, their pylons and shadows (so you can see how high up they are)
-        for (r in r0..r1) {
-            if (r < 0 || r.toFloat() > endS) continue
-            val y = sy(r.toFloat() + 1f)
-            for (g in 0..1) {
-                val gx = sx(laneX(g) + laneHalf)
-                val gw = sx(laneX(g + 1) - laneHalf) - gx
-                rect(c, gx, y, gw, S, a(PX.K, 0xA0))
-                if (r % 5 == 2) {
-                    rect(c, gx - 4, y + 3, gw + 8, 9, steelDD); rect(c, gx - 4, y + 3, gw + 8, 2, steel); rect(c, gx - 4, y + 11, gw + 8, 1, PX.K)
-                    px(c, gx - 2, y + 7, steelL); px(c, gx + gw + 1, y + 7, steelL); px(c, gx + gw / 2, y + 7, steelL)
-                    rect(c, gx + gw / 2 - 1, y + 12, 3, 4, steelD)
+        for (r in fr0..fr1) if (r % 7 == 2) { val y = fy(r + 0.5f); c.drawBitmap(floorGlow, sx(3f) - 44f, y - 44f, plain); c.drawBitmap(floorGlow, sx(11f) - 44f, y - 44f, plain) }
+        // the racks: blue uprights, orange beams every bay, pallets of boxes, drums and sacks seen from above
+        for (rx in rackX) {
+            val x0 = sx(rx) - 14; val wR = 28
+            for (r in fr0..fr1) {
+                val y = fy(r.toFloat() + 1f)
+                rect(c, x0 - 1, y, wR + 2, S, 0xFF05070A.toInt())
+                rect(c, x0, y, 3, S, 0xFF2A4A8A.toInt()); rect(c, x0 + wR - 3, y, 3, S, 0xFF2A4A8A.toInt()); rect(c, x0, y, 1, S, 0xFF5A7AC0.toInt())
+                if (r % 2 == 0) { rect(c, x0, y, wR, 3, 0xFFC8642A.toInt()); rect(c, x0, y, wR, 1, 0xFFF0904A.toInt()); rect(c, x0, y + 2, wR, 1, 0xFF6A3418.toInt()) }   // the beams
+                val kind = hash(r, (rx * 10).toInt(), 17) % 9
+                val bx = x0 + 4; val by = y + (if (r % 2 == 0) 4 else 1); val bw = wR - 8; val bh = 11
+                when {
+                    kind == 0 -> { }                                                                                  // an empty bay
+                    kind < 5 -> {                                                                                     // a pallet stacked with boxes, shrink-wrapped
+                        rect(c, bx - 1, by - 1, bw + 2, bh + 2, 0xFF3A2A18.toInt())
+                        val bc = boxCols[hash(r, (rx * 7).toInt(), 18) % boxCols.size]
+                        for (q in 0..3) { val qx = bx + (q % 2) * (bw / 2); val qy = by + (q / 2) * (bh / 2); rect(c, qx, qy, bw / 2 - 1, bh / 2 - 1, bc); rect(c, qx, qy, bw / 2 - 1, 1, lite(bc, 30)); rect(c, qx + bw / 4 - 1, qy, 1, bh / 2 - 1, lite(bc, -28)) }
+                        if (kind % 2 == 0) { rect(c, bx + 1, by + 1, 2, bh - 2, a(PX.W, 0x40)); px(c, bx + bw - 3, by + 2, a(PX.W, 0x80)) }          // the wrap's sheen
+                        if (kind == 3) { rect(c, bx + 3, by + 3, 5, 3, PX.W); px(c, bx + 4, by + 4, PX.K) }                                    // a shipping label
+                    }
+                    kind < 7 -> { for (q in 0..1) { val dx2 = bx + 2 + q * 11; rect(c, dx2, by, 9, 9, PX.K); rect(c, dx2 + 1, by + 1, 7, 7, if ((r + q) % 2 == 0) 0xFF2F6F73.toInt() else 0xFF8A3A2A.toInt()); rect(c, dx2 + 3, by + 3, 3, 3, 0xFF14181E.toInt()); px(c, dx2 + 2, by + 2, a(PX.W, 0x90)) } }   // drums
+                    else -> { for (q in 0..2) { val sx2 = bx + q * 7; rect(c, sx2, by + 1, 6, 9, 0xFFC8B890.toInt()); rect(c, sx2, by + 1, 6, 2, 0xFFE8DCB8.toInt()); rect(c, sx2 + 2, by + 4, 2, 2, 0xFF8A7A50.toInt()) } }                  // sacks
                 }
             }
-            if (r % 5 == 2) for (side in 0..1) {
-                val px0 = if (side == 0) sx(laneX(0) - laneHalf) - 12 else sx(laneX(2) + laneHalf) + 4
-                rect(c, px0, y + 1, 9, 13, PX.K); rect(c, px0 + 1, y + 2, 7, 11, steelD); rect(c, px0 + 1, y + 2, 2, 11, steel); rect(c, px0 + 4, y + 2, 1, 11, steelDD)
-                rect(c, px0 + 9, y + 3, 5, 10, a(PX.K, 0x90))
-            }
+        }
+        // everything down there is far below and dim: a blue-black haze over it so the belts stand out
+        rect(c, -4, -4, W + 8, H + 8, 0x9004070E.toInt())
+        // the belts' shadows cast down on the floor (offset, because the light comes from above and to the left)
+        for (l in 0..2) { val x0 = sx(laneX(l) - laneHalf) + 10; val w = sx(laneX(l) + laneHalf) - sx(laneX(l) - laneHalf); val y0 = fy(world.endS).coerceAtLeast(0); val y1 = fy(0f).coerceAtMost(H); if (y1 > y0) rect(c, x0, y0, w, y1 - y0, a(PX.K, 0x70)) }
+        // 2. the legs holding the belts up, and the cross beams between them
+        for (r in r0..r1) {
+            if (r < 0 || r.toFloat() > endS || r % 5 != 2) continue
+            val y = sy(r.toFloat() + 1f)
+            rect(c, sx(laneX(0) - laneHalf) - 6, y + 5, sx(laneX(2) + laneHalf) - sx(laneX(0) - laneHalf) + 12, 4, PX.K)
+            rect(c, sx(laneX(0) - laneHalf) - 6, y + 5, sx(laneX(2) + laneHalf) - sx(laneX(0) - laneHalf) + 12, 1, steel)
+            for (l in 0..2) for (e in 0..1) { val lx = if (e == 0) sx(laneX(l) - laneHalf) - 3 else sx(laneX(l) + laneHalf); rect(c, lx, y + 2, 3, 10, PX.K); rect(c, lx, y + 2, 1, 10, steelL); rect(c, lx + 8, y + 9, 3, 6, a(PX.K, 0x80)) }
         }
         // 3. the belts, the feed end, the kicker and the landing platform
         for (l in 0..2) belt(c, l)
@@ -119,13 +146,11 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
             if (co.taken) continue
             val yy = sy(co.s)
             if (yy < -12 || yy > H + 12) continue
-            val cx = sx(laneX(co.lane)); val cy = yy - (if (co.high) 16 else 0)
+            var cx = sx(laneX(co.lane)); var cy = yy - (if (co.high) 16 else 0)
+            if (co.claimed) { val k = (1f - (co.s - world.s) / 6f).coerceIn(0f, 1f); cx += ((sx(world.x) - cx) * k).roundToInt(); cy -= (k * 6f).roundToInt() }   // pulled in to you
             if (co.high) rect(c, cx - 4, yy + 2, 9, 3, a(PX.K, 0x70))
-            val spin = ((clock * 9f + co.s * 1.3f).toInt()) % 4
-            val ww = intArrayOf(10, 7, 3, 7)[spin]
-            rect(c, cx - ww / 2 - 1, cy - 6, ww + 2, 13, 0xFFB88A12.toInt())
-            rect(c, cx - ww / 2, cy - 5, ww, 11, 0xFFFFD84D.toInt())
-            if (ww > 5) { rect(c, cx - ww / 2 + 1, cy - 4, 2, 4, PX.W); px(c, cx, cy + 1, 0xFFB88A12.toInt()) }
+            c.drawBitmap(coinGlow, cx - 10f, cy - 10f, plain)
+            coin(c, cx, cy, 5, clock * 4.2f + co.s * 0.8f)
         }
         // 6. me
         player(c, clock)
@@ -151,23 +176,23 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
         val yTop = sy(endS); val yBot = sy(0f)
         if (yBot < 0 || yTop > H) return
         val y0 = maxOf(yTop, 0); val y1 = minOf(yBot, H)
-        rect(c, x0 + 7, y0, w, y1 - y0, a(PX.K, 0x80))                                           // its shadow on the floor far below
-        rect(c, x0 - 4, y0, 4, y1 - y0, steelDD); rect(c, x0 - 4, y0, 1, y1 - y0, PX.K)           // the side of the frame
-        rect(c, x0, y0, w, y1 - y0, 0xFF1D232C.toInt())
-        rect(c, x0, y0, 4, y1 - y0, steelD); rect(c, x0, y0, 1, y1 - y0, steelL); rect(c, x0 + 3, y0, 1, y1 - y0, PX.K)
-        rect(c, x0 + w - 4, y0, 4, y1 - y0, steelD); rect(c, x0 + w - 4, y0, 1, y1 - y0, steel); rect(c, x0 + w - 1, y0, 1, y1 - y0, PX.K)
-        val bi0 = floor(camWy / 8f).toInt() - 1; val bi1 = floor((camWy + H) / 8f).toInt() + 1
+        // the frame: steel side rails with a lit top edge, rollers peeking out at the sides
+        rect(c, x0 - 3, y0, w + 6, y1 - y0, PX.K)
+        rect(c, x0 - 3, y0, 3, y1 - y0, steelD); rect(c, x0 - 3, y0, 1, y1 - y0, steelL)
+        rect(c, x0 + w, y0, 3, y1 - y0, steelD); rect(c, x0 + w + 2, y0, 1, y1 - y0, PX.K); rect(c, x0 + w, y0, 1, y1 - y0, steel)
+        // the rubber belt itself
+        rect(c, x0, y0, w, y1 - y0, 0xFF1A1E24.toInt())
+        rect(c, x0, y0, 1, y1 - y0, 0xFF2A3038.toInt()); rect(c, x0 + w - 1, y0, 1, y1 - y0, 0xFF101318.toInt())
+        val bi0 = floor(camWy / 4f).toInt() - 1; val bi1 = floor((camWy + H) / 4f).toInt() + 1
         for (bi in bi0..bi1) {
-            val sw = bi * 8f / S
+            val sw = bi * 4f / S
             if (sw < 0f || sw > endS) continue
-            val y = H - (bi * 8 - camWy)
-            rect(c, x0 + 4, y, w - 8, 1, 0xFF12161D.toInt()); rect(c, x0 + 4, y + 1, w - 8, 1, 0xFF28303B.toInt())
-            if (bi % 4 == 1) rect(c, x0 + 5 + hash(bi, l, 3) % (w - 12), y + 3, 2, 1, 0xFF3A4452.toInt())
-            if (bi % 5 == 0) { rivet(c, x0 + 1, y + 2); rivet(c, x0 + w - 3, y + 2) }
-            if (bi % 6 == 0) {                                                                     // a chevron pointing the way it runs
-                val cx = x0 + w / 2
-                for (i in 0..9) { rect(c, cx - 9 + i, y - 6 + (9 - i) / 2, 2, 2, 0xFF3C4858.toInt()); rect(c, cx + 8 - i, y - 6 + (9 - i) / 2, 2, 2, 0xFF3C4858.toInt()) }
-            }
+            val y = H - (bi * 4 - camWy)
+            if (bi % 2 == 0) { rect(c, x0 + 1, y, w - 2, 1, 0xFF0E1116.toInt()); rect(c, x0 + 1, y + 1, w - 2, 1, 0xFF262C35.toInt()) }   // cleats
+            if (bi % 4 == 1) { rect(c, x0 - 3, y, 3, 2, 0xFF5A6478.toInt()); rect(c, x0 + w, y, 3, 2, 0xFF5A6478.toInt()) }                // roller ends
+            if (bi % 7 == 3) px(c, x0 + 2 + hash(bi, l, 3) % (w - 4), y + 2, 0xFF3A4452.toInt())                                            // wear
+            if (bi % 10 == 0) rivet(c, x0 - 2, y + 1)
+            if (bi % 16 == 0) { val cx = x0 + w / 2; for (i in 0..5) { px(c, cx - 5 + i, y - 4 + (5 - i) / 2, 0xFF3C4858.toInt()); px(c, cx + 5 - i, y - 4 + (5 - i) / 2, 0xFF3C4858.toInt()) } }   // a chevron
         }
     }
 
@@ -230,63 +255,26 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
         px(c, cx - 1, by - 11, PX.GOLD); px(c, cx, by - 11, PX.W)
     }
 
-    // ---------------- the sides of the floor ----------------
-    private fun sideProps(c: Canvas, r: Int, y: Int) {
-        for (side in 0..1) {
-            val k = hash(r, side + 1, 6 + side) % 14
-            val x = if (side == 0) 0 else W - 26
-            when (k) {
-                0, 1, 2, 3 -> {
-                    rect(c, x + 1, y + 1, 24, 14, PX.K); rect(c, x + 2, y + 2, 22, 12, steelDD); rect(c, x + 2, y + 2, 22, 2, steel)
-                    for (b in 0..1) { val bx = x + 3 + b * 11; if (hash(r, b + side * 3, 11) % 5 != 0) { rect(c, bx, y + 5, 9, 8, cardboardD); rect(c, bx + 1, y + 5, 7, 7, cardboard); rect(c, bx + 1, y + 5, 7, 2, cardboardL); rect(c, bx + 4, y + 5, 1, 7, cardboardD) } }
-                }
-                4, 5 -> for (b in 0..1) { val bx = x + 3 + b * 11; rect(c, bx - 1, y + 3, 11, 12, PX.K); rect(c, bx, y + 4, 9, 10, if ((r + b) % 2 == 0) 0xFF2F6F73.toInt() else rust); rect(c, bx, y + 4, 9, 2, steelL); rect(c, bx, y + 8, 9, 1, PX.K); rect(c, bx, y + 11, 9, 1, PX.K); rect(c, bx + 2, y + 5, 2, 8, a(PX.W, 0x30)) }
-                6 -> {
-                    rect(c, x + 2, y + 1, 22, 15, PX.K); rect(c, x + 3, y + 2, 20, 13, 0xFF4A5A70.toInt()); rect(c, x + 3, y + 2, 20, 2, steelL); rect(c, x + 12, y + 3, 1, 12, PX.K)
-                    for (i in 0..3) px(c, x + 6 + i * 4, y + 8, if (((animT * 3f).toInt() + i + r) % 4 == 0) PX.RED else if (i % 2 == 0) 0xFF3BFF9A.toInt() else 0xFF2A5A44.toInt())
-                    rect(c, x + 5, y + 11, 7, 3, PX.K)
-                }
-                7 -> {
-                    rect(c, x + 3, y, 5, S, PX.K); rect(c, x + 4, y, 3, S, 0xFF2F6F73.toInt()); rect(c, x + 4, y, 1, S, 0xFF8AF0E8.toInt())
-                    rect(c, x + 11, y, 6, S, PX.K); rect(c, x + 12, y, 4, S, rust); rect(c, x + 12, y, 1, S, 0xFFC87A4A.toInt())
-                    rect(c, x + 2, y + 6, 16, 3, steelD)
-                }
-                8 -> {
-                    rect(c, x + 2, y + 10, 22, 5, PX.K); rect(c, x + 3, y + 11, 20, 3, 0xFF6A4524.toInt())
-                    rect(c, x + 5, y + 1, 16, 10, PX.K); rect(c, x + 6, y + 2, 14, 8, cardboard); rect(c, x + 6, y + 2, 14, 2, cardboardL); rect(c, x + 12, y + 2, 2, 8, cardboardD)
-                }
-                9 -> {
-                    rect(c, x + 1, y + 3, 24, 11, PX.K); rect(c, x + 2, y + 4, 22, 9, 0xFF6A4524.toInt()); rect(c, x + 2, y + 4, 22, 2, 0xFF8E6234.toInt())
-                    rect(c, x + 14, y + 6, 6, 5, steelDD); rect(c, x + 15, y + 5, 4, 2, steel); rect(c, x + 4, y + 7, 5, 2, hazard); px(c, x + 5, y + 6, steelL)
-                }
-                10 -> {
-                    rect(c, x + 4, y + 4, 6, 10, PX.K); rect(c, x + 5, y + 5, 4, 8, 0xFFC03030.toInt()); rect(c, x + 5, y + 3, 4, 2, steelL)
-                    rect(c, x + 13, y + 5, 9, 10, PX.K); rect(c, x + 14, y + 6, 7, 8, steelD); rect(c, x + 14, y + 6, 7, 2, steel)
-                }
-                else -> if (hash(r, side, 12) % 3 == 0) rect(c, x + 5, y + 5, 14, 6, a(oil, 0xC0))
-            }
-            if (r % 4 == 0) { val wx = if (side == 0) 0 else W - 4; rect(c, wx, y, 4, S, steelDD); rect(c, wx + (if (side == 0) 3 else 0), y, 1, S, PX.K); rect(c, wx + 1, y, 1, S, steel) }
-        }
-    }
-
     // ---------------- things on the belts ----------------
     private fun shadow(c: Canvas, x: Int, y: Int, w: Int, h: Int) { rect(c, x - w / 2 + 3, y - h / 2 + 3, w, h, a(PX.K, 0x80)) }
 
     private fun obstacle(c: Canvas, o: BeltObs, x: Int, y: Int, clock: Float) {
         when (o.kind) {
-            BeltWorld.BOX -> {
-                shadow(c, x, y, 24, 24)
-                rect(c, x - 13, y - 13, 26, 26, PX.K); rect(c, x - 12, y - 12, 24, 24, cardboard); rect(c, x - 12, y - 12, 24, 3, cardboardL)
-                rect(c, x - 12, y + 9, 24, 3, cardboardD); rect(c, x - 2, y - 12, 4, 24, cardboardD); rect(c, x - 1, y - 12, 2, 24, 0xFFD8C690.toInt())
-                rect(c, x + 4, y + 2, 6, 5, PX.W); px(c, x + 6, y + 4, PX.K); px(c, x + 8, y + 4, PX.K)
-                rect(c, x - 10, y - 8, 5, 2, 0xFFC03030.toInt())
+            BeltWorld.BOX -> {   // a cardboard box with tape, a label and a FRAGILE strip, sized to the belt
+                shadow(c, x, y, 18, 18)
+                rect(c, x - 10, y - 10, 20, 20, PX.K); rect(c, x - 9, y - 9, 18, 18, cardboard); rect(c, x - 9, y - 9, 18, 2, cardboardL); rect(c, x - 9, y - 9, 1, 18, cardboardL)
+                rect(c, x - 9, y + 7, 18, 2, cardboardD); rect(c, x + 8, y - 9, 1, 18, cardboardD)
+                rect(c, x - 1, y - 9, 3, 18, 0xFFD8C690.toInt()); rect(c, x - 1, y - 9, 1, 18, 0xFFEEE0B0.toInt())                    // tape
+                rect(c, x + 3, y + 1, 5, 4, PX.W); px(c, x + 4, y + 2, PX.K); px(c, x + 6, y + 3, PX.K)                                // label
+                rect(c, x - 8, y - 6, 5, 2, 0xFFC03030.toInt()); px(c, x - 7, y + 4, cardboardD); px(c, x - 5, y + 5, cardboardD)      // FRAGILE, scuffs
             }
-            BeltWorld.BARREL -> {
-                shadow(c, x, y, 22, 22)
-                rect(c, x - 12, y - 12, 24, 24, PX.K); rect(c, x - 11, y - 11, 22, 22, 0xFFB03A2A.toInt()); rect(c, x - 11, y - 11, 22, 3, 0xFFFF7A5A.toInt())
-                rect(c, x - 9, y - 9, 18, 18, 0xFF8A2A1C.toInt()); rect(c, x - 7, y - 7, 14, 14, 0xFFB03A2A.toInt()); rect(c, x - 7, y - 7, 14, 1, 0xFFFF7A5A.toInt())
-                rect(c, x - 2, y - 2, 4, 4, PX.K); rect(c, x - 1, y - 1, 2, 2, hazard)
-                rect(c, x - 11, y + 4, 22, 1, 0xFF701C10.toInt())
+            BeltWorld.BARREL -> {   // an oil drum from above: rim, ribs, the bung, a drip
+                shadow(c, x, y, 17, 17)
+                for (dy in -8..8) { val hw = kotlin.math.sqrt(maxOf(0f, 72.25f - dy * dy)).toInt(); rect(c, x - hw - 1, y + dy, hw * 2 + 3, 1, PX.K) }
+                for (dy in -7..7) { val hw = kotlin.math.sqrt(maxOf(0f, 56.25f - dy * dy)).toInt(); rect(c, x - hw, y + dy, hw * 2 + 1, 1, if (dy < -3) 0xFFD84A34.toInt() else if (dy < 3) 0xFFB03A2A.toInt() else 0xFF8A2A1C.toInt()) }
+                for (dy in -4..4) { val hw = kotlin.math.sqrt(maxOf(0f, 20.25f - dy * dy)).toInt(); px(c, x - hw, y + dy, 0xFF701C10.toInt()); px(c, x + hw, y + dy, 0xFF701C10.toInt()) }
+                rect(c, x + 2, y - 3, 3, 3, PX.K); px(c, x + 3, y - 2, hazard); px(c, x - 4, y - 5, 0xFFFF9A7A.toInt()); px(c, x - 3, y - 6, PX.W)
+                rect(c, x + 8, y + 2, 2, 3, a(oil, 0xC0))
             }
             BeltWorld.TOOL -> {
                 shadow(c, x, y, 12, 40)
@@ -311,7 +299,7 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
             BeltWorld.PRESS -> {
                 val live = world.obsLive(o)
                 val warn = !live && (((world.t + o.phase) % o.period) > o.period * o.onFrac + o.period * (1f - o.onFrac) * 0.6f)
-                val hw = (o.hw * S).toInt()
+                val hw = sx(laneHalf) + 6
                 if (live) {
                     rect(c, x - hw, y - 16, hw * 2, 32, PX.K)
                     rect(c, x - hw + 1, y - 15, hw * 2 - 2, 30, 0xFF5A6478.toInt()); rect(c, x - hw + 1, y - 15, hw * 2 - 2, 3, steelL)
@@ -344,8 +332,8 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
                     for (k in 0..4) px(c, coilL + (coilR - coilL) * k / 4, y, 0xFF3DE8F5.toInt())
                 }
             }
-            BeltWorld.SMALL -> { // a low striped barrier: jump it
-                val hw = (o.hw * S).toInt()
+            BeltWorld.SMALL -> { // a low striped barrier across the belt: jump it
+                val hw = sx(laneHalf) + 4
                 rect(c, x - hw + 3, y - 4, hw * 2, 11, a(PX.K, 0x80))
                 rect(c, x - hw + 1, y - 6, 4, 12, PX.K); rect(c, x + hw - 5, y - 6, 4, 12, PX.K)
                 rect(c, x - hw, y - 8, hw * 2, 9, PX.K)
@@ -353,14 +341,14 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
                 rect(c, x - hw + 1, y - 7, hw * 2 - 2, 1, 0xFFFFF2B0.toInt()); rect(c, x - 3, y - 12, 6, 4, PX.K); rect(c, x - 2, y - 11, 4, 2, PX.RED)
             }
             BeltWorld.GAP -> { // a hole in the belt: the floor far below shows through
-                val hw = (o.hw * S).toInt() + 4; val hh = (o.hs * S).toInt()
+                val hw = sx(laneHalf) + 3; val hh = (o.hs * S).toInt()
                 rect(c, x - hw, y - hh, hw * 2, hh * 2, PX.K)
                 rect(c, x - hw + 4, y - hh + 2, hw * 2 - 8, hh * 2 - 4, 0xFF070C10.toInt())
                 for (i in 0 until hw * 2 step 6) { rect(c, x - hw + i, y - hh - 2 + (hash(i, 1, 5) % 3), 4, 4, steelDD); rect(c, x - hw + i + 2, y + hh - 2 - (hash(i, 2, 5) % 3), 4, 4, steelDD) }
-                for (i in 0 until 5) rect(c, x - hw + 8 + i * 12, y - hh + 6 + (hash(i, 3, 5) % 18), 8, 1, 0xFF1A252D.toInt())
+                for (i in 0 until 2) rect(c, x - hw + 5 + i * 8, y - hh + 6 + (hash(i, 3, 5) % 18), 5, 1, 0xFF1A252D.toInt())
                 rect(c, x - hw, y - hh, 3, hh * 2, hazard); rect(c, x + hw - 3, y - hh, 3, hh * 2, hazard)
                 if ((clock * 10f).toInt() % 3 == 0) { px(c, x - 8, y - 2, PX.WARM); px(c, x - 6, y - 4, PX.W); px(c, x + 10, y + 3, PX.WARM) }
-                for (i in 0..2) { val wx = x - hw + 14 + i * 20; rect(c, wx, y - hh - 4, 2, 10 + i * 2, PX.K) }  // torn cables
+                for (i in 0..1) { val wx = x - hw + 6 + i * 10; rect(c, wx, y - hh - 4, 2, 8 + i * 2, PX.K) }  // torn belt
             }
             BeltWorld.TRUCK -> { // a runaway forklift driving at you
                 if (!o.armed) { if ((animT * 6f).toInt() % 2 == 0) { rect(c, x - 24, y - 10, 48, 4, PX.RED); rect(c, x - 2, y - 18, 4, 6, PX.RED) }; return }
@@ -387,7 +375,7 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
             BeltWorld.DROP -> { // a crate from the crane: a shadow grows on the belt, then it crashes down
                 val cyc = (world.t + o.phase) % o.period
                 val onT = o.period * o.onFrac
-                val hw = (o.hw * S).toInt()
+                val hw = sx(laneHalf) + 1
                 if (cyc < onT) { // down and lying there
                     rect(c, x - hw + 4, y - hw + 4, hw * 2, hw * 2, a(PX.K, 0x80))
                     rect(c, x - hw, y - hw, hw * 2, hw * 2, PX.K); rect(c, x - hw + 1, y - hw + 1, hw * 2 - 2, hw * 2 - 2, 0xFF8A6A34.toInt()); rect(c, x - hw + 1, y - hw + 1, hw * 2 - 2, 3, cardboardL)

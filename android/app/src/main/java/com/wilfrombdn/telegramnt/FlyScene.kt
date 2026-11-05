@@ -27,6 +27,23 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
     private val lampBeam = glowBitmap(30, 0xFFFFD28A.toInt(), 46)
     private val redGlow = glowBitmap(16, 0xFFFF3B3B.toInt(), 80)
     private val cyanGlow = glowBitmap(14, 0xFF3DE8F5.toInt(), 80)
+    private val coinGlow = glowBitmap(10, 0xFFFFD84D.toInt(), 0x38)
+    private val flameGlow = glowBitmap(20, 0xFFFF9A3A.toInt(), 0x70)
+    private val moonShaft: Bitmap by lazy {
+        // a slanting beam of moonlight from a tall window, dithered
+        val w = 70; val h = 200; val bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888); val pxs = IntArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) { val cx = 8 + y * 0.28f; val half = 14f + y * 0.05f; val ac = abs(x - cx); if (ac > half) continue
+            val v = (1f - y / h.toFloat()) * (1f - ac / half); val q = kotlin.math.floor(v * 4f + bayer[(y and 3) * 4 + (x and 3)] / 16f) / 4f; if (q > 0f) pxs[y * w + x] = a(0xFFA8C0F0.toInt(), (q * 0x34).toInt()) }
+        bm.setPixels(pxs, 0, w, 0, 0, w, h); bm
+    }
+    private val vignette: Bitmap by lazy {
+        val bm = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888); val pxs = IntArray(W * H)
+        for (y in 0 until H) for (x in 0 until W) { val d = (kotlin.math.hypot((x - W / 2f) / (W / 2f), (y - H / 2f) / (H / 2f)) - 0.78f) / 0.55f; if (d <= 0f) continue
+            val q = kotlin.math.floor(d.coerceAtMost(1f) * 4f + bayer[(y and 3) * 4 + (x and 3)] / 16f) / 4f; if (q > 0f) pxs[y * W + x] = a(PX.K, (q * 0xA0).toInt()) }
+        bm.setPixels(pxs, 0, W, 0, 0, W, H); bm
+    }
+    // where the jetpack has been, for the smoke trail
+    private val trail = ArrayList<FloatArray>()
 
     private fun mod(a: Int, b: Int) = ((a % b) + b) % b
 
@@ -55,6 +72,8 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
         }
         rect(c, 0, 24, W, 8, PX.K); rect(c, 0, 25, W, 6, 0xFF2F6F73.toInt()); rect(c, 0, 25, W, 2, 0xFF8AF0E8.toInt()); rect(c, 0, 30, W, 1, 0xFF1A4A50.toInt())
         for (i in -1..(W / 44 + 2)) { val x = i * 44 - mod(farOff, 44); rect(c, x + 14, 23, 4, 10, PX.K); rect(c, x + 15, 24, 2, 8, 0xFF9AA4B5.toInt()) }
+        // moonlight slanting down from the windows across the hall
+        for (i in -1..(W / 64 + 2)) { val wx = i * 64 - mod(farOff, 64); c.drawBitmap(moonShaft, wx.toFloat(), 98f, plain) }
 
         // ---- middle: boilers and tanks with pipes, racks, a gantry crane ----
         val midOff = (sc * S * 0.5f).toInt()
@@ -171,8 +190,9 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
             val x = (W - ((ph + k * 0.37f) % 1f) * (W + 20)).toInt(); val y = 30 + (hash(k, 6, 1) % (H - 90)) + (sin(clock * 1.3f + k) * 4).toInt()
             rect(c, x, y, 1, 1, a(PX.WARM, 0x70))
         }
-        // dark edges, so the hall feels deep
-        for (e in 0..5) { p.color = a(PX.K, 0x40 - e * 7); c.drawRect(e * 3f, 0f, e * 3f + 3f, H.toFloat(), p); c.drawRect(W - e * 3f - 3f, 0f, W - e * 3f, H.toFloat(), p) }
+        // a low haze rolling over the floor
+        for (y in floorTop - 26 until floorTop) { val k = (y - (floorTop - 26)) / 26f; val off = (clock * 8f + nearOff * 0.3f).toInt()
+            for (x in 0 until W) { val n = (sin((x + off) * 0.05f) + sin((x - off * 0.6f) * 0.11f + y * 0.2f)) * 0.5f + 0.5f; if (bayer[(y and 3) * 4 + (x and 3)] / 16f < k * n * 0.5f) px(c, x, y, a(0xFF8A98B8.toInt(), 0x50)) } }
 
         // ---- dangers ----
         for (z in world.hazards) {
@@ -184,11 +204,8 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
             if (co.taken) continue
             val x = ((co.wx - sc) * S).roundToInt(); val y = (co.y * S).roundToInt()
             if (x < -8 || x > W + 8) continue
-            val spin = ((clock * 9f + co.wx * 1.3f).toInt()) % 4
-            val ww = intArrayOf(9, 6, 2, 6)[spin]
-            rect(c, x - ww / 2 - 1, y - 5, ww + 2, 11, 0xFFB88A12.toInt())
-            rect(c, x - ww / 2, y - 4, ww, 9, 0xFFFFD84D.toInt())
-            if (ww > 4) { rect(c, x - ww / 2 + 1, y - 3, 2, 3, PX.W); px(c, x, y + 1, 0xFFB88A12.toInt()) }
+            c.drawBitmap(coinGlow, x - 10f, y - 10f, plain)
+            coin(c, x, y, 5, clock * 4.2f + co.wx * 0.9f)
         }
         for (z in world.zaps) {
             val x1 = ((z.wx - sc) * S).roundToInt(); val x2 = ((z.wx + z.dx - sc) * S).roundToInt()
@@ -210,6 +227,13 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
         }
         rockets(c, clock)
 
+        // the smoke trail from the jetpack: puffs left behind in the air, drifting back with the hall
+        val fxT = (world.px * S); val byT = (world.y * S)
+        if (world.phase == FlyWorld.Phase.FLY && world.thrust && (trail.isEmpty() || clock - trail.last()[2] > 0.05f)) trail += floatArrayOf(world.scroll * S + fxT - 9f, byT + 10f, clock)
+        trail.removeAll { clock - it[2] > 1.1f || clock < it[2] }
+        for (tp in trail) { val age = (clock - tp[2]) / 1.1f; val x = (tp[0] - world.scroll * S).roundToInt(); val y = (tp[1] - age * 8f).roundToInt(); val sz = 3 + (age * 6).toInt()
+            rect(c, x - sz / 2, y - sz / 2, sz, sz, a(0xFF9AA4B8.toInt(), ((1f - age) * 0x70).toInt())) }
+
         // ---- me, with a jetpack ----
         val fx = (world.px * S).roundToInt(); val bodyY = (world.y * S).roundToInt()
         val blink = world.invuln > 0f && ((clock * 14f).toInt() % 2 == 0)
@@ -229,10 +253,15 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
                 folk(c, fx, bodyY + 8, 1, if (world.phase == FlyWorld.Phase.FLY && world.thrust) 1 else 0, clerk, false, true)
                 val burning = (world.phase == FlyWorld.Phase.FLY && world.thrust) || (world.phase == FlyWorld.Phase.SPUTTER && (world.phaseT % 0.55f) < 0.16f)
                 if (burning) {
-                    val fl = 8 + (clock * 30f).toInt() % 5
-                    rect(c, fx - 9, bodyY + 2, 4, fl, 0xFFFF7A2A.toInt()); rect(c, fx - 8, bodyY + 2, 2, fl - 3, 0xFFFFE07A.toInt()); px(c, fx - 8, bodyY + 2 + fl, 0xFFFF3B1A.toInt())
-                    c.drawBitmap(redGlow, (fx - 8 - 16).toFloat(), (bodyY + 8 - 16).toFloat(), plain)
+                    // a layered flame: white-hot core, gold, orange, a red tip, flickering; a warm glow on everything near
+                    val fl = 10 + (clock * 30f).toInt() % 6; val wob = ((clock * 40f).toInt() % 3) - 1
+                    c.drawBitmap(flameGlow, (fx - 8 - 20).toFloat(), (bodyY + 8 - 20).toFloat(), plain)
+                    rect(c, fx - 10 + wob, bodyY + 2, 6, fl, 0xFFFF3B1A.toInt()); rect(c, fx - 9, bodyY + 2, 4, fl - 2, 0xFFFF7A2A.toInt())
+                    rect(c, fx - 9, bodyY + 2, 4, fl - 5, 0xFFFFC04A.toInt()); rect(c, fx - 8, bodyY + 2, 2, fl - 7, 0xFFFFF4C0.toInt())
+                    for (k in 0..2) { val ph = (clock * 6f + k * 0.33f) % 1f; px(c, fx - 9 + (k - 1) * 2, bodyY + 2 + fl + (ph * 6).toInt(), a(0xFFFFB04A.toInt(), ((1f - ph) * 0xE0).toInt())) }
                 }
+                // the lamps catch his back and shoulders
+                rect(c, fx - 3, bodyY - 10, 1, 8, a(PX.WARM, 0x70)); px(c, fx - 2, bodyY - 11, a(PX.WARM, 0x90))
                 if (world.phase == FlyWorld.Phase.SPUTTER || tumble) for (k in 0..3) {
                     val ph = (clock * 1.4f + k * 0.25f) % 1f
                     rect(c, fx - 12 - (ph * 22).toInt(), bodyY + 4 + (sin(clock * 5 + k) * 3).toInt(), 4, 4, a(0xFF5A6068.toInt(), ((1f - ph) * 0xB0).toInt()))
@@ -240,6 +269,12 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
                 c.restore()
             }
         }
+        // tall dark columns and pipes passing close to the camera (they move fastest, so the hall feels deep)
+        val frontOff = (world.scroll * S * 1.35f).toInt()
+        for (i in -1..(W / 170 + 2)) { val idx = (frontOff + i * 170) / 170; val x = i * 170 - mod(frontOff, 170) + 30
+            if (hash(idx, 2, 21) % 3 == 0) { rect(c, x, 0, 14, H, 0xFF05080C.toInt()); rect(c, x + 13, 0, 1, H, 0xFF1A2230.toInt()); for (yy in 20 until H step 40) rect(c, x - 2, yy, 18, 4, 0xFF080C12.toInt()) }
+            else if (hash(idx, 3, 21) % 2 == 0) { rect(c, x, H - 46, 40, 8, 0xFF05080C.toInt()); rect(c, x + 34, H - 46, 8, 46, 0xFF05080C.toInt()); rect(c, x, H - 46, 40, 1, 0xFF1A2230.toInt()) } }
+        c.drawBitmap(vignette, 0f, 0f, plain)
         if (world.hitFlash > 0f) { p.color = a(cyan, (world.hitFlash * 0x70).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
         return frame
     }

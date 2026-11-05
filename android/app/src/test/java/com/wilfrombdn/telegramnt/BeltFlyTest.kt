@@ -152,4 +152,18 @@ class BeltFlyTest {
         w.update(0.02f)
         assertTrue(w.coins < 50)
     }
+
+    @Test fun aJumpTakesEveryCoinHangingOverWhatYouJump() {
+        val w = BeltWorld(BeltLevel.warehouse)
+        var t = 0f; while (w.phase != BeltWorld.Phase.RIDE && t < 5f) { w.update(0.02f); t += 0.02f }
+        // put a row of high coins just ahead in ANOTHER lane, jump, and ride past them
+        val ahead = w.s + 2f
+        val row = (0 until 5).map { BeltCoin(ahead + it * 1.15f, (w.lane + 1) % 3, true) }
+        w.spec.coins.addAll(row); w.invuln = 99f
+        val before = w.coins
+        w.jump()
+        var g = 0f; while (g < 1.6f) { w.update(0.02f); w.invuln = 99f; g += 0.02f }
+        org.junit.Assert.assertTrue("all five taken", row.all { it.taken })
+        org.junit.Assert.assertTrue(w.coins >= before + 5)
+    }
 }

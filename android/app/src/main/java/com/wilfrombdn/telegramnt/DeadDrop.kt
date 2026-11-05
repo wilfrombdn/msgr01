@@ -15,6 +15,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
@@ -248,7 +249,12 @@ internal class DeadDropView(
                     val pid = e.getPointerId(i)
                     if (pid == joyId) readJoystick(e.getX(i), e.getY(i)) else if (pid == aimId) readAim(e.getX(i), e.getY(i))
                     if (pid == rollId && !rolled && hypot(e.getX(i) - rollX, e.getY(i) - rollY) > 26f * d) { shoot?.roll(e.getX(i) - rollX, e.getY(i) - rollY); rolled = true }
-                    if (pid == bPid && !bJumped && bDY - e.getY(i) > 36f * d) { belt?.jump(); bJumped = true }
+                    if (pid == bPid) {
+                        // swipes: up = jump, left/right = leap to the next belt; several in one drag, each from where the last one ended
+                        val dx = e.getX(i) - bDX; val dy = e.getY(i) - bDY
+                        if (-dy > 34f * d && -dy > abs(dx)) { belt?.jump(); bDX = e.getX(i); bDY = e.getY(i) }
+                        else if (abs(dx) > 30f * d && abs(dx) > abs(dy)) { belt?.leap(if (dx > 0) 1 else -1); bDX = e.getX(i); bDY = e.getY(i) }
+                    }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
@@ -260,7 +266,7 @@ internal class DeadDropView(
                 if (act == MotionEvent.ACTION_CANCEL) { joyId = -1; aimId = -1; thrustId = -1; bPid = -1; gunId = -1; rollId = -1 }
                 if (id == gunId) gunId = -1
                 if (id == rollId) rollId = -1
-                if (id == bPid) { if (!bJumped && act != MotionEvent.ACTION_CANCEL && hypot(e.getX(idx) - bDX, e.getY(idx) - bDY) < 28f * d) belt?.leap(if (bDX < width / 2f) -1 else 1); bPid = -1 }
+                if (id == bPid) bPid = -1
                 if (id == joyId) { joyId = -1; joyActive = false; mag = 0f; knobX = 0f; knobY = 0f }
                 if (id == aimId) { aimId = -1; aimMag = 0f; aimKX = 0f; aimKY = 0f }
                 if (id == thrustId) thrustId = -1
@@ -291,7 +297,7 @@ internal class DeadDropView(
                 mgText(c, "COINS  ${b.coins} / ${b.spec.coinGoal}", w / 2f + 70f * d, oy - 10f * d, 13f, if (b.coinFlash > 0f) Color.WHITE else 0xFFFFD84D.toInt()); mgText(c, "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f - 90f * d, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
                 if (b.phase == BeltWorld.Phase.FALL) mgText(c, if (b.fellInHole) "YOU FELL" else "YOU DIED", w / 2f, oy + bmp.height * sc / 2f, 22f, danger)
                 if (b.phase == BeltWorld.Phase.LAUNCH || b.phase == BeltWorld.Phase.PICKUP) mgText(c, "THE JETPACK!", w / 2f, oy - 10f * d - 18f * d, 12f, 0xFFFFD84D.toInt())
-                if (b.t < 9f) mgText(c, "TAP LEFT / RIGHT TO LEAP BELTS. SWIPE UP TO JUMP.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false) else if (b.coins < b.spec.coinGoal) mgText(c, "COLLECT 100 COINS TO REACH THE END.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0x80), false)
+                if (b.t < 9f) mgText(c, "SWIPE LEFT / RIGHT TO SWITCH BELTS. SWIPE UP TO JUMP.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false) else if (b.coins < b.spec.coinGoal) mgText(c, "COLLECT 100 COINS TO REACH THE END.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0x80), false)
             }
             fly?.let { f ->
                 mgText(c, "COINS  ${f.coins} / ${f.spec.coinGoal}", w / 2f, oy - 10f * d, 14f, 0xFFFFD84D.toInt())
