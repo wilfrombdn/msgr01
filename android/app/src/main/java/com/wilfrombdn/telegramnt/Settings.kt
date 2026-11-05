@@ -132,7 +132,9 @@ internal fun MainActivity.showSettings() {
     }
     col.addView(gap(20))
     col.addView(tv("$APP_NAME ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
-        13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })
+        13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20))
+        var taps = 0
+        setOnClickListener { if (++taps >= 7) { taps = 0; toast("🤫"); showDeadDrop() } } })
     setContentView(page(topBar("Settings", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }.restore(keepY)))
     connLabel?.post(connTick)
 }

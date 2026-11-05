@@ -154,6 +154,7 @@ class MainActivity : Activity() {
             screen == Screen.CROP && cropCancel != null -> cropCancel?.invoke()
             screen == Screen.SNAP_SEND -> cancelSnap()
             screen == Screen.TEXT_TOOLS -> showTextThread(textThread, textPeople.ifEmpty { null })
+            screen == Screen.DEAD_DROP -> showSettings()
             screen == Screen.TEXT_THREAD || screen == Screen.NEW_TEXT || screen == Screen.TEXT_SPAM -> leaveTexts()
             !Messenger.signedIn && screen != Screen.WELCOME -> showWelcome()
             screen == Screen.VIEWER -> leaveViewer()

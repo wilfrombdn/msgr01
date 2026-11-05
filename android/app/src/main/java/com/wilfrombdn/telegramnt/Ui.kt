@@ -65,6 +65,7 @@ internal fun MainActivity.redraw() {
     maybeCheckUpdate()
     if (screen == Screen.TEXT_THREAD) return fillTextThread()   // texts work signed in or not
     if (screen == Screen.TEXT_TOOLS) return   // search / gallery of a text group: nothing to refresh
+    if (screen == Screen.DEAD_DROP) return   // the game draws itself
     if (screen == Screen.TEXT_LIST) return showTextList()
     if (screen == Screen.TEXT_SPAM) return showTextSection(textSectionKind)
     if (!Messenger.signedIn) {
