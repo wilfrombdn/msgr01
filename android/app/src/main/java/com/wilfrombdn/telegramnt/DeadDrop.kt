@@ -35,10 +35,12 @@ internal fun MainActivity.showDeadDrop() {
     screen = Screen.DEAD_DROP
     val prefs = getSharedPreferences("dead_drop", Context.MODE_PRIVATE)
     val game = DeadDropView(this, prefs.getInt("level", 0), prefs.getBoolean("sound", true),
-        saveLevel = { prefs.edit().putInt("level", it).apply() }, saveSound = { prefs.edit().putBoolean("sound", it).apply() }, onExit = { showSettings() })
+        saveLevel = { prefs.edit().putInt("level", it).apply() }, saveSound = { prefs.edit().putBoolean("sound", it).apply() }, onExit = { showSettings() },
+        beaten = prefs.getBoolean("beaten", false), saveBeaten = { prefs.edit().putBoolean("beaten", it).apply() })
     // on the right: restart (tap = this level, hold = back to level 1) next to exit
     val skip = icon(R.drawable.ic_skip) { game.skip() }
-    val again = icon(R.drawable.ic_restart) { game.restart() }.apply { setOnLongClickListener { game.restartAll(); toast("Back to level 1"); true } }
+    // hold restart: once you've beaten the game, choose any letter; before that, back to level 1
+    val again = icon(R.drawable.ic_restart) { game.restart() }.apply { setOnLongClickListener { if (game.beaten) game.openChooser() else { game.restartAll(); toast("Back to level 1") }; true } }
     // edge to edge: the game fills the whole screen and the title bar floats over it, see-through (the game blurs behind it)
     val tb = topBar("Dead Letter", "Six letters. One truth.", null, skip, again, icon(R.drawable.ic_close) { showSettings() })
     tb.setBackgroundColor(Color.TRANSPARENT)
@@ -60,7 +62,15 @@ internal fun MainActivity.showDeadDrop() {
 internal class DeadDropView(
     ctx: Context, startLevel: Int, private var soundOn: Boolean,
     private val saveLevel: (Int) -> Unit, private val saveSound: (Boolean) -> Unit, private val onExit: () -> Unit,
+    beaten: Boolean = false, private val saveBeaten: (Boolean) -> Unit = {},
 ) : View(ctx) {
+    /** You've finished the game once: from now on you can pick any letter (level) to play. */
+    var beaten = beaten; private set
+    /** The "choose a letter" screen is up (it opens first once the game is beaten). */
+    private var choosing = beaten
+    private val chooserRows = ArrayList<RectF>()
+    internal fun openChooser() { choosing = true; invalidate() }
+    internal fun isChoosing() = choosing
     private val d = resources.displayMetrics.density
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
@@ -227,7 +237,7 @@ internal class DeadDropView(
                 if (sw != null && sw.phase == ShootWorld.Phase.DEAD) { if (deadT > 0.5f) startMg(mgIdx); return true }
                 prison?.let { pw -> if (pw.phase == PrisonWorld.Phase.SIGNAL || pw.phase == PrisonWorld.Phase.ESCAPE) { if (pw.drowned) pw.retry(); return true } }
                 finale?.let { fw ->
-                    if (fw.over) { onExit(); return true }
+                    if (fw.over) { beaten = true; saveBeaten(true); choosing = true; onExit(); return true }
                     when (fw.stage) {
                         FinaleWorld.Stage.SIMON -> { val b = finaleScene?.simonButtonAt((x - mgOx) / mgSc, (y - mgOy) / mgSc) ?: -1; if (b >= 0) fw.simonTap(b) }
                         FinaleWorld.Stage.CLIMB -> if (hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) } else fw.jump()
@@ -449,6 +459,34 @@ internal class DeadDropView(
     }
 
 
+    /** After the game is beaten: pick any of the six letters to play. */
+    private fun drawChooser(c: Canvas) {
+        val w = width.toFloat(); val h = height.toFloat()
+        c.drawColor(0xFF03050A.toInt())
+        p.textAlign = Paint.Align.CENTER; p.style = Paint.Style.FILL
+        p.typeface = monoBold; p.letterSpacing = 0.3f; p.textSize = 24f * d; p.color = Color.WHITE
+        val top = barH + 40f * d
+        c.drawText("DEAD LETTER", w / 2, top + 20f * d, p)
+        p.typeface = mono; p.letterSpacing = 0.15f; p.textSize = 12f * d; p.color = a(Color.WHITE, 0x99)
+        c.drawText("CHOOSE A LETTER", w / 2, top + 46f * d, p)
+        chooserRows.clear()
+        val rowH = min(84f * d, (h - top - 80f * d - botInset - 20f * d) / levels.size)
+        for ((i, lv) in levels.withIndex()) {
+            val y0 = top + 70f * d + i * rowH
+            val r = RectF(20f * d, y0, w - 20f * d, y0 + rowH - 8f * d); chooserRows += r
+            p.style = Paint.Style.FILL; p.color = if (i == levelIdx) 0xFF101828.toInt() else 0xFF0A0E16.toInt(); c.drawRoundRect(r, 6f * d, 6f * d, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = if (i == levelIdx) lv.pal.accent else a(lv.pal.accent, 0x55); c.drawRoundRect(r, 6f * d, 6f * d, p)
+            c.save(); c.translate(r.left + 44f * d, r.centerY()); c.scale(0.6f, 0.6f); drawBigLetter(c, 0f, 0f, i, 1f); c.restore()
+            p.style = Paint.Style.FILL; p.textAlign = Paint.Align.LEFT
+            p.typeface = monoBold; p.letterSpacing = 0.2f; p.textSize = 10f * d; p.color = lv.pal.accent
+            c.drawText("LETTER ${roman[i]}", r.left + 86f * d, r.centerY() - 6f * d, p)
+            p.letterSpacing = 0.04f; p.textSize = 16f * d; p.color = Color.WHITE
+            c.drawText(lv.building.uppercase(), r.left + 86f * d, r.centerY() + 14f * d, p)
+            p.textAlign = Paint.Align.CENTER
+        }
+        p.letterSpacing = 0f
+    }
+
     /** Carries a fixed scene's outer rows and columns out to the screen's edges and fades them to black, instead of hard black bars. */
     private val edgeFade = Paint()
     private fun extendEdges(c: Canvas, bmp: android.graphics.Bitmap, ox: Float, oy: Float, sc: Int, w: Float, h: Float) {
@@ -550,6 +588,7 @@ internal class DeadDropView(
         override fun run() {
             if (!running) return
             val now = System.nanoTime()
+            if (choosing) { last = now; invalidate(); postOnAnimation(this); return }      // paused behind the "choose a letter" screen
             if (last != 0L) {
                 val raw = ((now - last) / 1e9f).coerceAtMost(0.05f)
                 var dt = raw
@@ -665,6 +704,10 @@ internal class DeadDropView(
 
     // ---------- thumb ----------
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (choosing) {
+            if (e.actionMasked == MotionEvent.ACTION_UP) for ((i, r) in chooserRows.withIndex()) if (r.contains(e.x, e.y)) { choosing = false; levelIdx = i; saveLevel(i); load(false); break }
+            return true
+        }
         if (mgIdx >= 0) return mgTouch(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -688,7 +731,7 @@ internal class DeadDropView(
                 if (e.actionMasked == MotionEvent.ACTION_UP && overlayAtDown) when (world.state) {
                     StealthWorld.State.CAUGHT -> if (world.stateT > 0.5f) { attempt++; if (stage == 1) restartPac() else load(true) }
                     StealthWorld.State.WON -> if (lastLevel) {
-                        if (wt > 12f) { saveLevel(0); tracks.stop(); onExit() }
+                        if (wt > 12f) { saveLevel(0); beaten = true; saveBeaten(true); choosing = true; tracks.stop(); onExit() }
                     } else if (wt > 0.8f) { levelIdx++; saveLevel(levelIdx); load(false) }
                     else -> {}
                 }
@@ -731,6 +774,7 @@ internal class DeadDropView(
     }
 
     private fun drawAll(c: Canvas) {
+        if (choosing) { drawChooser(c); return }
         if (mgIdx >= 0) { drawMg(c); return }
         val w = width.toFloat(); val h = height.toFloat()
         val s = world.spec
