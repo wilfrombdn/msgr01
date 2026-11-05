@@ -64,4 +64,19 @@ class SkipTest {
         v.debugAdvance(3.0f)
         assertFalse(v.debugBannerUp())
     }
+
+    @Test fun afterBeatingTheGameYouChooseALetter() {
+        var saved = -1
+        val v = DeadDropView(RuntimeEnvironment.getApplication(), 5, false, { saved = it }, { }, { }, beaten = true)
+        v.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(2400, View.MeasureSpec.EXACTLY)); v.layout(0, 0, 1080, 2400)
+        assertTrue(v.isChoosing())
+        val bmp = Bitmap.createBitmap(1080, 2400, Bitmap.Config.ARGB_8888); v.draw(Canvas(bmp))
+        FileOutputStream(File("build/shots/deadletter-chooser.png")).use { Bitmap.createScaledBitmap(bmp, 540, 1200, true).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        // tap the third row (letter III)
+        val y = 2400f * 0.5f
+        fun tap(x: Float, yy: Float) { v.onTouchEvent(android.view.MotionEvent.obtain(0, 0, android.view.MotionEvent.ACTION_DOWN, x, yy, 0)); v.onTouchEvent(android.view.MotionEvent.obtain(0, 0, android.view.MotionEvent.ACTION_UP, x, yy, 0)) }
+        var picked = -1
+        for (yy in 300 until 2300 step 20) { tap(540f, yy.toFloat()); if (!v.isChoosing()) { picked = v.debugLevelIdx(); break } }
+        assertFalse(v.isChoosing()); assertEquals(picked, saved); assertTrue(picked in 0..5)
+    }
 }

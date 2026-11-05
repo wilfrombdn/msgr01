@@ -481,6 +481,8 @@ internal class DeadDropView(
             p.typeface = monoBold; p.letterSpacing = 0.2f; p.textSize = 10f * d; p.color = lv.pal.accent
             c.drawText("LETTER ${roman[i]}", r.left + 86f * d, r.centerY() - 6f * d, p)
             p.letterSpacing = 0.04f; p.textSize = 16f * d; p.color = Color.WHITE
+            val room = r.right - 14f * d - (r.left + 86f * d); val tw = p.measureText(lv.building.uppercase())
+            if (tw > room) p.textSize = 16f * d * room / tw                                        // long names shrink to fit
             c.drawText(lv.building.uppercase(), r.left + 86f * d, r.centerY() + 14f * d, p)
             p.textAlign = Paint.Align.CENTER
         }
