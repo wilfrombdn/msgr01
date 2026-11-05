@@ -96,6 +96,7 @@ internal class DeadDropView(
             "cine1" -> return "synth"
             "shoot" -> return "synth"
             "prison" -> return "synth"
+            "finale" -> return if (finale?.silent == true) "" else "l6"
         }
         if (levelIdx == 0) return "synth"
         if (levelIdx == 1) {
@@ -131,6 +132,8 @@ internal class DeadDropView(
     private var shoot: ShootWorld? = null; private var shootScene: ShootScene? = null
     private var cine: CineScene? = null
     private var prison: PrisonWorld? = null; private var prisonScene: PrisonScene? = null
+    private var finale: FinaleWorld? = null; private var finaleScene: FinaleScene? = null
+    private var mgOx = 0f; private var mgOy = 0f; private var mgSc = 1f      // where the picture sits on screen (for taps on it)
     private var mgPending = -9                    // where the fade goes: a stage number, -2 next level, -3 redo this part
     private var aimId = -1; private var joyId = -1; private var thrustId = -1
     private var aimDx = 0f; private var aimDy = 0f; private var aimMag = 0f; private var aimKX = 0f; private var aimKY = 0f
@@ -149,6 +152,7 @@ internal class DeadDropView(
         "The Industrial District" -> listOf("belt", "fly", "cine0")
         "The Administration" -> listOf("cine1", "shoot")
         "The Rock" -> listOf("prison")
+        "The Broadcast" -> listOf("finale")
         else -> null
     }
     private val mgName get() = if (mgIdx < 0) null else stagesOf(spec)?.getOrNull(mgIdx)
@@ -159,7 +163,7 @@ internal class DeadDropView(
     private val grR get() = 32f * d; private val grCx get() = gunCx - gunR - grR - 8f * d; private val grCy get() = joyCy + 14f * d
 
     private fun startMg(i: Int) {
-        mgIdx = i; belt = null; beltScene = null; fly = null; flyScene = null; shoot = null; shootScene = null; cine = null; prison = null; prisonScene = null
+        mgIdx = i; belt = null; beltScene = null; fly = null; flyScene = null; shoot = null; shootScene = null; cine = null; prison = null; prisonScene = null; finale = null; finaleScene = null
         bPid = -1; joyId = -1; aimId = -1; thrustId = -1; gunId = -1; rollId = -1; grMsgT = 0f; joyActive = false; mag = 0f; aimMag = 0f; knobX = 0f; knobY = 0f; aimKX = 0f; aimKY = 0f; deadT = 0f; mgPending = -9
         when (mgName) {
             "belt" -> { belt = BeltWorld(BeltLevel.warehouse); beltScene = BeltScene(belt!!); music.setHeat(3) }
@@ -168,6 +172,7 @@ internal class DeadDropView(
             "cine1" -> { cine = CineScene(1); music.setHeat(2) }
             "shoot" -> { shoot = ShootWorld(ShootLevel.townHall()); shootScene = ShootScene(shoot!!); music.setHeat(5) }
             "prison" -> { prison = PrisonWorld(PrisonLevel.rock()); prisonScene = PrisonScene(prison!!); music.setHeat(1) }
+            "finale" -> { finale = FinaleWorld(); finaleScene = FinaleScene(finale!!); music.setHeat(5) }
         }
     }
 
@@ -193,6 +198,7 @@ internal class DeadDropView(
         fly?.let { f -> f.thrust = thrustId >= 0; f.update(dt); if (f.finished) mgGo(mgIdx + 1) }
         cine?.let { cn -> cn.t += dt; if (cn.t >= cn.fadeStart) mgGo(mgIdx + 1) }
         prison?.let { pw -> pw.update(dt, ix, iy, mag); if (pw.done) mgGo(mgIdx + 1) }
+        finale?.update(dt, ix, iy, mag)
         shoot?.let { sw ->
             sw.update(dt, ix, iy, mag, gunId >= 0)
             grMsgT = max(0f, grMsgT - dt)
@@ -218,6 +224,15 @@ internal class DeadDropView(
                 val sw = shoot
                 if (sw != null && sw.phase == ShootWorld.Phase.DEAD) { if (deadT > 0.5f) startMg(mgIdx); return true }
                 prison?.let { pw -> if (pw.phase == PrisonWorld.Phase.SIGNAL || pw.phase == PrisonWorld.Phase.ESCAPE) { if (pw.drowned) pw.retry(); return true } }
+                finale?.let { fw ->
+                    if (fw.over) { onExit(); return true }
+                    when (fw.stage) {
+                        FinaleWorld.Stage.SIMON -> { val b = finaleScene?.simonButtonAt((x - mgOx) / mgSc, (y - mgOy) / mgSc) ?: -1; if (b >= 0) fw.simonTap(b) }
+                        FinaleWorld.Stage.CLIMB -> if (hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) } else fw.jump()
+                        else -> {}
+                    }
+                    return true
+                }
                 val m = mgName
                 if (m == "belt") { bPid = id; bDX = x; bDY = y; bJumped = false }
                 else if ((m == "shoot" || m == "prison") && hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) }
@@ -264,12 +279,13 @@ internal class DeadDropView(
         val w = width.toFloat(); val h = height.toFloat()
         c.drawColor(0xFF03050A.toInt())
         val top = barH; val bottom = 14f * d + botInset
-        val bmp = beltScene?.render(clock) ?: flyScene?.render(clock) ?: cine?.render(clock) ?: shootScene?.render(clock) ?: prisonScene?.render(clock)
+        val bmp = beltScene?.render(clock) ?: flyScene?.render(clock) ?: cine?.render(clock) ?: shootScene?.render(clock) ?: prisonScene?.render(clock) ?: finaleScene?.render(clock)
         if (bmp != null) {
             val sc = max(1, min(w / bmp.width, (h - top - bottom) / bmp.height).toInt())
             val ox = ((w - bmp.width * sc) / 2f).toInt().toFloat(); val oy = (top + (h - top - bottom - bmp.height * sc) / 2f).toInt().toFloat()
             rect.set(ox, oy, ox + bmp.width * sc, oy + bmp.height * sc)
             c.drawBitmap(bmp, null, rect, nearest)
+            mgOx = ox; mgOy = oy; mgSc = sc.toFloat()
             val bt = oy + bmp.height * sc
             belt?.let { b ->
                 mgText(c, "COINS  ${b.coins} / ${b.spec.coinGoal}", w / 2f + 70f * d, oy - 10f * d, 13f, if (b.coinFlash > 0f) Color.WHITE else 0xFFFFD84D.toInt()); mgText(c, "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f - 90f * d, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
@@ -328,6 +344,26 @@ internal class DeadDropView(
                     if (bits.isNotEmpty()) mgText(c, bits.joinToString("  ·  "), w / 2f, bt + 30f * d, 9f, 0xFFFFD84D.toInt(), false)
                 }
             }
+            finale?.let { fw ->
+                if (fw.stage == FinaleWorld.Stage.CLIMB) mgText(c, "♥".repeat(fw.lives.coerceAtLeast(0)), w / 2f, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
+                val cap = fw.caption()
+                if (cap.isNotEmpty()) {
+                    val sy = if (fw.stage == FinaleWorld.Stage.SIMON) oy + bmp.height * sc * (350f / FinaleWorld.H) + 14f * d else bt - 18f * d
+                    if (fw.stage != FinaleWorld.Stage.SIMON) { p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x99); c.drawRect(0f, sy - 18f * d, w, sy + 8f * d, p) }
+                    mgText(c, cap, w / 2f, sy, 10.5f, a(Color.WHITE, 0xEE))
+                }
+                // the very end: black, and the title
+                if (fw.stage == FinaleWorld.Stage.END && fw.t > FinaleWorld.END_TITLE - 1.5f) {
+                    p.style = Paint.Style.FILL; p.color = Color.BLACK; c.drawRect(0f, 0f, w, h, p)
+                    val f = ((fw.t - FinaleWorld.END_TITLE) / 1.2f).coerceIn(0f, 1f)
+                    p.textAlign = Paint.Align.CENTER
+                    p.typeface = monoBold; p.letterSpacing = 0.3f; p.textSize = 26f * d; p.color = a(Color.WHITE, (f * 255).toInt()); c.drawText("DEAD LETTER", w / 2, h / 2, p)
+                    val f2 = ((fw.t - FinaleWorld.END_TITLE - 1.2f) / 1.2f).coerceIn(0f, 1f)
+                    p.typeface = mono; p.letterSpacing = 0.1f; p.textSize = 12f * d; p.color = a(Color.WHITE, (f2 * 0x99).toInt()); c.drawText("six letters. one truth.", w / 2, h / 2 + 30f * d, p)
+                    if (fw.over) { p.letterSpacing = 0f; p.textSize = 11f * d; p.color = a(Color.WHITE, 0x66); c.drawText("tap to close", w / 2, h - 40f * d, p) }
+                    p.letterSpacing = 0f
+                }
+            }
             cine?.caption()?.let { mgText(c, it, w / 2f, bt - 16f * d, 13f, a(Color.WHITE, 0xEE)) }
             shoot?.let { sw ->
                 if (sw.msgT > 0f) mgText(c, sw.msg, w / 2f, oy - 10f * d, 11f, if (sw.msgGood) 0xFF3BFF9A.toInt() else 0xFFFF6A6A.toInt())
@@ -340,7 +376,15 @@ internal class DeadDropView(
                 }
             }
         }
-        if (mgName == "shoot" || (mgName == "prison" && prison?.phase == PrisonWorld.Phase.PLAY)) drawJoystick(c)
+        if (mgName == "shoot" || (mgName == "prison" && prison?.phase == PrisonWorld.Phase.PLAY) || (mgName == "finale" && finale?.stage == FinaleWorld.Stage.CLIMB)) drawJoystick(c)
+        if (mgName == "finale" && finale?.stage == FinaleWorld.Stage.CLIMB) {
+            // JUMP: tap anywhere on the right (the button shows where)
+            val gold = 0xFFFFD84D.toInt()
+            p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(gunCx, joyCy, gunR + 4f * d, p)
+            p.color = a(gold, 0x55); c.drawCircle(gunCx, joyCy, gunR - 4f * d, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; p.color = a(gold, 0xCC); c.drawCircle(gunCx, joyCy, gunR, p); p.style = Paint.Style.FILL
+            mgText(c, "JUMP", gunCx, joyCy + 4f * d, 12f, a(Color.WHITE, 0xEE))
+        }
         if (mgName == "shoot" && shoot?.phase == ShootWorld.Phase.PLAY) {
             val sw = shoot!!
             val cy = joyCy

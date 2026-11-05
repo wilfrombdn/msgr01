@@ -260,8 +260,9 @@ internal object StealthLevels {
         ),
         // ------------------------------------------------------------------ 6
         LevelSpec(
-            "The Broadcast", "Deliver the final letter to the radio operator.", "The whole city is looking for you. Searchlights, patrols and emergency broadcasts everywhere.",
-            "Everything at once. Watch, wait, then move. Almost there.",
+            // the finale (FinaleWorld/FinaleScene): the map below is the old walk, kept for the stealth tests only
+            "The Broadcast", "Get the evidence on the air.", "The city is burning. The radio tower is the last way to reach everyone.",
+            "Climb. Jump the spools. Then the uplink: repeat the lights.",
             "Radio operator", "It's already too late.", "The evidence is being broadcast to the entire city. The conspiracy is exposed.", 5,
             pal(0xFF120A0F, 0xFF1E1018, 0xFF070306, 0xFF4A1F33, 0xFFFF4D6D, 0xFFFFF0D0, 0xFFFF2D55),
             listOf(
