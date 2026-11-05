@@ -24,7 +24,12 @@ internal class CineScene(val kind: Int) : PixelSprites() {
     val done get() = t >= duration
 
     /** The line shown under the picture right now (or null). */
-    fun caption(): String? = if (kind == 0) { if (t in 2.4f..5.2f) "FORMER OFFICER: They took the others." else null }
+    fun caption(): String? = if (kind == 0) when {
+        t in 2.2f..3.8f -> "I know what the mayor has done."
+        t in 3.8f..5.2f -> "I know what you plan to do,"
+        t in 5.2f..6.4f -> "and I can get you there."
+        t in 6.4f..7.8f -> "Let's end this shit, brother."
+        else -> null }
         else { if (t in 6.8f..9.0f) "Nobody move. Walk." else null }
 
     private fun ease(a: Float, b: Float, k: Float) = a + (b - a) * k.coerceIn(0f, 1f)

@@ -599,7 +599,8 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         bodyFoundT = max(0f, bodyFoundT - dt)
 
         // my feet: a gentle drag is a quiet sneak, a full drag is a loud run
-        speed = if (mag < 0.5f) SNEAK * (mag / 0.5f) else SNEAK + (mag - 0.5f) / 0.5f * (RUN - SNEAK)
+        val frozen = spec.scene != null && sceneStage in 1..6      // the cop scene: I stand frozen until the contact has walked up to me
+        speed = if (frozen) 0f else if (mag < 0.5f) SNEAK * (mag / 0.5f) else SNEAK + (mag - 0.5f) / 0.5f * (RUN - SNEAK)
         noise = if (speed > QUIET) (speed - QUIET) / (RUN - QUIET) * NOISE_MAX else 0f
         if (speed > 0.01f && mag > 0.02f) {
             face = atan2(iy, ix)

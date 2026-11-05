@@ -137,10 +137,10 @@ internal object StealthLevels {
             ),
             props = listOf(
                 Prop("window", 5.5f, 3.5f, text = "[TRANSIT RADIO] ...all underground services are suspended. Transit police are searching every platform for the man called Tellem."),
-                Prop("window", 10.5f, 3.5f, text = "[CHANNEL 9 NEWS] ...sources say the suspect may be using the old maintenance tunnels under the waterworks."),
+                Prop("window", 10.5f, 3.5f, text = "[TWO NEIGHBOURS, BEHIND THE CURTAIN] \"I cannot believe the state declared a state of emergency.\" \"And closed the borders to the other states. Quarantined the cities, like we are all sick.\" \"I have never witnessed anything like this. Never.\""),
                 Prop("window", 4.5f, 17.5f, text = "[POLICE DISPATCH] Units four through seven to the waterworks. Seal every sewer access. Nobody goes down."),
-                Prop("window", 11.5f, 17.5f, text = "[OLD KITCHEN RADIO] ...and still no word about Mara Voss. Seven weeks now. Seven weeks."),
-                Prop("window", 7.5f, 25.5f, text = "[TALK RADIO 880] ...they will not find him, folks, because there is no him. A name on a poster. Think about that."),
+                Prop("window", 11.5f, 17.5f, text = "[A COUPLE ON THE STAIRS] \"My cousin works at the records office. She says they have started rounding up government clerks.\" \"Rounding them up? Why?\" \"Nobody knows. And not one word about it on the news. Not one.\" \"Does that not bother you?\" \"Keep your voice down.\""),
+                Prop("window", 7.5f, 25.5f, text = "[A MAN AT HIS WINDOW, ON THE PHONE] \"No, I cannot come to you, the roads are shut. Soldiers on the bridge... Yes, the whole city. Just stay in, love. Lock the door and stay in.\""),
                 Prop("notice", 13.5f, 25.5f, text = "MISSING: Mara Voss. Your former colleague."),
                 Prop("poster", 2.5f, 17.5f), Prop("poster", 9.5f, 3.5f), Prop("poster", 6.5f, 25.5f),
                 Prop("sign", 7.5f, 3.5f, text = "WATERWORKS. Maintenance access only. No entry."),

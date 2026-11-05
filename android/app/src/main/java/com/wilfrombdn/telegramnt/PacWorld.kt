@@ -219,7 +219,13 @@ internal class PacWorld(val spec: PacSpec) {
                 }
             }
             val pastCentre = (px - cx) * DX[dir] + (py - cy) * DY[dir]
-            if (pastCentre >= 0f && !free(tx + DX[dir], ty + DY[dir])) { px = cx; py = cy; return }
+            if (pastCentre >= 0f && !free(tx + DX[dir], ty + DY[dir])) {
+                // a wall ahead: never stop, turn into the open side (or back the way I came at a dead end)
+                px = cx; py = cy
+                val opts = listOf((dir + 1) % 4, (dir + 3) % 4).filter { free(tx + DX[it], ty + DY[it]) }
+                dir = if (wantDir in opts) wantDir else opts.firstOrNull() ?: ((dir + 2) % 4)
+                continue
+            }
             px += DX[dir] * step; py += DY[dir] * step
             moving = true
             if (px < -0.5f) px += w; if (px > w + 0.5f) px -= w

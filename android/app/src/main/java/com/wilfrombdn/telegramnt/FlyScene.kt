@@ -141,6 +141,39 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
         for (i in -1..(W / 140 + 2)) { val x = i * 140 - mod(nearOff, 140) + 70; val ph = (clock * 0.45f + i * 0.31f + (nearOff / 140) * 0.2f) % 1f
             if (ph < 0.5f) for (k in 0..3) { val q = ph * 2f; rect(c, x + (sin(clock * 3f + k) * 3).toInt(), floorTop - 4 - (q * 26).toInt() - k * 5, 5 + k, 5, a(0xFFC8D0E0.toInt(), ((1f - q) * 0x70).toInt())) } }
 
+        // ---- extra detail: ducts and drooping cables overhead, wall signs, a spinning fan, floor grating and puddles, dust ----
+        val ductOff = (sc * S * 0.8f).toInt()
+        for (i in -1..(W / 110 + 2)) {
+            val idx = (ductOff + i * 110) / 110; val x = i * 110 - mod(ductOff, 110)
+            rect(c, x, 36, 100, 10, PX.K); rect(c, x + 1, 37, 98, 8, 0xFF2A3544.toInt()); rect(c, x + 1, 37, 98, 2, steelL); for (s in 0 until 100 step 20) rect(c, x + s, 36, 2, 10, steelDD)
+            // a cable draped between two hooks
+            for (k in 0..24) { val cx = x + 10 + k * 3; val cy = 47 + (sin(k / 24f * PI.toFloat()) * (6 + hash(idx, 1, 5) % 6)).toInt(); rect(c, cx, cy, 3, 2, PX.K); px(c, cx + 1, cy, 0xFF3C4858.toInt()) }
+        }
+        for (i in -1..(W / 150 + 2)) {
+            val idx = (farOff + i * 150) / 150; val x = i * 150 - mod(farOff, 150) + 60
+            when (hash(idx, 7, 9) % 3) {
+                0 -> { rect(c, x, 104, 30, 20, PX.K); rect(c, x + 1, 105, 28, 18, hazardY); rect(c, x + 1, 105, 28, 3, 0xFFFFE9A0.toInt()); rect(c, x + 12, 109, 6, 8, PX.K); rect(c, x + 12, 119, 6, 2, PX.K) }   // a DANGER sign
+                1 -> { rect(c, x, 104, 30, 14, PX.K); rect(c, x + 1, 105, 28, 12, 0xFF0F5A34.toInt()); rect(c, x + 6, 109, 18, 3, PX.W); rect(c, x + 22, 108, 3, 5, 0xFF3BFF9A.toInt()) }     // an EXIT sign
+                else -> { // a wall fan turning
+                    rect(c, x + 2, 100, 26, 26, PX.K); rect(c, x + 4, 102, 22, 22, 0xFF2A3544.toInt())
+                    val ang = clock * 9f; for (b in 0..3) { val aa = ang + b * PI.toFloat() / 2f; val bx = (x + 15 + cos(aa) * 8f).roundToInt(); val by = (113 + sin(aa) * 8f).roundToInt(); rect(c, bx - 2, by - 2, 5, 5, steelL) }
+                    rect(c, x + 13, 111, 4, 4, PX.K)
+                }
+            }
+        }
+        // floor grating with a faint reflection of the lamps, and puddles
+        for (i in -1..(W / 48 + 2)) { val x = i * 48 - mod(nearOff, 48)
+            for (g in 0 until 40 step 4) rect(c, x + g, floorTop + 16, 2, 8, 0xFF10161C.toInt())
+            if (hash((nearOff + i * 48) / 48, 3, 2) % 4 == 0) { rect(c, x + 6, floorTop + 6, 24, 3, a(0xFF3A5A8A.toInt(), 0x90)); rect(c, x + 10, floorTop + 6, 8, 1, a(PX.W, 0x80)) }
+        }
+        for (k in 0 until 14) {   // dust and sparks floating in the lamp light
+            val ph = (clock * 0.25f + k * 0.0713f) % 1f
+            val x = (W - ((ph + k * 0.37f) % 1f) * (W + 20)).toInt(); val y = 30 + (hash(k, 6, 1) % (H - 90)) + (sin(clock * 1.3f + k) * 4).toInt()
+            rect(c, x, y, 1, 1, a(PX.WARM, 0x70))
+        }
+        // dark edges, so the hall feels deep
+        for (e in 0..5) { p.color = a(PX.K, 0x40 - e * 7); c.drawRect(e * 3f, 0f, e * 3f + 3f, H.toFloat(), p); c.drawRect(W - e * 3f - 3f, 0f, W - e * 3f, H.toFloat(), p) }
+
         // ---- dangers ----
         for (z in world.hazards) {
             val x = ((z.wx - sc) * S).roundToInt()

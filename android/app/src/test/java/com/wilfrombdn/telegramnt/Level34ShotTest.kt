@@ -27,10 +27,22 @@ class Level34ShotTest {
         step(6f); save(s.render(6f), "l3-belt-a")
         w.leap(1); step(6.15f); save(s.render(6.15f), "l3-belt-leap")
         w.s = 100f; step(t + 0.1f); save(s.render(7f), "l3-belt-fast")
-        w.s = w.spec.endS - 0.3f; step(t + 0.3f); save(s.render(8f), "l3-belt-kicker")
+        w.coins = 100; w.s = w.endS - 0.3f; step(t + 0.3f); save(s.render(8f), "l3-belt-kicker")
         step(t + 0.5f); save(s.render(8.5f), "l3-belt-launch")
         step(t + 1.6f); save(s.render(9.5f), "l3-belt-landed")
         step(t + 1.5f); save(s.render(11f), "l3-belt-jetpack")
+    }
+
+    @Test fun beltKinds() {
+        val w = BeltWorld(BeltLevel.warehouse); val s = BeltScene(w)
+        var t = 0f; while (t < 3f) { w.update(0.01f); t += 0.01f }
+        w.spec.extend(450f)
+        for (k in listOf(BeltWorld.SMALL, BeltWorld.GAP, BeltWorld.TRUCK, BeltWorld.SAWB, BeltWorld.DROP)) {
+            val o = w.spec.obstacles.firstOrNull { it.kind == k } ?: continue
+            w.invuln = 99f; w.s = o.s - 3f; w.x = w.spec.laneX[1]
+            for (i in 0 until 160) { w.s = o.s - 4f + (if (k == BeltWorld.TRUCK) 0f else 0f); w.update(0.01f); w.s = minOf(w.s, o.s - 3f + i * 0.0f) }
+            save(s.render(t + k * 1f), "l3-kind-$k")
+        }
     }
 
     @Test fun fly() {

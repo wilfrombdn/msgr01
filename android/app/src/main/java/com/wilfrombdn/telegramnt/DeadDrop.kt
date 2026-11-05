@@ -6,12 +6,14 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.LinearGradient
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
+import android.widget.FrameLayout
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.floor
@@ -34,7 +36,21 @@ internal fun MainActivity.showDeadDrop() {
     // on the right: restart (tap = this level, hold = back to level 1) next to exit
     val skip = icon(R.drawable.ic_skip) { game.skipLevel(); toast("Skipped") }
     val again = icon(R.drawable.ic_restart) { game.restart() }.apply { setOnLongClickListener { game.restartAll(); toast("Back to level 1"); true } }
-    setContentView(page(topBar("Dead Letter", "Six letters. One truth.", null, skip, again, icon(R.drawable.ic_close) { showSettings() }), game))
+    // edge to edge: the game fills the whole screen and the title bar floats over it, see-through (the game blurs behind it)
+    val tb = topBar("Dead Letter", "Six letters. One truth.", null, skip, again, icon(R.drawable.ic_close) { showSettings() })
+    tb.setBackgroundColor(Color.TRANSPARENT)
+    @Suppress("DEPRECATION")
+    tb.setOnApplyWindowInsetsListener { v, ins -> v.setPadding(v.paddingLeft, dp(4) + ins.systemWindowInsetTop, v.paddingRight, dp(4)); ins }
+    val frame = FrameLayout(this).apply {
+        setBackgroundColor(0xFF03050A.toInt())
+        addView(game, FrameLayout.LayoutParams(-1, -1))
+        addView(tb, FrameLayout.LayoutParams(-1, -2))
+    }
+    setContentView(frame)
+    window.statusBarColor = Color.TRANSPARENT; window.navigationBarColor = Color.TRANSPARENT
+    @Suppress("DEPRECATION")
+    window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+    frame.requestApplyInsets()
 }
 
 internal class DeadDropView(
@@ -64,19 +80,23 @@ internal class DeadDropView(
     private val music = DeadLetterMusic()
     private val tracks = DeadLetterTracks(ctx)
     private var cue = ""
-    private fun applyCue() { if (soundOn) tracks.play(cue) else tracks.stop() }
+    private fun applyCue() {
+        if (!soundOn) { tracks.stop(); music.stop(); return }
+        if (cue == "synth") { tracks.stop(); music.start() } else { music.stop(); tracks.play(cue) }
+    }
 
     /** Which song should be on right now ("" = silence, null = leave it alone). */
     private fun wantedCue(): String? {
         when (mgName) {
             "belt" -> { val b = belt ?: return ""; return if (b.phase == BeltWorld.Phase.RIDE && b.phaseT >= 1f) "l3" else "" }
             "fly" -> { val f = fly ?: return ""; return if (f.phase != FlyWorld.Phase.DONE) "l3b" else "" }
-            "cine0", "cine1" -> return ""
-            "shoot" -> { val sw = shoot ?: return ""; return when (sw.phase) { ShootWorld.Phase.PLAY -> "l4"; ShootWorld.Phase.DEAD -> null; else -> "" } }
+            "cine0" -> return ""
+            "cine1" -> return "synth"
+            "shoot" -> return "synth"
         }
-        if (levelIdx == 0) return "l1"
+        if (levelIdx == 0) return "synth"
         if (levelIdx == 1) {
-            if (stage == 0) return "l1"
+            if (stage == 0) return "synth"
             val pw = pac ?: return ""
             return when (pw.phase) { PacWorld.Phase.PLAY -> if (pw.phaseT >= 1f) "l2" else if (cue == "l2") "l2" else ""; PacWorld.Phase.CAUGHT -> null; else -> "" }
         }
@@ -111,6 +131,14 @@ internal class DeadDropView(
     private var aimId = -1; private var joyId = -1; private var thrustId = -1
     private var aimDx = 0f; private var aimDy = 0f; private var aimMag = 0f; private var aimKX = 0f; private var aimKY = 0f
     private var carryFade = false
+    private var topInset = 0f; private var botInset = 0f
+    private val barH get() = topInset + 60f * d
+    private var node: android.graphics.RenderNode? = null; private var blurNode: android.graphics.RenderNode? = null
+    init {
+        @Suppress("DEPRECATION")
+        setOnApplyWindowInsetsListener { _, i -> topInset = i.systemWindowInsetTop.toFloat(); botInset = i.systemWindowInsetBottom.toFloat(); i }
+    }
+    private var bPid = -1; private var bDX = 0f; private var bDY = 0f; private var bJumped = false
     private var deadT = 0f
 
     private fun stagesOf(s: LevelSpec): List<String>? = when (s.building) {
@@ -123,7 +151,7 @@ internal class DeadDropView(
 
     private fun startMg(i: Int) {
         mgIdx = i; belt = null; beltScene = null; fly = null; flyScene = null; shoot = null; shootScene = null; cine = null
-        joyId = -1; aimId = -1; thrustId = -1; joyActive = false; mag = 0f; aimMag = 0f; knobX = 0f; knobY = 0f; aimKX = 0f; aimKY = 0f; deadT = 0f; mgPending = -9
+        bPid = -1; joyId = -1; aimId = -1; thrustId = -1; joyActive = false; mag = 0f; aimMag = 0f; knobX = 0f; knobY = 0f; aimKX = 0f; aimKY = 0f; deadT = 0f; mgPending = -9
         when (mgName) {
             "belt" -> { belt = BeltWorld(BeltLevel.warehouse); beltScene = BeltScene(belt!!); music.setHeat(3) }
             "fly" -> { fly = FlyWorld(FlySpec()); flyScene = FlyScene(fly!!); music.setHeat(4) }
@@ -174,11 +202,11 @@ internal class DeadDropView(
         when (act) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val x = e.getX(idx); val y = e.getY(idx)
-                if (act == MotionEvent.ACTION_DOWN && x > width - 52f * d && y < 46f * d) { soundTap = true; return true }
+                if (act == MotionEvent.ACTION_DOWN && x > width - 52f * d && y > barH && y < barH + 46f * d) { soundTap = true; return true }
                 val sw = shoot
                 if (sw != null && sw.phase == ShootWorld.Phase.DEAD) { if (deadT > 0.5f) startMg(mgIdx); return true }
                 val m = mgName
-                if (m == "belt") { belt?.leap(if (x < width / 2f) -1 else 1) }
+                if (m == "belt") { bPid = id; bDX = x; bDY = y; bJumped = false }
                 else if (m == "shoot" && hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) }
                 else if (m == "shoot" && hypot(x - aimCx, y - joyCy) < joyR * 1.7f) { aimId = id; readAim(x, y) }
                 else if (m == "fly") thrustId = id
@@ -188,6 +216,7 @@ internal class DeadDropView(
                 for (i in 0 until e.pointerCount) {
                     val pid = e.getPointerId(i)
                     if (pid == joyId) readJoystick(e.getX(i), e.getY(i)) else if (pid == aimId) readAim(e.getX(i), e.getY(i))
+                    if (pid == bPid && !bJumped && bDY - e.getY(i) > 36f * d) { belt?.jump(); bJumped = true }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
@@ -196,7 +225,8 @@ internal class DeadDropView(
                     if (act == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); applyCue() }
                     return true
                 }
-                if (act == MotionEvent.ACTION_CANCEL) { joyId = -1; aimId = -1; thrustId = -1 }
+                if (act == MotionEvent.ACTION_CANCEL) { joyId = -1; aimId = -1; thrustId = -1; bPid = -1 }
+                if (id == bPid) { if (!bJumped && act != MotionEvent.ACTION_CANCEL && hypot(e.getX(idx) - bDX, e.getY(idx) - bDY) < 28f * d) belt?.leap(if (bDX < width / 2f) -1 else 1); bPid = -1 }
                 if (id == joyId) { joyId = -1; joyActive = false; mag = 0f; knobX = 0f; knobY = 0f }
                 if (id == aimId) { aimId = -1; aimMag = 0f; aimKX = 0f; aimKY = 0f }
                 if (id == thrustId) thrustId = -1
@@ -214,7 +244,7 @@ internal class DeadDropView(
     private fun drawMg(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
         c.drawColor(0xFF03050A.toInt())
-        val top = 44f * d; val bottom = 14f * d
+        val top = barH; val bottom = 14f * d + botInset
         val bmp = beltScene?.render(clock) ?: flyScene?.render(clock) ?: cine?.render(clock) ?: shootScene?.render(clock)
         if (bmp != null) {
             val sc = max(1, min(w / bmp.width, (h - top - bottom) / bmp.height).toInt())
@@ -223,10 +253,10 @@ internal class DeadDropView(
             c.drawBitmap(bmp, null, rect, nearest)
             val bt = oy + bmp.height * sc
             belt?.let { b ->
-                mgText(c, "LIVES  " + "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
+                mgText(c, "COINS  ${b.coins} / ${b.spec.coinGoal}", w / 2f + 70f * d, oy - 10f * d, 13f, if (b.coinFlash > 0f) Color.WHITE else 0xFFFFD84D.toInt()); mgText(c, "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f - 90f * d, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
                 if (b.phase == BeltWorld.Phase.FALL) mgText(c, "YOU FELL", w / 2f, oy + bmp.height * sc / 2f, 22f, danger)
                 if (b.phase == BeltWorld.Phase.LAUNCH || b.phase == BeltWorld.Phase.PICKUP) mgText(c, "THE JETPACK!", w / 2f, oy - 10f * d - 18f * d, 12f, 0xFFFFD84D.toInt())
-                if (b.t < 6f) mgText(c, "TAP LEFT OR RIGHT TO LEAP TO THE NEXT BELT.", w / 2f, bt + 14f * d, 10.5f, a(Color.WHITE, 0x99), false)
+                if (b.t < 9f) mgText(c, "TAP LEFT / RIGHT TO LEAP BELTS. SWIPE UP TO JUMP.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false) else if (b.coins < b.spec.coinGoal) mgText(c, "COLLECT 100 COINS TO REACH THE END.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0x80), false)
             }
             fly?.let { f ->
                 mgText(c, "COINS  ${f.coins} / ${f.spec.coinGoal}", w / 2f, oy - 10f * d, 14f, 0xFFFFD84D.toInt())
@@ -308,7 +338,7 @@ internal class DeadDropView(
     }
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); running = true; last = 0L; applyCue(); postOnAnimation(tick) }
-    override fun onDetachedFromWindow() { running = false; tracks.stop(); super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { running = false; tracks.stop(); music.stop(); super.onDetachedFromWindow() }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -337,8 +367,9 @@ internal class DeadDropView(
     }
 
     private val joyR get() = 56f * d
-    private val joyCx get() = 24f * d + joyR + 6f * d
-    private val joyCy get() = height - 30f * d - joyR
+    private var joyFx = -1f; private var joyFy = -1f      // in the maze the stick floats: it sits wherever you put your thumb down
+    private val joyCx get() = if (joyFx >= 0f) joyFx else 24f * d + joyR + 6f * d
+    private val joyCy get() = if (joyFy >= 0f) joyFy else height - 30f * d - botInset - joyR
 
     /** Read the joystick: the courier walks the way you push, faster the harder you push (a light push sneaks quietly). */
     private fun readJoystick(x: Float, y: Float) {
@@ -346,11 +377,11 @@ internal class DeadDropView(
         val len = hypot(dx, dy)
         val shown = min(len, joyR)
         if (len > 0.001f) { knobX = dx / len * shown; knobY = dy / len * shown } else { knobX = 0f; knobY = 0f }
-        val dead = 7f * d
+        val dead = if (pac != null) 4f * d else 7f * d
         if (len < dead) { mag = 0f; return }
         ix = dx / len; iy = dy / len
         mag = ((shown - dead) / (joyR - dead)).coerceIn(0f, 1f)
-        if (mag > 0.35f) pacWant = if (kotlin.math.abs(ix) > kotlin.math.abs(iy)) (if (ix > 0) PacWorld.RIGHT else PacWorld.LEFT) else (if (iy > 0) PacWorld.DOWN else PacWorld.UP)
+        if (mag > (if (pac != null) 0.12f else 0.35f)) pacWant = if (kotlin.math.abs(ix) > kotlin.math.abs(iy)) (if (ix > 0) PacWorld.RIGHT else PacWorld.LEFT) else (if (iy > 0) PacWorld.DOWN else PacWorld.UP)
     }
 
     /** Moves level 2 from one part to the next, with a fade to black between. */
@@ -363,6 +394,7 @@ internal class DeadDropView(
             if (pw != null) {
                 if (pw.phase == PacWorld.Phase.WON && pw.phaseT > 0.9f && spec.room != null) { pendingStage = 2; fadeDir = 1 }
                 if (pw.phase == PacWorld.Phase.CAUGHT && world.state != StealthWorld.State.CAUGHT) { world.state = StealthWorld.State.CAUGHT; world.spotter = "A guard caught you."; world.stateT = 0f }
+                else if (world.state == StealthWorld.State.CAUGHT) world.stateT += dt     // the world is not running in the maze, so count the red screen here
             }
         }
     }
@@ -405,9 +437,10 @@ internal class DeadDropView(
         if (mgIdx >= 0) return mgTouch(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (e.x > width - 52f * d && e.y < 46f * d) { soundTap = true; return true }
+                if (e.x > width - 52f * d && e.y > barH && e.y < barH + 46f * d) { soundTap = true; return true }
                 overlayAtDown = overlayUp()                       // a tap anywhere dismisses a Spotted / Delivered screen
                 touchWasJoy = !overlayAtDown && hypot(e.x - joyCx, e.y - joyCy) < joyR * 1.7f
+                if (!overlayAtDown && pac != null && e.y > barH) { joyFx = e.x; joyFy = e.y; touchWasJoy = true }
                 if (touchWasJoy) { joyActive = true; readJoystick(e.x, e.y) }
             }
             MotionEvent.ACTION_MOVE -> {
@@ -420,7 +453,7 @@ internal class DeadDropView(
                     if (e.actionMasked == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); applyCue() }
                     return true
                 }
-                joyActive = false; mag = 0f; knobX = 0f; knobY = 0f
+                joyActive = false; mag = 0f; knobX = 0f; knobY = 0f; joyFx = -1f; joyFy = -1f
                 if (e.actionMasked == MotionEvent.ACTION_UP && overlayAtDown) when (world.state) {
                     StealthWorld.State.CAUGHT -> if (world.stateT > 0.5f) { attempt++; if (stage == 1) restartPac() else load(true) }
                     StealthWorld.State.WON -> if (lastLevel) {
@@ -443,13 +476,36 @@ internal class DeadDropView(
     private val ink = 0xFF1A1B20.toInt()
     private val danger = 0xFFFF4D4D.toInt()
 
+    /** Draws the game, then a blurred copy of it behind the see-through title bar (blur needs Android 12; older phones get a dark fade). */
     override fun onDraw(c: Canvas) {
+        val w = width; val h = height
+        val bh = barH.toInt().coerceAtMost(h)
+        if (android.os.Build.VERSION.SDK_INT >= 31 && c.isHardwareAccelerated && w > 0 && h > 0) {
+            val n = node ?: android.graphics.RenderNode("dd-game").also { node = it }
+            val bn = blurNode ?: android.graphics.RenderNode("dd-bar").also {
+                blurNode = it; it.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(16f, 16f, Shader.TileMode.CLAMP))
+            }
+            n.setPosition(0, 0, w, h)
+            val rc = n.beginRecording()
+            try { drawAll(rc) } finally { n.endRecording() }
+            c.drawRenderNode(n)
+            bn.setPosition(0, 0, w, bh)
+            val rc2 = bn.beginRecording()
+            try { rc2.drawRenderNode(n) } finally { bn.endRecording() }
+            c.drawRenderNode(bn)
+        } else drawAll(c)
+        // a soft dark fade so the title and buttons stay readable
+        p.style = Paint.Style.FILL; p.shader = LinearGradient(0f, 0f, 0f, bh.toFloat(), intArrayOf(0x99000000.toInt(), 0x55000000, 0x00000000), floatArrayOf(0f, 0.7f, 1f), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w.toFloat(), bh.toFloat(), p); p.shader = null
+    }
+
+    private fun drawAll(c: Canvas) {
         if (mgIdx >= 0) { drawMg(c); return }
         val w = width.toFloat(); val h = height.toFloat()
         val s = world.spec
         val pal = s.pal
         c.drawColor(pal.wall)
-        val top = 44f * d; val bottom = 14f * d
+        val top = barH + 30f * d; val bottom = 14f * d + botInset
         T = min(w / world.cols, (h - top - bottom) / world.rows)
         offX = (w - T * world.cols) / 2; offY = top + (h - top - bottom - T * world.rows) / 2
 
@@ -494,7 +550,7 @@ internal class DeadDropView(
 
         drawMarks(c)
         drawLight(c, w, h, pal)
-        drawHud(c, w, h, pal)
+        c.save(); c.translate(0f, barH - 8f * d); drawHud(c, w, h, pal); c.restore()
         drawJoystick(c)
         drawClue(c, w, h, pal)
         drawSay(c, w, h, pal)
@@ -1100,7 +1156,7 @@ internal class DeadDropView(
 
     /** The sewer maze: drawn whole, scaled by a whole number, with the fragment count and "READY!" around it. */
     private fun drawPacStage(c: Canvas, w: Float, h: Float, ps: PacScene, pw: PacWorld) {
-        val top = 44f * d; val bottom = 44f * d
+        val top = barH; val bottom = 44f * d + botInset
         val sc = max(1, min(w / ps.W, (h - top - bottom) / ps.H).toInt())
         T = 16f * sc
         offX = ((w - ps.W * sc) / 2f).toInt().toFloat(); offY = (top + (h - top - bottom - ps.H * sc) / 2f).toInt().toFloat()

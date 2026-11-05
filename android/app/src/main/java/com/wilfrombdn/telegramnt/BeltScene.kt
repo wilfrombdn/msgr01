@@ -61,7 +61,7 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
         c.save(); c.translate(shx.toFloat(), shy.toFloat())
         val topS = (camWy + H) / S.toFloat(); val botS = camWy / S.toFloat()
         val r0 = floor(botS).toInt() - 2; val r1 = floor(topS).toInt() + 2
-        val endS = world.spec.endS
+        val endS = world.endS
 
         // 1. the floor far below, and the sides
         for (r in r0..r1) {
@@ -114,6 +114,19 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
             if (yy < -50 || yy > H + 50) continue
             obstacle(c, o, sx(world.obsX(o)), yy, clock)
         }
+        // 5b. coins: on the belt, or hanging in the air over barriers (with a little shadow below)
+        for (co in world.spec.coins) {
+            if (co.taken) continue
+            val yy = sy(co.s)
+            if (yy < -12 || yy > H + 12) continue
+            val cx = sx(laneX(co.lane)); val cy = yy - (if (co.high) 16 else 0)
+            if (co.high) rect(c, cx - 4, yy + 2, 9, 3, a(PX.K, 0x70))
+            val spin = ((clock * 9f + co.s * 1.3f).toInt()) % 4
+            val ww = intArrayOf(10, 7, 3, 7)[spin]
+            rect(c, cx - ww / 2 - 1, cy - 6, ww + 2, 13, 0xFFB88A12.toInt())
+            rect(c, cx - ww / 2, cy - 5, ww, 11, 0xFFFFD84D.toInt())
+            if (ww > 5) { rect(c, cx - ww / 2 + 1, cy - 4, 2, 4, PX.W); px(c, cx, cy + 1, 0xFFB88A12.toInt()) }
+        }
         // 6. me
         player(c, clock)
         // 7. sparks drifting up in the air
@@ -133,7 +146,7 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
 
     // ---------------- the belts ----------------
     private fun belt(c: Canvas, l: Int) {
-        val endS = world.spec.endS
+        val endS = world.endS
         val x0 = sx(laneX(l) - laneHalf); val w = sx(laneX(l) + laneHalf) - x0
         val yTop = sy(endS); val yBot = sy(0f)
         if (yBot < 0 || yTop > H) return
@@ -331,6 +344,63 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
                     for (k in 0..4) px(c, coilL + (coilR - coilL) * k / 4, y, 0xFF3DE8F5.toInt())
                 }
             }
+            BeltWorld.SMALL -> { // a low striped barrier: jump it
+                val hw = (o.hw * S).toInt()
+                rect(c, x - hw + 3, y - 4, hw * 2, 11, a(PX.K, 0x80))
+                rect(c, x - hw + 1, y - 6, 4, 12, PX.K); rect(c, x + hw - 5, y - 6, 4, 12, PX.K)
+                rect(c, x - hw, y - 8, hw * 2, 9, PX.K)
+                for (i in 0 until hw * 2 - 2 step 8) { rect(c, x - hw + 1 + i, y - 7, 4, 7, hazard); rect(c, x - hw + 5 + i, y - 7, 4, 7, 0xFFE8EEF8.toInt()) }
+                rect(c, x - hw + 1, y - 7, hw * 2 - 2, 1, 0xFFFFF2B0.toInt()); rect(c, x - 3, y - 12, 6, 4, PX.K); rect(c, x - 2, y - 11, 4, 2, PX.RED)
+            }
+            BeltWorld.GAP -> { // a hole in the belt: the floor far below shows through
+                val hw = (o.hw * S).toInt() + 4; val hh = (o.hs * S).toInt()
+                rect(c, x - hw, y - hh, hw * 2, hh * 2, PX.K)
+                rect(c, x - hw + 4, y - hh + 2, hw * 2 - 8, hh * 2 - 4, 0xFF070C10.toInt())
+                for (i in 0 until hw * 2 step 6) { rect(c, x - hw + i, y - hh - 2 + (hash(i, 1, 5) % 3), 4, 4, steelDD); rect(c, x - hw + i + 2, y + hh - 2 - (hash(i, 2, 5) % 3), 4, 4, steelDD) }
+                for (i in 0 until 5) rect(c, x - hw + 8 + i * 12, y - hh + 6 + (hash(i, 3, 5) % 18), 8, 1, 0xFF1A252D.toInt())
+                rect(c, x - hw, y - hh, 3, hh * 2, hazard); rect(c, x + hw - 3, y - hh, 3, hh * 2, hazard)
+                if ((clock * 10f).toInt() % 3 == 0) { px(c, x - 8, y - 2, PX.WARM); px(c, x - 6, y - 4, PX.W); px(c, x + 10, y + 3, PX.WARM) }
+                for (i in 0..2) { val wx = x - hw + 14 + i * 20; rect(c, wx, y - hh - 4, 2, 10 + i * 2, PX.K) }  // torn cables
+            }
+            BeltWorld.TRUCK -> { // a runaway forklift driving at you
+                if (!o.armed) { if ((animT * 6f).toInt() % 2 == 0) { rect(c, x - 24, y - 10, 48, 4, PX.RED); rect(c, x - 2, y - 18, 4, 6, PX.RED) }; return }
+                rect(c, x - 28 + 5, y - 28 + 5, 56, 56, a(PX.K, 0x80))
+                rect(c, x - 30, y - 28, 60, 56, PX.K); rect(c, x - 29, y - 27, 58, 54, 0xFFE8A020.toInt()); rect(c, x - 29, y - 27, 58, 4, 0xFFFFD060.toInt())
+                for (i in 0 until 58 step 8) { rect(c, x - 29 + i, y + 21, 4, 5, PX.K) }
+                rect(c, x - 14, y - 20, 28, 20, PX.K); rect(c, x - 12, y - 18, 24, 16, 0xFF2A3A4C.toInt()); rect(c, x - 12, y - 18, 24, 3, 0xFF4C6A8C.toInt())
+                rect(c, x - 8, y + 4, 16, 10, PX.K); rect(c, x - 6, y + 6, 12, 6, 0xFFC03030.toInt())
+                rect(c, x - 22, y + 26, 5, 14, steelL); rect(c, x + 18, y + 26, 5, 14, steelL); rect(c, x - 22, y + 38, 5, 3, PX.K); rect(c, x + 18, y + 38, 5, 3, PX.K)    // the forks, pointing at you
+                rect(c, x - 26, y + 22, 8, 5, PX.W); rect(c, x + 19, y + 22, 8, 5, PX.W)
+                p.color = a(0xFFFFE9A0.toInt(), 0x30); c.drawRect((x - 34).toFloat(), (y + 26).toFloat(), 68f, 36f, p)
+                if ((clock * 8f).toInt() % 2 == 0) { rect(c, x - 3, y - 26, 6, 4, PX.RED) }
+            }
+            BeltWorld.SAWB -> { // a saw on a rail across all three belts
+                val x0 = sx(world.spec.laneX[0]) - 40; val x1 = sx(world.spec.laneX[2]) + 40
+                rect(c, x0, y - 3, x1 - x0, 6, PX.K); rect(c, x0, y - 2, x1 - x0, 2, steel); rect(c, x0, y, x1 - x0, 1, steelDD)
+                for (i in x0 until x1 step 10) px(c, i, y - 2, steelL)
+                rect(c, x - 10, y - 10, 24, 24, a(PX.K, 0x70))
+                rect(c, x - 9, y - 9, 18, 18, PX.K); rect(c, x - 8, y - 8, 16, 16, 0xFFE8EEF8.toInt())
+                for (k in 0 until 10) { val ang = clock * 18f + k * 0.628f; val tx = (x + kotlin.math.cos(ang) * 13f).roundToInt(); val ty = (y + kotlin.math.sin(ang) * 13f).roundToInt(); rect(c, tx - 2, y.coerceAtLeast(0) + (ty - y) - 2, 4, 4, steelL); px(c, tx, ty, PX.K) }
+                rect(c, x - 4, y - 4, 8, 8, steelD); rect(c, x - 1, y - 1, 3, 3, hazard)
+                if ((clock * 14f).toInt() % 2 == 0) { px(c, x + 14, y - 4, PX.WARM); px(c, x + 16, y - 2, PX.W) }
+            }
+            BeltWorld.DROP -> { // a crate from the crane: a shadow grows on the belt, then it crashes down
+                val cyc = (world.t + o.phase) % o.period
+                val onT = o.period * o.onFrac
+                val hw = (o.hw * S).toInt()
+                if (cyc < onT) { // down and lying there
+                    rect(c, x - hw + 4, y - hw + 4, hw * 2, hw * 2, a(PX.K, 0x80))
+                    rect(c, x - hw, y - hw, hw * 2, hw * 2, PX.K); rect(c, x - hw + 1, y - hw + 1, hw * 2 - 2, hw * 2 - 2, 0xFF8A6A34.toInt()); rect(c, x - hw + 1, y - hw + 1, hw * 2 - 2, 3, cardboardL)
+                    rect(c, x - 3, y - hw, 6, hw * 2, cardboardD); rect(c, x - hw + 4, y + 2, 10, 6, PX.W); rect(c, x - hw + 3, y - hw + 5, 6, 3, PX.RED)
+                    if (cyc < 0.25f) for (k in 0..5) rect(c, x - hw - 6 + k * 7, y + hw - 2 + (k % 2) * 3, 4, 3, a(0xFFC8D0E0.toInt(), 0x90))     // dust
+                } else {
+                    val kk = ((cyc - onT) / (o.period - onT)).coerceIn(0f, 1f)
+                    val sz = (hw * (0.35f + 0.65f * kk)).toInt()
+                    rect(c, x - sz, y - sz, sz * 2, sz * 2, a(PX.K, 0x40 + (kk * 0x50).toInt()))
+                    if ((clock * 10f).toInt() % 2 == 0 && kk > 0.5f) { rect(c, x - 8, y - 2, 16, 4, PX.RED); rect(c, x - 2, y - 8, 4, 16, PX.RED) }
+                    if (kk > 0.75f) { val up = ((1f - kk) / 0.25f * 70f).toInt(); rect(c, x - hw, y - hw - up, hw * 2, hw * 2, PX.K); rect(c, x - hw + 1, y - hw - up + 1, hw * 2 - 2, hw * 2 - 2, 0xFF8A6A34.toInt()) }
+                }
+            }
             BeltWorld.FLYER -> {
                 if (!o.armed) { if ((animT * 6f).toInt() % 2 == 0) rect(c, x - 7, y - 10, 14, 3, PX.RED); return }
                 for (k in 0..3) rect(c, x - 3 + (hash(k, (clock * 20f).toInt(), 14) % 7) - 3, y + 12 + k * 5, 6 - k, 5, a(if (k < 2) 0xFFFFD84D.toInt() else 0xFFFF7A2A.toInt(), 0xE0 - k * 0x30))
@@ -372,7 +442,7 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
                 val blink = world.invuln > 0f && ((clock * 16f).toInt() % 2 == 0)
                 rect(c, px0 - 6, py + 5, 13, 3, a(PX.K, 0x80))
                 if (!blink) {
-                    val lift = (world.air * 12f).toInt()
+                    val lift = maxOf(world.air * 12f, world.jumpAir * 24f).toInt()
                     val frame = if (world.moving) 1 + ((clock * 11f).toInt() % 2) else 0
                     folk(c, px0, py + 6 - lift, 0, frame, clerk, false, true)
                 }
