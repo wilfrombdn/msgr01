@@ -198,7 +198,7 @@ internal class DeadDropView(
         fly?.let { f -> f.thrust = thrustId >= 0; f.update(dt); if (f.finished) mgGo(mgIdx + 1) }
         cine?.let { cn -> cn.t += dt; if (cn.t >= cn.fadeStart) mgGo(mgIdx + 1) }
         prison?.let { pw -> pw.update(dt, ix, iy, mag); if (pw.done) mgGo(mgIdx + 1) }
-        finale?.update(dt, ix, iy, mag)
+        finale?.let { fw -> fw.update(dt, ix, iy, mag); if (soundOn) for (e in fw.events) DeadLetterSfx.play(e); fw.events.clear() }
         shoot?.let { sw ->
             sw.update(dt, ix, iy, mag, gunId >= 0)
             grMsgT = max(0f, grMsgT - dt)

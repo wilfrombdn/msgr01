@@ -37,6 +37,10 @@ internal class FinaleWorld(seed: Int = 6) {
     /** Set when the screen should fade before the next stage (the view draws the fade). */
     var fade = 0f; private set
     private var next: Stage? = null
+    /** Sounds to play (the view drains this each frame and plays them if sound is on). */
+    val events = ArrayList<String>()
+    private var tPrev = 0f
+    private fun at(sec: Float) = tPrev < sec && t >= sec
 
     companion object {
         const val W = 256
@@ -131,7 +135,16 @@ internal class FinaleWorld(seed: Int = 6) {
             return
         }
         if (fade > 0f) fade = max(0f, fade - dt / 0.6f)
+        tPrev = t
         t += dt
+        when (stage) {
+            Stage.BEACH -> if (at(11.9f)) events += "kick"
+            Stage.INTRO -> { if (t in 4.7f..6.0f && (t * 4f).toInt() != (tPrev * 4f).toInt()) events += "type"; if (at(6.0f) || at(6.8f) || at(7.5f)) events += "clank" }
+            Stage.EXECUTE -> if (at(2.9f)) events += "shot"
+            Stage.CONTROL -> if (at(6.5f)) events += "boom"
+            Stage.END -> if (at(2.4f)) events += "static"
+            else -> {}
+        }
         when (stage) {
             Stage.BEACH -> if (t >= BEACH_S) go(Stage.INTRO)
             Stage.INTRO -> introTick(dt)
@@ -193,6 +206,7 @@ internal class FinaleWorld(seed: Int = 6) {
     fun jump() {
         if (stage != Stage.CLIMB || jumpT >= 0f || onLadder != null || hitT >= 0f) return
         jumpT = 0f; jumpDir = if (walking) (if (faceRight) 1f else -1f) else 0f
+        events += "jump"
     }
 
     private fun spoolSpeed() = max(30f, 54f * (1f - 0.12f * fails))
@@ -207,7 +221,7 @@ internal class FinaleWorld(seed: Int = 6) {
         }
         // the patrol throws
         nextThrow -= dt
-        if (nextThrow <= 0f) { spools += Spool(46f, floorY(5, 46f) - SPOOL_R, 5, 1f); nextThrow = throwGap() * (0.8f + rnd.nextFloat() * 0.5f); throwT = 0f }
+        if (nextThrow <= 0f) { spools += Spool(46f, floorY(5, 46f) - SPOOL_R, 5, 1f); nextThrow = throwGap() * (0.8f + rnd.nextFloat() * 0.5f); throwT = 0f; events += "throw" }
         moveSpools(dt)
         movePlayer(dt, ix, iy, mag)
         // hit?
@@ -215,7 +229,7 @@ internal class FinaleWorld(seed: Int = 6) {
             if (s.gone) continue
             val sy = s.y; val feet = py - jumpH
             val dx = abs(s.x - px); val dy = abs((sy + SPOOL_R) - feet)
-            if (dx < 7f && dy < 9f) { hitT = 0f; return }
+            if (dx < 7f && dy < 9f) { hitT = 0f; events += "hit"; return }
         }
         if (floor == TOP) go(Stage.EXECUTE)
     }
@@ -294,7 +308,7 @@ internal class FinaleWorld(seed: Int = 6) {
         val i = (showT / stepS).toInt()
         val within = showT - i * stepS
         if (i >= round) { showing = false; lit = -1; inputAt = 0; return }
-        if (within < stepS * 0.7f) { if (lit != seq[i]) { lit = seq[i]; litT = 0f } } else lit = -1
+        if (within < stepS * 0.7f) { if (lit != seq[i] || litT > stepS) { lit = seq[i]; litT = 0f; events += "simon${seq[i]}" } } else lit = -1
     }
 
     /** You press one of the four buttons (0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right). */
@@ -302,15 +316,17 @@ internal class FinaleWorld(seed: Int = 6) {
         if (stage != Stage.SIMON || showing || next != null) return
         lit = b; litT = 0f
         if (seq[inputAt] != b) {
+            events += "wrong"
             simonFails++
             round = max(1, round - 1)
             simonMsg = "SIGNAL LOST. AGAIN, SLOWER."; simonMsgT = 1.6f
             showing = true; showT = -1.2f; inputAt = 0
             return
         }
+        events += "simon$b"
         inputAt++
         if (inputAt >= round) {
-            if (round >= SIMON_GOAL) { simonMsg = "UPLINK ESTABLISHED."; simonMsgT = 2f; go(Stage.BROADCAST); return }
+            if (round >= SIMON_GOAL) { simonMsg = "UPLINK ESTABLISHED."; simonMsgT = 2f; events += "ok"; go(Stage.BROADCAST); return }
             round++
             showing = true; showT = -0.7f; inputAt = 0
         }

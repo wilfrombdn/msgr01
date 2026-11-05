@@ -532,27 +532,27 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
             0 -> {   // a living room: a family on the sofa in front of the TV
                 rect(c, 20, 40, 60, 80, K(0xFF101830)); skyline(c, 120, 20, 80, 90, 40, K(0xFF080A18), 0.2f); for (x in intArrayOf(20, 49, 79)) rect(c, x, 40, 2, 80, K(0xFF2A2420))
                 rect(c, 150, 150, 92, 66, K(0xFF0A0A0E)); rect(c, 146, 216, 100, 30, K(0xFF2A1E16))                       // TV and its stand
-                rect(c, 0, 280, W, 104, K(0xFF2A2030)); rect(c, 10, 250, 150, 50, K(0xFF3A2A3A)); rect(c, 10, 250, 150, 4, K(0xFF4A3A4A))   // floor, sofa back
-                for ((hx, hs) in listOf(40 to 12, 80 to 9, 120 to 12)) { rect(c, hx - hs / 2, 236 - hs, hs, hs + 14, K(0xFF14101A)) }
+                rect(c, 0, 280, W, 104, K(0xFF2A2030))                                                                      // the floor
+                rect(c, 196, 40, 40, 90, K(0xFF2A1E16)); for (k in 0 until 4) for (b in 0 until 6) rect(c, 199 + b * 6, 44 + k * 22, 4, 16, BOOK[(k * 6 + b) % BOOK.size])   // a bookshelf
+                rect(c, 0, 300, W, 3, K(0xFF3A2E40))
             }
             1 -> {   // a diner at night, the radio on the shelf
                 rect(c, 0, 250, W, 30, K(0xFF5A2A2A)); rect(c, 0, 250, W, 3, K(0xFFB8B0A0)); rect(c, 0, 280, W, 104, K(0xFF2A2A34))
                 for (x in 20 until W step 40) { rect(c, x, 292, 14, 4, K(0xFF8A2A2A)); rect(c, x + 6, 296, 2, 24, K(0xFF8A929A)) }
                 rect(c, 150, 120, 80, 4, K(0xFF4A3220)); rect(c, 170, 96, 40, 24, K(0xFF6A4A2E)); rect(c, 174, 100, 20, 16, K(0xFF2A1A10)); for (k in 0..2) px(c, 200, 102 + k * 5, K(0xFFE8C880))
-                for ((hx, hy) in listOf(60 to 240, 110 to 238)) { rect(c, hx - 6, hy - 30, 12, 30, K(0xFF14101A)); rect(c, hx - 5, hy - 40, 10, 10, K(0xFF14101A)) }
+                rect(c, 10, 150, 110, 60, K(0xFF0A0A10)); rect(c, 12, 152, 106, 56, K(0xFF2A2018)); rect(c, 30, 170, 20, 12, K(0xFF8A8A92)); rect(c, 70, 166, 30, 4, K(0xFF5A5A62))   // the kitchen hatch
                 p.typeface = android.graphics.Typeface.MONOSPACE; p.textSize = 16f; p.textAlign = Paint.Align.CENTER; p.color = K(0xFFFF38D6); c.drawText("DINER", 70f, 70f, p); p.typeface = null
             }
             2 -> {   // the police station: desks, officers stopped in front of the wall TV
                 rect(c, 70, 60, 120, 76, K(0xFF0A0A0E)); rect(c, 0, 260, W, 124, K(0xFF1A2030))
                 for (x in intArrayOf(20, 140)) { rect(c, x, 230, 90, 30, K(0xFF3A3020)); rect(c, x, 230, 90, 3, K(0xFF5A4A30)) }
                 rect(c, 214, 40, 34, 60, K(0xFF101830))
-                for ((k, hx) in listOf(40, 90, 130, 180).withIndex()) { rect(c, hx - 7, 190, 14, 40, K(0xFF101A3A)); rect(c, hx - 5, 178, 10, 12, K(0xFF14101A)); if (k != 2) rect(c, hx - 6, 176, 12, 3, K(0xFF0A1028)) }
+                for (k in 0 until 3) { rect(c, 10 + k * 70, 150, 50, 30, K(0xFF242C3E)); rect(c, 12 + k * 70, 152, 46, 4, K(0xFFE8E4D4)) }   // notice boards
             }
             3 -> {   // downtown: the big screens, a crowd with phones up, rain
                 skyline(c, 270, 0, W, 91, 160, K(0xFF0A0A16), 0.3f)
                 rect(c, 40, 90, 120, 70, K(0xFF050508)); rect(c, 170, 130, 70, 50, K(0xFF050508))
                 rect(c, 0, 270, W, 114, K(0xFF14141E))
-                for (k in 0 until 40) { val hx = (k * 7 + hash(k, 1, 4) % 6) % W; val hy = 300 + hash(k, 2, 4) % 40; rect(c, hx - 3, hy - 14, 6, 18, K(0xFF07070C)); rect(c, hx - 2, hy - 20, 5, 6, K(0xFF07070C)) }
             }
             else -> {   // the state capitol
                 rect(c, 40, 190, 176, 70, K(0xFF14141E)); rect(c, 40, 190, 176, 2, K(0xFF4A4A6A))
@@ -564,8 +564,24 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         }
         return bm
     }
+    private val BOOK = intArrayOf(K(0xFF6A2A2A), K(0xFF2A3A6A), K(0xFF3A5A3A), K(0xFF6A5A2A), K(0xFF4A2A5A))
+    private val folks = listOf(
+        Outfit(PX.SKIN, 0xFF3A2A1E.toInt(), null, null, 0xFFE8E0C8.toInt(), null, 0xFF3A4058.toInt(), PX.K, null),
+        Outfit(0xFFC89A78.toInt(), 0xFF1A1420.toInt(), null, null, 0xFF8A3A4A.toInt(), 0xFF3A3040.toInt(), 0xFF2A3350.toInt(), PX.K, null),
+        Outfit(0xFF8A6048.toInt(), 0xFF0E0A0A.toInt(), null, null, 0xFFB0C8E8.toInt(), null, 0xFF4A3A58.toInt(), PX.K, null, glasses = true),
+        Outfit(PX.SKIN, 0xFF8A8A92.toInt(), null, null, 0xFF5A7A5A.toInt(), 0xFF4A4A3A.toInt(), 0xFF3A3A44.toInt(), PX.K, null),
+        Outfit(0xFFA87858.toInt(), 0xFF6A3A1A.toInt(), null, null, 0xFFC8B048.toInt(), null, 0xFF2A2A3A.toInt(), PX.K, null),
+    )
+    private val cook = Outfit(PX.SKIN, 0xFF2A1A10.toInt(), PX.W, null, PX.W, null, 0xFF3A3A44.toInt(), PX.K, null, apron = PX.W)
+    private val waitress = Outfit(0xFFC89A78.toInt(), 0xFF8A3A1A.toInt(), null, null, 0xFF7AB8C8.toInt(), null, 0xFF7AB8C8.toInt(), PX.K, null, apron = PX.W)
+    private val copNoHat = Outfit(PX.SKIN, 0xFF1A1420.toInt(), null, null, 0xFF2F58C8.toInt(), null, 0xFF0E1736.toInt(), PX.K, PX.K, badge = true)
+    /** Tints whatever is drawn next by a light colour (TV blue, neon pink...). Call again with 0 to stop. */
+    private fun tint(col: Int) { p.colorFilter = if (col == 0) null else android.graphics.PorterDuffColorFilter(col, PorterDuff.Mode.MULTIPLY) }
+
     private fun sqrt01(v: Float) = kotlin.math.sqrt(max(0f, v))
     private val tvGlow by lazy { glowBitmap(90, K(0xFF6A9AFF), 0x50) }
+    private val flashBurst by lazy { glowBitmap(12, PX.W, 0xE0) }
+    private val neonGlow by lazy { glowBitmap(40, PX.MAG, 0x40) }
 
     private fun broadcast(c: Canvas, clock: Float) {
         val i = (world.t / FinaleWorld.VIGNETTE_S).toInt().coerceAtMost(FinaleWorld.VIGNETTES - 1)
@@ -581,15 +597,51 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
             for (sl in y until y + h step 2) rect(c, x, sl, w, 1, a(PX.K, 0x30))
         }
         when (i) {
-            0 -> { c.drawBitmap(tvGlow, 196f - 90f, 183f - 90f, plain); tv(154, 154, 84, 58) }
-            1 -> { for (k in 0 until 3) { val r = ((clock * 30f + k * 14f) % 42f); p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = a(K(0xFFE8C880), ((1f - r / 42f) * 0xC0).toInt()); c.drawCircle(184f, 108f, r, p); p.style = Paint.Style.FILL }; rect(c, 150, 200, 6, 4, a(PX.W, 0x60)) }
-            2 -> { c.drawBitmap(tvGlow, 130f - 90f, 98f - 90f, plain); tv(74, 64, 112, 68); if ((clock * 3f).toInt() % 2 == 0) { rect(c, 216, 42, 30, 56, a(PX.RED, 0x50)) } else rect(c, 216, 42, 30, 56, a(PX.BLUE, 0x50)) }
+            0 -> {
+                c.drawBitmap(tvGlow, 196f - 90f, 183f - 90f, plain); tv(154, 154, 84, 58)
+                // the family on the sofa, seen from behind, lit blue by the TV; the kid leans forward
+                tint(K(0xFF8AA0E0))
+                for ((k, hx) in listOf(44, 82, 120).withIndex()) { val lean = if (k == 1 && lt > 1.2f) 3 else 0; big(hx, 280 - lean) { folk(c, hx, 280 - lean, 0, 0, folks[k], false, false) } }
+                tint(0)
+                rect(c, 16, 262, 142, 40, K(0xFF3A2A3A)); rect(c, 16, 262, 142, 3, K(0xFF5A4A6A)); rect(c, 10, 256, 12, 46, K(0xFF2E2030)); rect(c, 152, 256, 12, 46, K(0xFF2E2030))   // the sofa back
+                for (x in 18 until 156) if (hash(x, 0, 3) % 4 == 0) px(c, x, 262, K(0xFF7A8AC0))                                                          // TV light on its edge
+            }
+            1 -> {
+                // the cook stops at the hatch; at the counter they all turn to the radio; the waitress stands with the pot
+                big(60, 196) { folk(c, 60, 196, 2, 0, cook, false, false) }
+                // the waitress behind the counter with the coffee pot, frozen; the customers on our side turn to the radio
+                tint(K(0xFFE0B0D0)); big(150, 262) { folk(c, 150, 262, 1, 0, waitress, false, false) }; tint(0)
+                rect(c, 0, 250, W, 30, K(0xFF5A2A2A)); rect(c, 0, 250, W, 3, K(0xFFB8B0A0)); rect(c, 0, 253, W, 1, K(0xFF7A3A3A))
+                rect(c, 172, 238, 4, 12, K(0xFF2A2A2A)); rect(c, 170, 236, 8, 4, K(0xFF8A6A3A)); for (k in 0..2) px(c, 173 + k, 232 - ((clock * 8f).toInt() + k) % 5, a(PX.W, 0x80))   // coffee, steaming
+                tint(K(0xFFE0B0D0))
+                for ((k, hx) in listOf(26, 100, 220).withIndex()) big(hx, 306) { folk(c, hx, 306, if (lt > 0.8f + k * 0.3f) (if (hx < 184) 1 else 3) else 0, 0, folks[k + 1], false, false) }
+                tint(0)
+                c.drawBitmap(neonGlow, 70f - 40f, 64f - 40f, plain)
+ for (k in 0 until 3) { val r = ((clock * 30f + k * 14f) % 42f); p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = a(K(0xFFE8C880), ((1f - r / 42f) * 0xC0).toInt()); c.drawCircle(184f, 108f, r, p); p.style = Paint.Style.FILL }; rect(c, 150, 200, 6, 4, a(PX.W, 0x60)) }
+            2 -> {
+                c.drawBitmap(tvGlow, 130f - 90f, 98f - 90f, plain); tv(74, 64, 112, 68)
+                if ((clock * 3f).toInt() % 2 == 0) rect(c, 216, 42, 30, 56, a(PX.RED, 0x50)) else rect(c, 216, 42, 30, 56, a(PX.BLUE, 0x50))
+                // the officers stop and watch; one takes his hat off
+                tint(K(0xFFA0B4E8))
+                for ((k, hx) in listOf(52, 98, 150, 198).withIndex()) big(hx, 262) { folk(c, hx, 262, 0, 0, if (k == 2 && lt > 1.4f) copNoHat else police, false, false) }
+                tint(0)
+                if (lt > 1.4f) { rect(c, 162, 246, 10, 4, police.hat!!); rect(c, 161, 249, 12, 1, police.brim!!) }   // the hat in his hand
+            }
             3 -> {
                 tv(44, 94, 112, 62); tv(174, 134, 62, 42)
-                for (k in 0 until 26) { val hx = (k * 11 + hash(k, 1, 6) % 8) % W; val hy = 280 + hash(k, 2, 6) % 40; rect(c, hx, hy - 4, 2, 3, K(0xFFDCEBFF)) }       // phones up
+                // the crowd, from behind, phones up to film the screens
+                val rows = listOf(300 to 22, 322 to 18, 346 to 14)
+                for ((ri, rr) in rows.withIndex()) { val (ry, n) = rr; for (k in 0 until n) { val hx = (k * (W / n) + hash(k, ri, 6) % 8 + (if (ri % 2 == 1) 6 else 0)) % W; val bob = if (hash(k, ri, 7) % 3 == 0 && (clock * 2f + k).toInt() % 2 == 0) 1 else 0
+                    big(hx, ry - bob, 1f + ri * 0.25f) { tint(K(0xFF9AA0C8)); folk(c, hx, ry - bob, 0, 0, folks[(k + ri) % folks.size], false, false); tint(0)
+                        if (hash(k, ri, 8) % 3 == 0) { rect(c, hx + 4, ry - bob - 24, 2, 8, folks[(k + ri) % folks.size].shirt); rect(c, hx + 3, ry - bob - 28, 4, 5, PX.K); rect(c, hx + 4, ry - bob - 27, 2, 3, K(0xFFDCEBFF)) } } } }
                 for (k in 0 until 60) { val rx = (hash(k, 1, 7) % W + (clock * 30f).toInt()) % W; val ry = (hash(k, 2, 7) % H + (clock * 220f).toInt() + k * 13) % H; rect(c, rx, ry, 1, 4, a(K(0xFF8AA0C8), 0x60)) }   // rain
             }
-            else -> { for (k in 0 until 11) { val on = lt > 0.3f + k * 0.18f; rect(c, 50 + k * 14 + 1, 204, 2, 10, if (on) PX.WARM else K(0xFF1A1A28)); rect(c, 50 + k * 14 + 1, 228, 2, 10, if (on && k % 2 == 0) PX.WARM else K(0xFF1A1A28)) } }
+            else -> {
+                for (k in 0 until 11) { val on = lt > 0.3f + k * 0.18f; rect(c, 50 + k * 14 + 1, 204, 2, 10, if (on) PX.WARM else K(0xFF1A1A28)); rect(c, 50 + k * 14 + 1, 228, 2, 10, if (on && k % 2 == 0) PX.WARM else K(0xFF1A1A28)) }
+                // reporters on the steps, cameras flashing
+                for (k in 0 until 9) { val hx = 30 + k * 24 + hash(k, 1, 9) % 8; big(hx, 300 + (k % 2) * 6, 1.5f) { folk(c, hx, 300 + (k % 2) * 6, 0, 0, folks[k % folks.size], false, false) }
+                    if (hash(k, (clock * 5f).toInt(), 10) % 7 == 0) { c.drawBitmap(flashBurst, hx - 12f, 262f - 12f, plain) } }
+            }
         }
         // cross-fade at the start and end of each place
         val edge = min(lt, FinaleWorld.VIGNETTE_S - lt)
