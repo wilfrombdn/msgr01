@@ -468,6 +468,7 @@ internal fun MainActivity.mentionPicker(box: EditText, g: Group): LinearLayout {
         val q = m?.groupValues?.get(1)?.lowercase()
         val hits = if (q == null) emptyList() else synchronized(Messenger.core) { g.members.toList() }
             .filter { it != me && (it.startsWith(q) || (Messenger.core.contact(it)?.name?.lowercase()?.contains(q) == true)) }.sorted().take(4)
+            .let { list -> if (q != null && g.owner.isNotEmpty() && g.isLeader(me ?: "") && "everyone".startsWith(q)) listOf("everyone") + list.take(3) else list }
         col.visibility = if (hits.isEmpty()) View.GONE else View.VISIBLE
         for (u in hits) col.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(6), dp(14), dp(6)); background = pressable()

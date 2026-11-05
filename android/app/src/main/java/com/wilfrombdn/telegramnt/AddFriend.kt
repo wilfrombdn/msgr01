@@ -104,8 +104,8 @@ internal fun MainActivity.myQr() {
 
 /** A scanned code: a friend (add them) or a group invite (join it). */
 internal fun MainActivity.scanned(text: String) {
-    if (text.startsWith("msgr01://group")) {
-        Messenger.run({ val g = Messenger.core.joinGroupLink(text); Messenger.kick(); groupToOpen = g.id }, { groupToOpen?.let { showGroup(it) } }) { e -> toast(errorText(e)) }
+    if (text.startsWith("msgr01://group") || text.startsWith("msgr01://join")) {
+        Messenger.run({ groupToOpen = null; groupToOpen = Messenger.core.joinGroupLink(text)?.id; Messenger.kick() }, { groupToOpen?.let { showGroup(it) } ?: toast("Request sent. An admin has to approve you.") }) { e -> toast(errorText(e)) }
         return
     }
     val body = text.removePrefix(QrActivity.ADD).trim().lowercase()

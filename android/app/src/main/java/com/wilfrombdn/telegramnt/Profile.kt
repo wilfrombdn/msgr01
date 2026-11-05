@@ -19,6 +19,12 @@ internal fun MainActivity.photoMenu(anchor: View) {
     else dropdown(anchor, Gravity.START, choose, "Remove photo" to { Messenger.run({ Messenger.core.setAvatar(null) }, { showProfile() }) })
 }
 
+internal fun MainActivity.pickGroupPhoto() {
+    val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)
+    else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
+    @Suppress("DEPRECATION") startActivityForResult(i, PICK_GROUP_PHOTO)
+}
+
 internal fun MainActivity.pickPhoto() {
     // The system photo picker needs no permissions and only hands over the one photo chosen.
     val i = if (Build.VERSION.SDK_INT >= 33) Intent(android.provider.MediaStore.ACTION_PICK_IMAGES)

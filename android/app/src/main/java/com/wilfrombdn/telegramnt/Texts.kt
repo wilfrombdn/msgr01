@@ -292,6 +292,21 @@ object Texts {
     fun setGroupName(ctx: Context, thread: Long, name: String) { prefs(ctx).edit().putString("gname$thread", name.trim()).apply(); reload(ctx) }
     fun threadTitle(ctx: Context, thread: Long, addresses: List<String>) = groupName(ctx, thread) ?: title(ctx, addresses)
 
+    // carrier-group extras, all kept on this phone only (the carrier has no place for them)
+    fun muted(ctx: Context): Set<Long> = idSet(ctx, "mute")
+    fun setMuted(ctx: Context, thread: Long, on: Boolean) { setId(ctx, "mute", thread, on); reload(ctx) }
+    fun groupPhoto(ctx: Context, thread: Long): ByteArray? = prefs(ctx).getString("gpic$thread", null)?.takeIf { it.isNotEmpty() }?.let { runCatching { android.util.Base64.decode(it, android.util.Base64.NO_WRAP) }.getOrNull() }
+    fun setGroupPhoto(ctx: Context, thread: Long, jpeg: ByteArray?) { prefs(ctx).edit().putString("gpic$thread", jpeg?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) } ?: "").apply(); reload(ctx) }
+
+    /** Does [text] say my name or @username? (Used for the @ badge and to let a muted group through.) Needs a signed-in Tellem account. */
+    fun mentionsMe(text: String): Boolean {
+        val me = runCatching { Messenger.core.me }.getOrNull() ?: return false
+        val names = listOf(me.user, me.name.trim().substringBefore(' ')).map { it.lowercase() }.filter { it.length >= 3 }.distinct()
+        if (names.isEmpty()) return false
+        val edge = "[\\p{L}\\p{N}_]"
+        return Regex("(?<!$edge)@?(" + names.joinToString("|") { Regex.escape(it) } + ")(?!$edge)", RegexOption.IGNORE_CASE).containsMatchIn(text)
+    }
+
     private fun idSet(ctx: Context, key: String) = prefs(ctx).getStringSet(key, emptySet())!!.mapNotNull { it.toLongOrNull() }.toSet()
     private fun setId(ctx: Context, key: String, id: Long, on: Boolean) {
         val now = prefs(ctx).getStringSet(key, emptySet())!!.toMutableSet()
@@ -512,6 +527,8 @@ object Texts {
         val recent = messages(ctx, thread, 30)
         val spam = spamVerdict(ctx, thread, people, recent.lastOrNull { !it.mine }?.body.orEmpty(), recent.any { it.mine })
         if (spam) return   // spam never notifies; it waits quietly in Spam & blocked
+        // a muted conversation stays silent, unless someone writes my name and "Mentions get through mute" is on
+        if (thread in muted(ctx) && !(Messenger.mentionsBreakMute && recent.takeLastWhile { !it.mine }.takeLast(3).any { mentionsMe(it.body) })) return
         val title = (if (spam) "Possible spam · " else "") + if (showNames) title(ctx, people) else APP_NAME
         val open = PendingIntent.getActivity(ctx, ("t$thread").hashCode(), Intent(ctx, MainActivity::class.java).putExtra("textThread", thread),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

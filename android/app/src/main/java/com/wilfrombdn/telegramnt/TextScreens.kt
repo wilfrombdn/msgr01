@@ -104,24 +104,31 @@ internal fun MainActivity.textRow(t: Texts.Thread, pins: Set<Long> = Texts.pins(
             // no "Archive" here any more (it stays in the chat's ⋮ menu); an archived text can still be moved back
             val items = listOfNotNull<Pair<String, () -> Unit>>(
                 (if (pinned) "Unpin" else "Pin to top") to { Texts.setPinned(this@textRow, t.id, !pinned) },
+                (if (t.id in Texts.muted(this@textRow)) "Unmute" else "Mute") to { Texts.setMuted(this@textRow, t.id, t.id !in Texts.muted(this@textRow)) },
                 if (t.archived) "Unarchive" to { Texts.setArchived(this@textRow, t.id, false); toast("Moved back to your texts") } else null,
                 (if (t.spam) "Not spam" else "Move to spam") to { Texts.markSpam(this@textRow, t.id, !t.spam); toast(if (t.spam) "Moved back to your texts" else "Moved to spam") },
             )
             dropdown(v, Gravity.END, *items.toTypedArray()); true
         }
     }
-    row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54, null, numberSeed(t.addresses.joinToString(","))))   // a bare number gets "#", not "+5"
+    val muted = t.id in Texts.muted(this)
+    row.addView(avatar(if (title.any(Char::isLetter)) title else "#", 54, if (t.addresses.size > 1) Texts.groupPhoto(this, t.id) else null, numberSeed(t.addresses.joinToString(","))))   // a bare number gets "#", not "+5"
     val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
     val line1 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
     line1.addView(tv(title, 16.5f, white, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+    if (muted) line1.addView(tv("🔇", 12f, dim).apply { setPadding(dp(4), 0, 0, 0) })
     if (pinned) line1.addView(pinMark())
     if (Texts.mixed(this)) line1.addView(tv("SMS", 10.5f, Color.WHITE, true).apply { setPadding(dp(5), dp(1), dp(5), dp(1)); background = round(smsGreen, 4) })   // only needed when texts sit among the chats
     line1.addView(tv(time(t.date), 13f, dim).apply { setPadding(dp(6), 0, 0, 0) })
     mid.addView(line1)
     val line2 = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
     line2.addView(tv(t.snippet.replace('\n', ' '), 15f, dim).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+    if (t.unread > 0 && Texts.mentionsMe(t.snippet)) line2.addView(tv("@", 12.5f, Color.WHITE, true).apply {
+        gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(4), dp(1), dp(4), dp(1)); background = round(smsGreen, 11)
+        (layoutParams as? LinearLayout.LayoutParams)?.rightMargin = dp(4)
+    })
     if (t.unread > 0) line2.addView(tv("${t.unread}", 12.5f, Color.WHITE, true).apply {
-        gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1)); background = round(smsGreen, 11)
+        gravity = Gravity.CENTER; minWidth = dp(22); setPadding(dp(6), dp(1), dp(6), dp(1)); background = round(if (muted) faint else smsGreen, 11)
     })
     mid.addView(line2)
     row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
@@ -210,6 +217,10 @@ internal fun MainActivity.textThreadMenu(anchor: View) {
     val t = Texts.threads.firstOrNull { it.id == id }
     val items = ArrayList<Pair<String, () -> Unit>>()
     val pinned = id in Texts.pins(this)
+    items += "Search" to { showTextSearch() }
+    items += "Photos & videos" to { showTextGallery() }
+    val mutedNow = id in Texts.muted(this)
+    items += (if (mutedNow) "Unmute" else "Mute") to { Texts.setMuted(this, id, !mutedNow); toast(if (mutedNow) "Unmuted" else "Muted. Mentions of your name still get through.") }
     items += (if (t?.archived == true) "Unarchive" else "Archive") to { Texts.setArchived(this, id, t?.archived != true); toast(if (t?.archived == true) "Moved back to your texts" else "Archived"); if (t?.archived != true) leaveTexts() }
     items += (if (pinned) "Unpin from top" else "Pin to top") to { Texts.setPinned(this, id, !pinned); toast(if (pinned) "Unpinned" else "Pinned to the top of your texts") }
     people.singleOrNull()?.takeIf { Texts.contact(this, it) == null }?.let { n ->
@@ -227,6 +238,11 @@ internal fun MainActivity.textThreadMenu(anchor: View) {
                 match?.let { p -> showEditContact(p) { showTextThread(back, people) } } ?: toast("Couldn't find that contact")
             }) { toast("Couldn't find that contact") }
         }
+    }
+    if (people.size > 1) {
+        items += (if (Texts.groupPhoto(this, id) == null) "Set group photo" else "Change group photo") to { pickTextGroupPhoto() }
+        if (Texts.groupPhoto(this, id) != null) items += "Remove group photo" to { Texts.setGroupPhoto(this, id, null); showTextThread(id, people) }
+        items += "Move to Tellem" to { moveTextGroupToTellem() }
     }
     if (people.size > 1) items += "Name this group" to {
         val box = field("Group name", Texts.groupName(this, id).orEmpty())
@@ -426,6 +442,10 @@ internal fun MainActivity.fillTextThread() {
         want.forEachIndexed { i, v -> if (list.getChildAt(i) !== v) { (v.parent as? ViewGroup)?.removeView(v); list.addView(v, i) } }
         if (msgs.isEmpty()) list.addView(tv("Texts go through your phone carrier, not Tor, and aren't encrypted.", 13.5f, dim).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) })
         // the scroller keeps to the bottom while you're there (see chatScroller)
+        textJump?.let { p ->
+            textJump = null
+            textViews.entries.firstOrNull { it.key.startsWith(p) }?.value?.let { v -> textScroll?.let { s -> s.post { s.post { s.scrollTo(0, (v.top - dp(80)).coerceAtLeast(0)); stick = false } } } }
+        }
         if (textRestoreY >= 0) { val y = textRestoreY; textRestoreY = -1; textScroll?.let { s -> s.post { s.scrollTo(0, y); stick = atBottom(s) } } }
     })
 }

@@ -153,6 +153,7 @@ class MainActivity : Activity() {
             drawer?.isDrawerOpen(GravityCompat.START) == true -> drawer?.closeDrawer(GravityCompat.START)
             screen == Screen.CROP && cropCancel != null -> cropCancel?.invoke()
             screen == Screen.SNAP_SEND -> cancelSnap()
+            screen == Screen.TEXT_TOOLS -> showTextThread(textThread, textPeople.ifEmpty { null })
             screen == Screen.TEXT_THREAD || screen == Screen.NEW_TEXT || screen == Screen.TEXT_SPAM -> leaveTexts()
             !Messenger.signedIn && screen != Screen.WELCOME -> showWelcome()
             screen == Screen.VIEWER -> leaveViewer()
@@ -277,6 +278,8 @@ class MainActivity : Activity() {
     internal var textsTab = false
         set(v) { if (v != field) openCallAt = 0L; field = v }                        // separate mode: the Texts tab is showing
     internal var textThread = 0L
+    internal var textPhotoFor = 0L          // the group text whose photo is being picked
+    internal var textJump: String? = null   // after a search: the message (key prefix) to scroll to once the chat is drawn
     internal var textPeople: List<String> = emptyList()
     internal var textImage: Pair<ByteArray, String>? = null
     internal var textImageBar: TextView? = null
@@ -328,6 +331,7 @@ class MainActivity : Activity() {
     internal var pinnedKeys = emptySet<String>()
 
     internal var groupToOpen: String? = null
+    internal var groupPhotoFor: String? = null   // the group whose photo is being picked
 
     internal var groupId: String? = null
     internal var groupBubbles: LinearLayout? = null
@@ -548,6 +552,8 @@ class MainActivity : Activity() {
         if (requestCode == PICK_ATTACH_PHOTO || requestCode == PICK_ATTACH_FILE) return attachPicked(uri, requestCode == PICK_ATTACH_PHOTO)
         if (requestCode == TAKE_MEDIA) return attachPicked(uri, data?.getBooleanExtra("photo", true) ?: true)
         if (requestCode == PICK_CONTACT_PHOTO) return contactPhotoPicked(uri)
+        if (requestCode == PICK_GROUP_PHOTO) return groupPhotoPicked(uri)
+        if (requestCode == PICK_TEXT_GROUP_PHOTO) return textGroupPhotoPicked(uri)
         if (requestCode == PICK_CONTACT) return contactPicked(uri)
         if (requestCode == TEXT_IMAGE) return textImagePicked(uri)
         if (requestCode == TEXT_CAMERA) return textImagePicked(uri, fromCamera = true)

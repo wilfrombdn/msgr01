@@ -367,7 +367,9 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         return "msgr01://group#" + Base64.getUrlEncoder().withoutPadding().encodeToString(o.toString().toByteArray())
     }
 
-    fun joinGroupLink(link: String): Group {
+    /** A group link joins at once; a join link only sends a request (returns null, an admin has to approve). */
+    fun joinGroupLink(link: String): Group? {
+        if (link.contains("msgr01://join")) { requestJoin(link); return null }
         val frag = link.trim().substringAfter('#', "")
         val o = try { JSONObject(String(Base64.getUrlDecoder().decode(frag))) } catch (e: Exception) { throw UserError("That isn't a valid group link") }
         val secret = o.optString("s")
@@ -411,9 +413,12 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
      */
     fun rekeyGroup(g: Group, remove: Set<String>) = synchronized(g.rekeyDue) {   // one re-key at a time per group
         val m = me ?: throw UserError("Not signed in")
-        if (g.owner.isEmpty() || m.user != g.owner) throw UserError("Only the group owner can remove members")
+        if (g.owner.isEmpty() || !g.isLeader(m.user)) throw UserError("Only an admin can remove members")
         val removeN = remove.map { it.removePrefix("@").lowercase() }.toSet()
-        val kept = synchronized(this) { g.members.filter { it != m.user && it !in removeN } }
+        // admins can remove members; only the owner can remove an admin (and nobody can remove the owner)
+        if (m.user != g.owner && removeN.any { it == g.owner || it in g.leaders }) throw UserError("Only the owner can remove an admin")
+        if (g.owner in removeN) throw UserError("The owner can't be removed")
+        val kept = synchronized(this) { g.members.filter { it != m.user && it !in removeN } + listOfNotNull(g.owner.takeIf { it != m.user }) }.distinct()
         val newSecret = Crypto.randomHex()
         val newEpoch = g.epoch + 1
         val keys = JSONObject()
@@ -485,7 +490,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         msg.reply = Msg.replyRef(reply)
         msg.fwd = fwd
         msg.lp = lp
-        synchronized(this) { g.msgs.add(msg) }
+        synchronized(this) { g.msgs.add(timed(g, msg)) }
         onChange()
         return msg
     }
@@ -497,7 +502,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val poll = Msg.pollOf(JSONObject().put("q", question).put("o", JSONArray(options))) ?: throw UserError("A poll needs a question and at least 2 options")
         if (!g.canPost(m.user)) throw UserError("Only admins can post in this group")
         val msg = Msg(Crypto.randomHex(16), true, "", System.currentTimeMillis(), Msg.SENDING).also { it.poll = poll; it.sender = m.user }
-        synchronized(this) { g.msgs.add(msg) }
+        synchronized(this) { g.msgs.add(timed(g, msg)) }
         onChange()
         deliverGroup(g, msg)
         return msg
@@ -540,20 +545,183 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
 
 
     /** A leader changes the group's name / read-only / leader list; broadcast as an authenticated set. */
-    fun setGroup(g: Group, name: String, readOnly: Boolean, leaders: Set<String>) {
+    fun setGroup(g: Group, name: String, readOnly: Boolean, leaders: Set<String>, desc: String = g.desc, ttl: Int = g.ttl) {
         val m = me ?: return
         if (!g.isLeader(m.user)) throw UserError("Only an admin can change this group")
         synchronized(this) {
             g.name = name.trim().take(80).ifEmpty { g.name }
             g.readOnly = readOnly
-            g.leaders.clear(); g.leaders.addAll(leaders); if (g.owner.isNotEmpty()) g.leaders.add(g.owner)
-            g.setVer++
+            g.desc = desc.trim().take(MAX_GROUP_DESC)
+            if (ttl != g.ttl) { g.ttl = ttl.coerceIn(0, 31 * 86400); g.msgs.add(note(if (g.ttl == 0) "Disappearing messages turned off." else "Disappearing messages: on, ${timerLabel(g.ttl)}. New messages delete on every phone.")) }
+            if (m.user == g.owner) g.leaders.clear()   // only the owner can take admin rights away
+            g.leaders.addAll(leaders); if (g.owner.isNotEmpty()) g.leaders.add(g.owner)
         }
+        broadcastSet(g, m)
+    }
+
+    /** In a group with a disappearing-messages timer, a new message gets its deadline when it is added. */
+    private fun timed(g: Group, msg: Msg): Msg {
+        if (g.ttl > 0 && msg.state != Msg.NOTE) msg.expires = System.currentTimeMillis() + g.ttl * 1000L
+        return msg
+    }
+
+    /** Admin: set (or clear, with null) the group photo and send it to everyone. */
+    fun setGroupPhoto(g: Group, jpeg: ByteArray?) {
+        val m = me ?: return
+        if (!g.isLeader(m.user) || g.owner.isEmpty()) throw UserError("Only an admin can change the group photo")
+        require(jpeg == null || jpeg.size <= MAX_AVATAR) { "photo too big" }
+        synchronized(this) { g.avatar = jpeg }
+        changed()
+        runCatching { sendGroupPhoto(g, m) }
+    }
+
+    private fun sendGroupPhoto(g: Group, m: Me) {
+        gctl(g, m, JSONObject().put("t", "gpic").put("d", g.avatar?.let { b64(it) } ?: ""))
+    }
+
+    /** A new member just appeared: an admin hands them the description, timer and photo (they missed the earlier broadcasts). */
+    private fun resendProfile(m: Me, g: Group) {
+        if (!g.isLeader(m.user) || g.owner.isEmpty()) return
+        if (g.setVer > 0) gctl(g, m, JSONObject().put("t", "set").put("ver", g.setVer).put("n", g.name)
+            .put("ro", g.readOnly).put("ldr", JSONArray(g.leaders.toList()))
+            .put("jm", g.joinMode).put("lk", g.linkSecret).put("d", g.desc).put("tl", g.ttl))
+        if (g.avatar != null) sendGroupPhoto(g, m)
+    }
+
+    private fun broadcastSet(g: Group, m: Me) {
+        synchronized(this) { g.setVer++ }
         changed()
         runCatching {
             gctl(g, m, JSONObject().put("t", "set").put("ver", g.setVer).put("n", g.name)
-                .put("ro", g.readOnly).put("ldr", JSONArray(g.leaders.toList())))
+                .put("ro", g.readOnly).put("ldr", JSONArray(g.leaders.toList()))
+                .put("jm", g.joinMode).put("lk", g.linkSecret).put("d", g.desc).put("tl", g.ttl))
         }
+    }
+
+    // ---------- joining by link, with admin approval ----------
+    // The link holds only a "join ticket", never the group's secret. A person who uses it posts a signed request to the
+    // group's join mailbox; an admin approves, and only then is the secret sealed to that one person's key.
+
+    private fun joinAddr(owner: String, ls: String) = Crypto.sha256("msgr01-join|$owner|$ls".toByteArray()).hex()
+    private fun joinKey(owner: String, ls: String) = Crypto.sha256("msgr01-join-key|$owner|$ls".toByteArray())
+    private fun joinReplyAddr(owner: String, ls: String, user: String) = Crypto.sha256("msgr01-join-ok|$owner|$ls|$user".toByteArray()).hex()
+    private fun joinReqBytes(addr: String, user: String, ts: Long) = "msgr01-join-req|$addr|$user|$ts".toByteArray()
+
+    /** Admin: turn approval-by-link on (1) or off (0). Turning it off cancels the link. */
+    fun setJoinMode(g: Group, mode: Int) {
+        val m = me ?: return
+        if (!g.isLeader(m.user) || g.owner.isEmpty()) throw UserError("Only an admin can change this")
+        synchronized(this) {
+            g.joinMode = if (mode == 1) 1 else 0
+            if (g.joinMode == 1 && g.linkSecret.isEmpty()) { g.linkSecret = Crypto.randomHex(); g.joinCursor = 0 }
+            if (g.joinMode == 0) { g.linkSecret = ""; g.requests.clear() }
+        }
+        broadcastSet(g, m)
+    }
+
+    /** Admin: cancel the current link and make a new one. People already approved stay in. */
+    fun revokeJoinLink(g: Group) {
+        val m = me ?: return
+        if (!g.isLeader(m.user) || g.joinMode != 1) throw UserError("Turn on join requests first")
+        synchronized(this) { g.linkSecret = Crypto.randomHex(); g.joinCursor = 0; g.requests.clear() }
+        broadcastSet(g, m)
+    }
+
+    fun groupJoinLink(g: Group): String {
+        val o = JSONObject().put("l", g.linkSecret).put("n", g.name).put("o", g.owner)
+        return "msgr01://join#" + Base64.getUrlEncoder().withoutPadding().encodeToString(o.toString().toByteArray())
+    }
+
+    /** A person waiting for an answer to a join request, remembered until approved or a week passes. */
+    class JoinWait(val link: String, val name: String, val owner: String, val at: Long = System.currentTimeMillis(), var cursor: Long = 0)
+    private val joinWaits = mutableListOf<JoinWait>()
+    fun pendingJoins(): List<JoinWait> = synchronized(this) { joinWaits.toList() }
+
+    /** Uses a join link: sends a signed request to the group's admins. Returns the group name. */
+    fun requestJoin(link: String): String {
+        val m = me ?: throw UserError("Not signed in")
+        val frag = link.trim().substringAfter('#', "")
+        val o = try { JSONObject(String(Base64.getUrlDecoder().decode(frag))) } catch (e: Exception) { throw UserError("That isn't a valid group link") }
+        val ls = o.optString("l"); val owner = o.optString("o")
+        if (ls.length != 64 || !ls.all { it in "0123456789abcdef" } || !USERNAME.matches(owner)) throw UserError("That isn't a valid group link")
+        val name = o.optString("n").take(80).ifBlank { "Group" }
+        if (synchronized(this) { groups.any { it.owner == owner && it.joinMode == 1 && it.linkSecret == ls } }) throw UserError("You're already in that group")
+        val addr = joinAddr(owner, ls)
+        val ts = System.currentTimeMillis()
+        val sig = m.signal.identity.privateKey.calculateSignature(joinReqBytes(addr, m.user, ts))
+        val req = JSONObject().put("u", m.user).put("ts", ts).put("sig", b64(sig))
+        relay.gsend(addr, Crypto.gcmSeal(joinKey(owner, ls), "msgr01-join", req.toString().toByteArray()))
+        synchronized(this) { if (joinWaits.none { it.link == ls }) joinWaits.add(JoinWait(ls, name, owner)) }
+        changed()
+        return name
+    }
+
+    /** Joiner: look for an approval. Called from the poll loop. */
+    private fun pollJoins(m: Me) {
+        val now = System.currentTimeMillis()
+        synchronized(this) { joinWaits.removeAll { now - it.at > 7 * 24 * 3600_000L } }
+        for (w in synchronized(this) { joinWaits.toList() }) runCatching {
+            val reply = joinReplyAddr(w.owner, w.link, m.user)
+            val got = relay.gfetch(reply, w.cursor, 0)
+            for (gm in got) {
+                w.cursor = maxOf(w.cursor, gm.seq)
+                val o = Crypto.open(m.enc, reply, gm.blob) ?: continue
+                val inner = try { JSONObject(String(o.inner ?: continue)) } catch (e: Exception) { continue }
+                val a = inner.optString("a"); val secret = inner.optString("s")
+                if (!USERNAME.matches(a) || inner.optString("o") != w.owner) continue
+                if (secret.length != 64 || !secret.all { it in "0123456789abcdef" }) continue
+                val p = relay.lookup(a) ?: continue
+                val sigKey = Crypto.parsePublic(unb64(p.sig), Crypto.SIG_TEMPLATE) ?: continue
+                if (!Crypto.verify(sigKey, o)) continue   // only the person named as approver can have made this
+                val g = joinGroup(secret, inner.optString("n").take(80).ifBlank { w.name }, inner.optBoolean("p"), w.owner)
+                synchronized(this) { g.members.add(a); joinWaits.remove(w) }
+                changed()
+                return@runCatching
+            }
+        }
+    }
+
+    /** Admin: look for new join requests. */
+    private fun pollJoinRequests(m: Me, g: Group) {
+        if (g.joinMode != 1 || g.linkSecret.isEmpty() || !g.isLeader(m.user)) return
+        val addr = joinAddr(g.owner, g.linkSecret)
+        val key = joinKey(g.owner, g.linkSecret)
+        val got = relay.gfetch(addr, g.joinCursor, 0)
+        for (gm in got) {
+            g.joinCursor = maxOf(g.joinCursor, gm.seq)
+            val plain = Crypto.gcmOpen(key, "msgr01-join", gm.blob) ?: continue
+            val r = try { JSONObject(String(plain)) } catch (e: Exception) { continue }
+            val u = r.optString("u"); val ts = r.optLong("ts")
+            if (!USERNAME.matches(u) || u == m.user) continue
+            if (synchronized(this) { u in g.members || g.requests.any { it.user == u } || g.requests.size >= MAX_JOIN_REQUESTS }) continue
+            val p = relay.lookup(u) ?: continue
+            val ident = try { IdentityKey(unb64(p.ident)) } catch (e: Exception) { continue }
+            if (!ident.publicKey.verifySignature(joinReqBytes(addr, u, ts), unb64(r.optString("sig")))) continue   // someone posting as @u
+            synchronized(this) { g.requests.add(JoinReq(u, System.currentTimeMillis())) }
+        }
+        if (got.isNotEmpty()) changed()
+    }
+
+    /** Admin: let [user] in. Only now is the group's secret sealed to them. */
+    fun approveJoin(g: Group, user: String) {
+        val m = me ?: return
+        if (!g.isLeader(m.user)) throw UserError("Only an admin can approve")
+        val p = relay.lookup(user) ?: throw UserError("@$user isn't on Tellem any more")
+        val enc = Crypto.parsePublic(unb64(p.enc), Crypto.ENC_TEMPLATE) ?: throw UserError("@$user's keys look wrong")
+        val reply = joinReplyAddr(g.owner, g.linkSecret, user)
+        val inner = JSONObject().put("a", m.user).put("s", g.secret).put("n", g.name).put("p", g.public).put("o", g.owner)
+        relay.gsend(reply, Crypto.seal(m.sig, enc, reply, inner.toString().toByteArray()))
+        synchronized(this) { g.members.add(user); g.requests.removeAll { it.user == user }; g.msgs.add(note("@$user was approved to join.")) }
+        changed()
+        runCatching { gctl(g, m, JSONObject().put("t", "jdone").put("u", user).put("ok", true)) }
+    }
+
+    fun denyJoin(g: Group, user: String) {
+        val m = me ?: return
+        if (!g.isLeader(m.user)) throw UserError("Only an admin can do this")
+        synchronized(this) { g.requests.removeAll { it.user == user } }
+        changed()
+        runCatching { gctl(g, m, JSONObject().put("t", "jdone").put("u", user)) }
     }
 
     fun deliverGroup(g: Group, msg: Msg) {
@@ -614,7 +782,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         val f = JSONObject().put("k", key).put("n", cleanName(name)).put("m", cleanMime(mime)).put("s", data.size).put("local", local).put("grp", true)
         thumb?.let { f.put("th", b64(it)) }
         val msg = Msg(Crypto.randomHex(16), true, "", System.currentTimeMillis(), Msg.SENDING).also { it.file = f; it.sender = m.user }
-        synchronized(this) { g.msgs.add(msg) }
+        synchronized(this) { g.msgs.add(timed(g, msg)) }
         onChange()
         return msg
     }
@@ -648,6 +816,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         // (or re-syncs) later can still read my messages.
         if (g.distSent && System.currentTimeMillis() - g.distAt > GROUP_FILE_TTL * 500L) runCatching { postMyDist(m, g) }
         if (m.user == g.owner && g.owner.isNotEmpty()) { drainRekeyDue(g); resendRekeys(m, g) }
+        runCatching { pollJoinRequests(m, g) }
         val got = relay.gfetch(g.addr, g.cursor, wait)
         if (got.isEmpty()) return
         // decode everything, then handle sender-key announcements before chat messages so a
@@ -682,6 +851,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 // a new member just arrived: re-post my sender key so they can read my messages
                 // (the short group TTL may have swept my earlier one). u != me guards against self-echo.
                 if (isNew && g.distSent && u != m.user) runCatching { postMyDist(m, g) }
+                if (isNew && u != m.user) runCatching { resendProfile(m, g) }
             }
             "gmsg" -> {
                 val id = inner.optString("id")
@@ -735,7 +905,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 val f = p.optJSONObject("f")?.let { checkFile(it) } ?: return
                 if (id.isEmpty() || synchronized(this) { g.msgs.any { it.id == id } }) return
                 val msg = Msg(id, false, "", System.currentTimeMillis(), Msg.RECEIVED).also { it.sender = u; it.file = f; it.fwd = Msg.fwdOf(p) }
-                synchronized(this) { g.msgs.add(msg); if (openChat != "g:${g.id}") g.unread++ }
+                synchronized(this) { g.msgs.add(timed(g, msg)); if (openChat != "g:${g.id}") g.unread++ }
                 toFetch.add(msg)   // poll() downloads it; fetchFile skips doneWith for group files
             }
             "typing" -> {
@@ -755,7 +925,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 val poll = Msg.pollOf(p.optJSONObject("poll")) ?: return
                 if (id.isEmpty() || synchronized(this) { g.msgs.any { it.id == id } }) return
                 val msg = Msg(id, false, "", System.currentTimeMillis(), Msg.RECEIVED).also { it.sender = u; it.poll = poll }
-                synchronized(this) { g.msgs.add(msg); if (openChat != "g:${g.id}") g.unread++ }
+                synchronized(this) { g.msgs.add(timed(g, msg)); if (openChat != "g:${g.id}") g.unread++ }
                 onChange()
             }
             "vote" -> {   // the gctl proves who voted, so nobody can vote for someone else
@@ -786,10 +956,39 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                     g.name = p.optString("n", g.name).take(80).ifEmpty { g.name }
                     g.readOnly = p.optBoolean("ro", g.readOnly)
                     p.optJSONArray("ldr")?.let { arr ->
-                        g.leaders.clear(); for (i in 0 until arr.length()) g.leaders.add(arr.getString(i))
+                        // an admin can add admins; only the owner can take admin rights away
+                        if (u == g.owner) g.leaders.clear()
+                        for (i in 0 until arr.length()) arr.optString(i).takeIf { USERNAME.matches(it) }?.let { g.leaders.add(it) }
                         if (g.owner.isNotEmpty()) g.leaders.add(g.owner)
                     }
+                    if (p.has("d")) g.desc = p.optString("d").take(MAX_GROUP_DESC)
+                    if (p.has("tl")) {
+                        val tl = p.optInt("tl").coerceIn(0, 31 * 86400)
+                        if (tl != g.ttl) { g.ttl = tl; g.msgs.add(note(if (tl == 0) "@$u turned off disappearing messages." else "@$u set disappearing messages: ${timerLabel(tl)}.")) }
+                    }
+                    if (p.has("jm")) {
+                        g.joinMode = if (p.optInt("jm") == 1) 1 else 0
+                        val lk = p.optString("lk")
+                        val ok = lk.length == 64 && lk.all { it in "0123456789abcdef" }
+                        val mine = if (g.isLeader(m.user) && g.joinMode == 1 && ok) lk else ""   // only admins keep the link secret
+                        if (mine != g.linkSecret) { g.linkSecret = mine; g.joinCursor = 0 }
+                        if (g.joinMode == 0) g.requests.clear()
+                    }
                 }
+                onChange()
+            }
+            "gpic" -> {   // the group photo: admins only, small JPEGs only
+                if (!g.isLeader(u) || g.owner.isEmpty()) return
+                val d = p.optString("d")
+                val bytes = if (d.isEmpty()) null else unb64(d)
+                if (bytes != null && (bytes.size < 4 || bytes.size > MAX_AVATAR || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte())) return
+                synchronized(this) { g.avatar = bytes }
+                onChange()
+            }
+            "jdone" -> {   // another admin answered a join request
+                if (!g.isLeader(u)) return
+                val who = p.optString("u")
+                synchronized(this) { g.requests.removeAll { it.user == who }; if (p.optBoolean("ok")) g.members.add(who) }
                 onChange()
             }
             "leave" -> {   // authenticated departure: drop them, and if I'm the owner, re-key so they lose access
@@ -800,12 +999,13 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 if (me?.user == g.owner && g.owner.isNotEmpty()) { synchronized(g.rekeyDue) { g.rekeyDue.add(u) }; drainRekeyDue(g) }
                 onChange()
             }
-            "rekey" -> {   // only the owner may re-key, and only to a newer epoch
+            "rekey" -> {   // the owner or an admin may re-key, and only to a newer epoch
                 val ep = p.optInt("ep", 0)
-                if (u != g.owner || g.owner.isEmpty() || ep <= g.epoch) return
+                if (g.owner.isEmpty() || !g.isLeader(u) || ep <= g.epoch) return
                 val keys = p.optJSONObject("keys") ?: return
                 val mine = keys.optString(m.user)
                 if (mine.isEmpty()) {   // no piece for me => I was removed
+                    if (u != g.owner && (m.user == g.owner || m.user in g.leaders)) return   // an admin can't remove the owner or another admin
                     synchronized(this) { g.msgs.add(note("You were removed from this group.")) }
                     synchronized(this) { groups.remove(g) }
                     onChange(); return
@@ -814,8 +1014,10 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
                 val newSecret = opened.inner?.let { String(it) } ?: return
                 if (newSecret.length != 64 || !newSecret.all { it in "0123456789abcdef" }) return
                 val leaders = mutableSetOf<String>().apply { p.optJSONArray("ldr")?.let { for (i in 0 until it.length()) add(it.getString(i)) } }
-                val kept = mutableSetOf(g.owner, m.user).apply { keys.keys().forEach { add(it) } }
+                val kept = mutableSetOf(g.owner, u, m.user).apply { keys.keys().forEach { add(it) } }
                 val removed = synchronized(this) { g.members.filter { it !in kept } }.toSet()
+                // an admin can't push out the owner or another admin; only the owner can
+                if (u != g.owner && removed.any { it == g.owner || it in g.leaders }) return
                 migrateGroup(g, newSecret, ep, removed, p.optString("n", g.name), p.optBoolean("ro", g.readOnly), leaders)
             }
         }
@@ -845,11 +1047,12 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
             msg.fwd = fwd
             msg.lp = lp
             msg.loc = loc
-            g.msgs.add(msg)
+            g.msgs.add(timed(g, msg))
             if (openChat != "g:${g.id}") g.unread++
         }
         val mine = me?.user
-        if (mine != null && openChat != "g:${g.id}" && Format.MENTION.findAll(text).any { it.groupValues[1] == mine }) { g.mentioned = true; onMention(g) }
+        val toMe = mine != null && (Format.MENTION.findAll(text).any { it.groupValues[1] == mine || (it.groupValues[1] == "everyone" && g.owner.isNotEmpty() && g.isLeader(u)) } || reply?.optString("u") == mine)
+        if (toMe && openChat != "g:${g.id}") { g.mentioned = true; if (g.mentionMsg == null) g.mentionMsg = id; onMention(g) }
     }
 
     /** Marks a chat read and, if read receipts are on, tells the other side. */
@@ -1088,6 +1291,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         var changed = false
         synchronized(this) {
             for (c in contacts) if (c.msgs.removeAll { it.expires in 1..now }) changed = true
+            for (g in groups) if (g.msgs.removeAll { it.expires in 1..now }) changed = true
         }
         if (changed) onChange()
         return changed
@@ -1413,6 +1617,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         if (synchronized(this) { callNotes.isNotEmpty() }) sendCallNotes()
         if (synchronized(this) { acceptDue.isNotEmpty() }) sendDueAccepts()
         for (g in synchronized(this) { groups.toList() }) runCatching { pollGroup(m, g, 0) }
+        if (synchronized(this) { joinWaits.isNotEmpty() }) pollJoins(m)
         purgeExpired()
         for (msg in synchronized(this) { toFetch.toList() }) {
             if (msg.file?.let { autoFetch(it) } == false) continue   // waits for a tap
@@ -1762,6 +1967,7 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         return o.put("contacts", JSONArray(contacts.map { it.json(withMsgs = true) })).put("backupDirty", backupDirty)
             .put("readReceipts", readReceipts).put("showTyping", showTyping).put("showSeen", showSeen).put("blocked", JSONArray(blocked.toList())).put("groups", JSONArray(groups.map { it.json(withMsgs = true) }))
             .put("callNotes", JSONArray(callNotes))
+            .put("joinWaits", JSONArray(joinWaits.map { JSONObject().put("l", it.link).put("n", it.name).put("o", it.owner).put("t", it.at).put("c", it.cursor) }))
             .put("invites", JSONArray(invites.map { JSONObject().put("f", it.from).put("s", it.secret).put("n", it.name).put("p", it.public).put("o", it.owner).put("t", it.at) }))
             .put("acceptDue", JSONObject(acceptDue as Map<*, *>))
             .put("early", JSONObject().apply { early.forEach { (u, l) -> put(u, JSONArray(l)) } })
@@ -1802,6 +2008,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         o.optJSONArray("invites")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { j ->
             invites.add(Invite(j.optString("f"), j.optString("s"), j.optString("n"), j.optBoolean("p"), j.optString("o"), j.optLong("t")))
         } }
+        joinWaits.clear()
+        o.optJSONArray("joinWaits")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { j -> joinWaits.add(JoinWait(j.optString("l"), j.optString("n"), j.optString("o"), j.optLong("t"), j.optLong("c"))) } }
         callNotes.clear()
         o.optJSONArray("callNotes")?.let { for (i in 0 until it.length()) it.optJSONObject(i)?.let(callNotes::add) }
         // attachments that arrived but weren't downloaded yet
@@ -1826,6 +2034,8 @@ class Core(server: String, private val socks: () -> Int? = { null }) {
         const val NET_TOR = "tor"
         const val NET_DIRECT = "direct"
         const val GROUP_FILE_TTL = 7 * 24 * 3600   // group blobs fan out (no per-reader delete); keep them a week
+        const val MAX_JOIN_REQUESTS = 50   // waiting join requests kept per group (stops a flood)
+        const val MAX_GROUP_DESC = 300
         const val REKEY_RESEND_WINDOW = 30L * 24 * 3600 * 1000  // owner re-posts a re-key this long so offline members migrate
         const val REKEY_RESEND_EVERY = 24L * 3600 * 1000        // ...about once a day
         private const val FILE_LABEL = "telegramnt-file"

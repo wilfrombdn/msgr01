@@ -16,7 +16,16 @@ import android.widget.TextView
 
 // Settings, storage and appearance screens.
 
+/** Scroll position of the open screen, so a screen that rebuilds itself after a change stays where it was. */
+private fun MainActivity.scrollY(): Int {
+    fun find(v: View?): ScrollView? = if (v is ScrollView) v else (v as? android.view.ViewGroup)?.let { g -> (0 until g.childCount).firstNotNullOfOrNull { find(g.getChildAt(it)) } }
+    return find(findViewById<View>(android.R.id.content))?.scrollY ?: 0
+}
+
+private fun ScrollView.restore(y: Int): ScrollView { if (y > 0) post { scrollTo(0, y) }; return this }
+
 internal fun MainActivity.showSettings() {
+    val keepY = if (screen == Screen.SETTINGS) scrollY() else 0
     screen = Screen.SETTINGS
     connLabel = null
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -61,6 +70,8 @@ internal fun MainActivity.showSettings() {
     // ---- Notifications ----
     header("Notifications")
     col.addView(settingSwitch("Show names in notifications", Messenger.notifyNames) { on -> Messenger.notifyNames = on; Messenger.settingsChanged() })
+    col.addView(settingSwitch("Mentions get through mute", Messenger.mentionsBreakMute) { on -> Messenger.mentionsBreakMute = on; Messenger.settingsChanged() })
+    col.addView(settingNote("A muted group still notifies you when someone @mentions you, replies to you, or an admin writes @everyone."))
     col.addView(settingSwitch("Show message text in notifications", Messenger.notifyText) { on -> Messenger.notifyText = on; Messenger.settingsChanged() })
     col.addView(settingNote("Like a normal text: who wrote and what they said (not while app lock is on). On the lock screen your phone's own setting decides how much shows. " +
         "Turn names off to just see \"$APP_NAME · New message\"."))
@@ -122,7 +133,7 @@ internal fun MainActivity.showSettings() {
     col.addView(gap(20))
     col.addView(tv("$APP_NAME ${packageManager.getPackageInfo(packageName, 0).versionName}\nEvery chat is end-to-end encrypted. The server can't read your messages and keeps no logs.",
         13f, dim).apply { setPadding(dp(20), 0, dp(20), dp(20)) })
-    setContentView(page(topBar("Settings", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }))
+    setContentView(page(topBar("Settings", left = icon(R.drawable.ic_back) { showChats() }), ScrollView(this).apply { addView(col) }.restore(keepY)))
     connLabel?.post(connTick)
 }
 
@@ -196,6 +207,7 @@ internal fun MainActivity.showStorage() {
 // ---------- appearance ----------
 
 internal fun MainActivity.showAppearance() {
+    val keepY = if (screen == Screen.APPEARANCE) scrollY() else 0
     screen = Screen.APPEARANCE
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
@@ -282,7 +294,7 @@ internal fun MainActivity.showAppearance() {
         setPadding(dp(20), dp(24), dp(20), dp(24))
         setOnClickListener { Messenger.look.load(org.json.JSONObject()); Messenger.look.out = Look.BUBBLES[0].second; Messenger.look.inn = Look.BUBBLES[1].second; Messenger.look.sms = Look.SMS_GREEN; Messenger.settingsChanged(); showAppearance() }
     })
-    setContentView(page(topBar("Appearance", left = icon(R.drawable.ic_back) { showSettings() }), ScrollView(this).apply { addView(col) }))
+    setContentView(page(topBar("Appearance", left = icon(R.drawable.ic_back) { showSettings() }), ScrollView(this).apply { addView(col) }.restore(keepY)))
 }
 
 

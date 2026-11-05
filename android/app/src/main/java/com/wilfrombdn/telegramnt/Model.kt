@@ -205,7 +205,15 @@ class Group(
     var setVer = 0                        // version counter for settings changes (newer wins)
     var epoch = 0                         // re-key generation; a higher epoch's secret replaces a lower one
     var pinned: String? = null            // id of the pinned message (set by an admin)
+    var desc = ""                         // description (set by an admin)
+    var avatar: ByteArray? = null         // group photo (small JPEG, set by an admin)
+    var ttl = 0                           // disappearing-messages timer in seconds for the whole group (0 = off)
+    var joinMode = 0                      // 0 = friends added by an admin only; 1 = admins share a link and approve each request
+    var linkSecret = ""                   // join-link secret (admins only; changing it cancels every old link)
+    var joinCursor = 0L                   // last join-request mailbox position read (admins)
+    val requests = mutableListOf<JoinReq>()   // people waiting for an admin to approve them
     var mentioned = false                 // someone @mentioned me in a message I haven't seen yet
+    @Volatile var mentionMsg: String? = null   // the first message that mentioned me and I have not seen (not saved)
     val typing = java.util.concurrent.ConcurrentHashMap<String, Long>()   // @username -> show "typing…" until (not saved)
     val pending = mutableListOf<Triple<String, String, ByteArray>>() // gmsgs waiting for a sender key
     val pendingCtl = mutableListOf<Pair<String, ByteArray>>()        // gctl controls waiting for a sender key
@@ -228,6 +236,9 @@ class Group(
         .put("id", id).put("name", name).put("secret", secret).put("public", public)
         .put("cursor", cursor).put("created", created).put("members", JSONArray(members.toList()))
         .put("owner", owner).put("leaders", JSONArray(leaders.toList())).put("readOnly", readOnly).put("setVer", setVer).put("epoch", epoch).put("pinned", pinned).put("mentioned", mentioned)
+        .put("desc", desc).put("avatar", avatar?.let { java.util.Base64.getEncoder().encodeToString(it) } ?: "").put("ttl", ttl)
+        .put("joinMode", joinMode).put("linkSecret", linkSecret).put("joinCursor", joinCursor)
+        .put("requests", JSONArray(requests.map { JSONObject().put("u", it.user).put("t", it.at) }))
         .put("rekeyDue", JSONArray(rekeyDue.toList()))
         .put("rekeyResend", JSONArray(rekeyResend.map { JSONObject().put("addr", it.addr).put("blob", it.blob).put("until", it.until).put("last", it.last) }))
         .apply { if (withMsgs) put("unread", unread).put("msgs", JSONArray(msgs.map { it.json() })) }
@@ -241,6 +252,10 @@ class Group(
             g.readOnly = o.optBoolean("readOnly"); g.setVer = o.optInt("setVer"); g.epoch = o.optInt("epoch")
             g.pinned = o.optString("pinned").ifEmpty { null }
             g.mentioned = o.optBoolean("mentioned")
+            g.desc = o.optString("desc"); g.ttl = o.optInt("ttl")
+            g.avatar = o.optString("avatar").takeIf { it.isNotEmpty() }?.let { runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull() }
+            g.joinMode = o.optInt("joinMode"); g.linkSecret = o.optString("linkSecret"); g.joinCursor = o.optLong("joinCursor")
+            o.optJSONArray("requests")?.let { for (i in 0 until it.length()) it.getJSONObject(i).let { r -> g.requests.add(JoinReq(r.getString("u"), r.optLong("t"))) } }
             o.optJSONArray("rekeyDue")?.let { for (i in 0 until it.length()) g.rekeyDue.add(it.getString(i)) }
             o.optJSONArray("rekeyResend")?.let { for (i in 0 until it.length()) it.getJSONObject(i).let { r ->
                 g.rekeyResend.add(ResendItem(r.getString("addr"), r.getString("blob"), r.getLong("until"), r.optLong("last")))
@@ -250,5 +265,8 @@ class Group(
         }
     }
 }
+
+/** Someone who used a group's join link and is waiting for an admin to approve them. */
+class JoinReq(val user: String, val at: Long)
 
 class UserError(msg: String) : IOException(msg)

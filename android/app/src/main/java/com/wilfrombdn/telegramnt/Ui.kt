@@ -64,6 +64,7 @@ internal fun MainActivity.redraw() {
     if (Messenger.locked && Messenger.signedIn) { if (screen != Screen.LOCK) showLock(); return }
     maybeCheckUpdate()
     if (screen == Screen.TEXT_THREAD) return fillTextThread()   // texts work signed in or not
+    if (screen == Screen.TEXT_TOOLS) return   // search / gallery of a text group: nothing to refresh
     if (screen == Screen.TEXT_LIST) return showTextList()
     if (screen == Screen.TEXT_SPAM) return showTextSection(textSectionKind)
     if (!Messenger.signedIn) {

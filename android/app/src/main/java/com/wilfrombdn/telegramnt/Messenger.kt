@@ -88,6 +88,7 @@ object Messenger {
     var autoMedia = true
     /** Say who a message is from in notifications (off = just "Tellem · New message", and no text either). */
     var notifyNames = true
+    var mentionsBreakMute = true   // a mention (or @everyone from an admin, or a reply to me) still notifies in a muted group
     /** Show the message itself in notifications, like a normal text. The lock screen follows the phone's own setting. */
     var notifyText = false
 
@@ -208,7 +209,7 @@ object Messenger {
         core.onChange = { save(); changed(); ui.post { scheduleExpiry() } }
         core.onNew = { contact -> if (!visible && "u:${contact.user}" !in muted) ui.post { onNotify?.invoke(contact) } }
         core.onCall = { k -> ui.post { callChanged(k) } }
-        core.onMention = { g -> if (!visible && "g:${g.id}" !in muted) ui.post { onNotifyMention?.invoke(g) } }
+        core.onMention = { g -> if (!visible && ("g:${g.id}" !in muted || mentionsBreakMute)) ui.post { onNotifyMention?.invoke(g) } }
     }
 
     val signedIn get() = core.me != null
@@ -435,7 +436,7 @@ object Messenger {
     private fun extras(o: JSONObject): JSONObject {
         o.put("emojiUse", JSONObject(synchronized(emojiUse) { emojiUse.toMap() }))
         o.put("folders", JSONObject().also { j -> synchronized(allFolders) { allFolders.forEach { (u, fs) -> j.put(u, Folder.toJson(fs)) } } })
-        o.put("keepMediaDays", keepMediaDays).put("autoMedia", autoMedia).put("notifyNames", notifyNames).put("notifyText", notifyText).put("appLock", appLock).put("lockAfterMin", lockAfterMin)
+        o.put("keepMediaDays", keepMediaDays).put("autoMedia", autoMedia).put("notifyNames", notifyNames).put("mentionsBreakMute", mentionsBreakMute).put("notifyText", notifyText).put("appLock", appLock).put("lockAfterMin", lockAfterMin)
         o.put("direct", direct).put("directUrl", directUrl).put("ringSetupAsked", ringSetupAsked).put("pushOn", pushOn).put("pushChosen", pushChosen)
         o.put("pins", JSONObject().also { j -> synchronized(allPins) { allPins.forEach { (u, ps) -> j.put(u, org.json.JSONArray(ps)) } } })
         o.put("stickers", JSONObject().also { j -> synchronized(allStickers) { allStickers.forEach { (u, ss) -> j.put(u, org.json.JSONArray(ss)) } } })
@@ -449,7 +450,7 @@ object Messenger {
         o.optJSONObject("emojiUse")?.let { j -> synchronized(emojiUse) { j.keys().forEach { emojiUse[it] = j.optInt(it) } } }
         o.optJSONObject("folders")?.let { j -> synchronized(allFolders) { j.keys().forEach { allFolders[it] = Folder.fromJson(j.optJSONArray(it)) } } }
         o.optJSONObject("spot")?.let { spot = Spot.from(it) }
-        keepMediaDays = o.optInt("keepMediaDays", 0); autoMedia = o.optBoolean("autoMedia", true); notifyNames = o.optBoolean("notifyNames", true); notifyText = o.optBoolean("notifyText", false)
+        keepMediaDays = o.optInt("keepMediaDays", 0); autoMedia = o.optBoolean("autoMedia", true); notifyNames = o.optBoolean("notifyNames", true); mentionsBreakMute = o.optBoolean("mentionsBreakMute", true); notifyText = o.optBoolean("notifyText", false)
         appLock = o.optBoolean("appLock"); lockAfterMin = o.optInt("lockAfterMin", 1).coerceAtLeast(1)
         direct = o.optBoolean("direct"); directUrl = o.optString("directUrl"); ringSetupAsked = o.optBoolean("ringSetupAsked"); pushChosen = o.optBoolean("pushChosen", false); pushOn = pushChosen && o.optBoolean("pushOn", false)
         o.optJSONObject("pins")?.let { j -> synchronized(allPins) { j.keys().forEach { u ->

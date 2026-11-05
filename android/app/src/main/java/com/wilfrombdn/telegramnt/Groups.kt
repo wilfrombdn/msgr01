@@ -23,7 +23,7 @@ internal fun MainActivity.groupRow(g: Group, key: String? = null, bg: Int = list
     }
     // group avatar: initials on a ring so groups read differently from people
     row.addView(FrameLayout(this).apply {
-        addView(avatar(g.name, 54, null, "g:${g.id}"))
+        addView(avatar(g.name, 54, g.avatar, "g:${g.id}"))
         addView(icon(R.drawable.ic_more, white, 12, 0).apply {
             background = circle(raised); setPadding(dp(2), dp(2), dp(2), dp(2))
         }, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.BOTTOM or Gravity.END))
@@ -128,10 +128,10 @@ internal fun MainActivity.showNewGroup() {
 internal fun MainActivity.joinGroupPrompt() {
     val box = field("Paste the group invite link")
     (getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString())
-        ?.let { if (it.contains("msgr01://group")) box.setText(it) }
-    popup("Join a group", "Paste a public group's invite link.", box, "Cancel" to dim, "Join" to white) { i ->
-        if (i == 1) Messenger.run({ val g = Messenger.core.joinGroupLink(box.text.toString().trim()); Messenger.kick(); groupToOpen = g.id }, {
-            groupToOpen?.let { showGroup(it) }
+        ?.let { if (it.contains("msgr01://group") || it.contains("msgr01://join")) box.setText(it) }
+    popup("Join a group", "Paste a group invite or join link.", box, "Cancel" to dim, "Join" to white) { i ->
+        if (i == 1) Messenger.run({ groupToOpen = null; groupToOpen = Messenger.core.joinGroupLink(box.text.toString().trim())?.id; Messenger.kick() }, {
+            groupToOpen?.let { showGroup(it) } ?: toast("Request sent. An admin has to approve you.")
         }) { e -> toast(errorText(e)) }
     }
 }
@@ -140,7 +140,9 @@ internal fun MainActivity.showGroup(id: String, restore: Pair<String, Int>? = nu
     val g = Messenger.core.group(id) ?: return showChats()
     screen = Screen.GROUP; groupId = id; chatUser = null
     Messenger.core.openChat = "g:$id"
-    stick = restore == null; restoreTo = restore
+    // opening a group where someone mentioned me: land on that message instead of the bottom
+    val jump = g.mentionMsg?.takeIf { mid -> g.msgs.any { it.id == mid } }
+    stick = restore == null && jump == null; restoreTo = restore ?: jump?.let { it to dp(60) }
     groupTop = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     groupBubbles = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -208,12 +210,12 @@ internal fun MainActivity.showGroup(id: String, restore: Pair<String, Int>? = nu
 
 internal fun MainActivity.fillGroup() {
     val g = groupId?.let { Messenger.core.group(it) } ?: return
-    if (g.unread != 0 || g.mentioned) { g.unread = 0; g.mentioned = false; Messenger.save() }
+    if (g.unread != 0 || g.mentioned) { g.unread = 0; g.mentioned = false; g.mentionMsg = null; Messenger.save() }
     groupTop?.removeAllViews()
     val typing = groupTyping(g)
     val info = "${g.members.size} member" + (if (g.members.size != 1) "s" else "") + (if (g.public) " · public" else "") + if (g.readOnly) " · read-only" else ""
     groupTop?.addView(topBar(g.name, typing?.let { android.text.SpannableString(it).apply { setSpan(android.text.style.ForegroundColorSpan(blue), 0, it.length, 0) } } ?: info,
-        LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; addView(icon(R.drawable.ic_back) { showChats() }); addView(avatar(g.name, 40, null, "g:${g.id}")) },
+        LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; addView(icon(R.drawable.ic_back) { showChats() }); addView(avatar(g.name, 40, g.avatar, "g:${g.id}")) },
         icon(R.drawable.ic_more) { groupMenu(g) }), LinearLayout.LayoutParams(-1, -2))
     pinnedBar(g.pinned, g.msgs, groupBubbles, groupScroller, Messenger.core.canPin(g)) { Messenger.run({ Messenger.core.pinGroupMessage(g, null) }) { e -> toast(errorText(e)) } }?.let { groupTop?.addView(it) }
     val list = groupBubbles ?: return
@@ -290,7 +292,11 @@ internal fun MainActivity.groupMenu(g: Group) {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("group", Messenger.core.groupInviteLink(g)))
         toast("Invite link copied")
     }) else items.add("Add a friend" to { addToGroup(g) })
-    if (g.owner.isNotEmpty() && g.isLeader(Messenger.core.me?.user ?: "")) items.add("Group settings" to { showGroupSettings(g) })
+    if (g.owner.isNotEmpty() && g.isLeader(Messenger.core.me?.user ?: "")) {
+        val n = synchronized(Messenger.core) { g.requests.size }
+        items.add((if (n > 0) "Group settings ($n waiting to join)" else "Group settings") to { showGroupSettings(g) })
+    }
+    if (g.desc.isNotEmpty()) items.add("About this group" to { popup(g.name, g.desc + (if (g.ttl > 0) "\n\nMessages here disappear after " + (GROUP_TIMERS.firstOrNull { it.second == g.ttl }?.first ?: "a while") + "." else ""), null, "Close" to white) {} })
     items.add("Leave group" to {
         popup("Leave \"${g.name}\"?", "You'll stop getting its messages. You can be re-invited later.", null, "Cancel" to dim, "Leave" to red) { i ->
             if (i == 1) { Messenger.io.execute { Messenger.core.leaveGroup(g) }; showChats() }
@@ -314,6 +320,30 @@ internal fun MainActivity.showGroupSettings(g: Group) {
     col.addView(tv("Name", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
     val nameBox = field("Group name", g.name)
     col.addView(nameBox, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(20), 0, dp(20), 0) })
+    // photo, description, disappearing messages
+    col.addView(avatar(g.name, 72, g.avatar, "g:${g.id}").apply {
+        setOnClickListener { groupPhotoFor = g.id; pickGroupPhoto() }
+    }, LinearLayout.LayoutParams(-2, -2).apply { setMargins(dp(20), dp(14), dp(20), dp(2)) })
+    col.addView(settingRow(if (g.avatar == null) "Set group photo" else "Change group photo", "Everyone in the group sees it") { groupPhotoFor = g.id; pickGroupPhoto() })
+    if (g.avatar != null) col.addView(settingRow("Remove group photo", "") {
+        Messenger.run({ Messenger.core.setGroupPhoto(g, null); Messenger.kick() }, { showGroupSettings(Messenger.core.group(g.id) ?: g) }) { e -> toast(errorText(e)) }
+    })
+    col.addView(tv("Description", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
+    val descBox = field("What is this group about?", g.desc)
+    col.addView(descBox, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(20), 0, dp(20), 0) })
+    var ttl = g.ttl
+    val ttlLabel = tv(GROUP_TIMERS.firstOrNull { it.second == ttl }?.first ?: "Custom", 15f, dim)
+    col.addView(LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL; background = pressable(); isClickable = true
+        setPadding(dp(20), dp(14), dp(20), dp(14))
+        addView(tv("Disappearing messages", 16f, white), LinearLayout.LayoutParams(0, -2, 1f))
+        addView(ttlLabel)
+        setOnClickListener {
+            pickList("Disappearing messages", "New messages in this group delete themselves on every phone after the time you pick.", GROUP_TIMERS.map { it.first }.toTypedArray()) { i ->
+                ttl = GROUP_TIMERS[i].second; ttlLabel.text = GROUP_TIMERS[i].first
+            }
+        }
+    })
     col.addView(gap(10))
     var readOnly = g.readOnly
     col.addView(settingSwitch("Read-only", g.readOnly) { readOnly = it })
@@ -321,13 +351,14 @@ internal fun MainActivity.showGroupSettings(g: Group) {
     col.addView(tv("Admins", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
     val chosen = g.leaders.toMutableSet()
     val iAmOwner = g.owner.isNotEmpty() && g.owner == Messenger.core.me?.user
+    val iAmAdmin = g.owner.isNotEmpty() && g.isLeader(Messenger.core.me?.user ?: "")
     synchronized(Messenger.core) { g.members.sorted() }.forEach { member ->
         val isOwner = member == g.owner
-        val sw = settingSwitch("@$member" + if (isOwner) "  (owner)" else "", isOwner || member in chosen) { on ->
+        val sw = settingSwitch("@$member" + if (isOwner) "  (owner)" else if (member in g.leaders) "  (admin)" else "", isOwner || member in chosen) { on ->
             if (on) chosen.add(member) else chosen.remove(member)
-        }.apply { if (isOwner) isEnabled = false }
-        // only the owner can remove, and not themselves
-        if (iAmOwner && !isOwner) {
+        }.apply { if (isOwner || (!iAmOwner && member in g.leaders)) isEnabled = false }   // only the owner can take admin rights away
+        // any admin can remove a member; only the owner can remove an admin; nobody removes the owner
+        if (iAmAdmin && !isOwner && member != Messenger.core.me?.user && (iAmOwner || member !in g.leaders)) {
             col.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 addView(sw, LinearLayout.LayoutParams(0, -2, 1f))
@@ -343,10 +374,58 @@ internal fun MainActivity.showGroupSettings(g: Group) {
             })
         } else col.addView(sw)
     }
+    // joining: friends only (default), or a link where an admin approves each person
+    col.addView(tv("Joining", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
+    col.addView(settingSwitch("Join by link, admins approve", g.joinMode == 1) { on ->
+        Messenger.run({ Messenger.core.setJoinMode(g, if (on) 1 else 0); Messenger.kick() }, { showGroupSettings(Messenger.core.group(g.id) ?: g) }) { e -> toast(errorText(e)) }
+    })
+    col.addView(settingNote(if (g.joinMode == 1) "Anyone with the link can ask to join, but nobody gets in until an admin approves them. The link never contains the group's key."
+        else "Off: only friends an admin adds can join. This is the most private choice."))
+    if (g.joinMode == 1 && g.linkSecret.isNotEmpty()) {
+        col.addView(settingRow("Copy join link", "Share it with people you want to be able to ask") {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("group", Messenger.core.groupJoinLink(g)))
+            toast("Join link copied")
+        })
+        col.addView(settingRow("Cancel this link", "Makes a new one. People already in stay in.") {
+            popup("Cancel the link?", "The old link stops working. Waiting requests are cleared.", null, "Keep it" to dim, "Cancel link" to red) { i ->
+                if (i == 1) Messenger.run({ Messenger.core.revokeJoinLink(g); Messenger.kick() }, { showGroupSettings(Messenger.core.group(g.id) ?: g) }) { e -> toast(errorText(e)) }
+            }
+        })
+        val waiting = synchronized(Messenger.core) { g.requests.toList() }
+        if (waiting.isNotEmpty()) col.addView(tv("Waiting for approval", 14f, dim, true).apply { setPadding(dp(20), dp(16), dp(20), dp(6)) })
+        for (r in waiting) col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(tv("@${r.user}", 16f, white).apply { setPadding(dp(20), dp(14), dp(8), dp(14)) }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(tv("Deny", 15f, red).apply {
+                setPadding(dp(14), dp(14), dp(14), dp(14)); background = pressable(); isClickable = true
+                setOnClickListener { Messenger.run({ Messenger.core.denyJoin(g, r.user) }, { showGroupSettings(Messenger.core.group(g.id) ?: g) }) { e -> toast(errorText(e)) } }
+            })
+            addView(tv("Approve", 15f, white, true).apply {
+                setPadding(dp(14), dp(14), dp(20), dp(14)); background = pressable(); isClickable = true
+                setOnClickListener { Messenger.run({ Messenger.core.approveJoin(g, r.user); Messenger.kick() }, { showGroupSettings(Messenger.core.group(g.id) ?: g) }) { e -> toast(errorText(e)) } }
+            })
+        })
+    }
     col.addView(gap(20))
     col.addView(cta("Save") {
-        Messenger.run({ Messenger.core.setGroup(g, nameBox.text.toString(), readOnly, chosen); Messenger.kick() }, { showGroup(g.id) }) { e -> toast(errorText(e)) }
+        Messenger.run({ Messenger.core.setGroup(g, nameBox.text.toString(), readOnly, chosen, descBox.text.toString(), ttl); Messenger.kick() }, { showGroup(g.id) }) { e -> toast(errorText(e)) }
     }, ctaParams())
     col.addView(gap(20))
     setContentView(page(topBar("Group settings", left = icon(R.drawable.ic_back) { showGroup(g.id) }), ScrollView(this).apply { addView(col) }))
 }
+
+/** A photo was picked for a group: crop it, then an admin sends it to everyone. */
+internal fun MainActivity.groupPhotoPicked(uri: android.net.Uri) {
+    val id = groupPhotoFor ?: return
+    var bmp: android.graphics.Bitmap? = null
+    Messenger.run({ bmp = loadPhoto(uri) }, {
+        val b = bmp
+        val back = { Messenger.core.group(id)?.let { showGroupSettings(it) } ?: showChats() }
+        if (b == null) { toast("Couldn't open that photo"); back() }
+        else showCrop(b, done = { jpeg ->
+            Messenger.run({ Messenger.core.group(id)?.let { Messenger.core.setGroupPhoto(it, jpeg); Messenger.kick() } }, { back() }) { e -> toast(errorText(e)); back() }
+        }, cancel = { back() })
+    }) { toast("Couldn't open that photo") }
+}
+
+private val GROUP_TIMERS = listOf("Off" to 0, "1 minute" to 60, "1 hour" to 3600, "1 day" to 86400, "1 week" to 604800)

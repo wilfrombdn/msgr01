@@ -83,7 +83,7 @@ class QrActivity : ComponentActivity() {
                     val src = PlanarYUVLuminanceSource(data, plane.rowStride, img.height, 0, 0, img.width, img.height, false)
                     val text = runCatching { reader.decodeWithState(BinaryBitmap(HybridBinarizer(src))).text }.getOrNull()
                     reader.reset()
-                    if (text != null && (text.startsWith(ADD) || text.startsWith("msgr01://group"))) {
+                    if (text != null && (text.startsWith(ADD) || text.startsWith("msgr01://group") || text.startsWith("msgr01://join"))) {
                         done = true
                         runOnUiThread { setResult(RESULT_OK, Intent().putExtra("qr", text)); finish() }
                     }

@@ -316,14 +316,14 @@ class RelayFlowTest {
         host.signup(hu, "hosts long password", "Host"); guest.signup(gu, "guests long password", "Guest"); faker.signup(fu, "fakers long password", "Faker")
         val g = host.createGroup("Open Room", public = true)
         val link = host.groupInviteLink(g)
-        val gg = guest.joinGroupLink(link)
+        val gg = guest.joinGroupLink(link)!!
         host.poll(5); guest.poll(5); host.poll(5)
         host.sendGroup(g, "welcome")
         guest.poll(5)
         assertTrue(gtexts(guest.group(gg.id)).any { it == "$hu:welcome" })
 
         // faker joins and tries to post a sender key claiming to be the host -> must be rejected
-        val gf = faker.joinGroupLink(link)
+        val gf = faker.joinGroupLink(link)!!
         val fakeSkdm = org.signal.libsignal.protocol.groups.GroupSessionBuilder(faker.signalFor())
             .create(org.signal.libsignal.protocol.SignalProtocolAddress(hu, 1), gf.distId).serialize()
         faker.postRaw(gf, org.json.JSONObject().put("t", "skdm").put("u", hu).put("d", java.util.Base64.getEncoder().encodeToString(fakeSkdm)).put("sig", java.util.Base64.getEncoder().encodeToString(ByteArray(64))))
