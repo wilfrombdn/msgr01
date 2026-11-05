@@ -54,7 +54,7 @@ internal class LevelSpec(
  * The scripted moment of a walking level: a cop stands at a fork, hidden in fog. When you get past [triggerY] the fog clears,
  * he hesitates (dots, one at a time), turns around, then walks away along [exit].
  */
-internal class SceneSpec(val copX: Float, val copY: Float, val triggerY: Float, val fog: IntArray, val exit: List<Pair<Float, Float>>)
+internal class SceneSpec(val copX: Float, val copY: Float, val triggerY: Float, val fog: IntArray, val exit: List<Pair<Float, Float>>, val contactLine: String = "")
 
 /** Something that can see: a guard or a camera at one moment. */
 internal class Eye(val x: Float, val y: Float, val face: Float, val half: Float, val range: Float)
@@ -315,12 +315,24 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         var torch = true             // is his torch on
         var visible = true
         var walking = false
+        var headDown = false         // eyes on the ground
     }
-    val cop: Actor? = spec.scene?.let { Actor(it.copX, it.copY, 0f) }
+    val cop: Actor? = spec.scene?.let { Actor(it.copX, it.copY, PI.toFloat() / 2) }   // he starts facing south: straight down the passage at you
     var fog = if (spec.scene != null) 1f else 0f     // 1 = the fogged part of the map is still hidden
     var sceneStage = 0
     private var sceneT = 0f
     private var exitIdx = 0
+
+    // the contact in a walking scene: watches the cop leave, comes out to meet me, waits, and says something when I get close
+    var contactFace = PI.toFloat() / 2
+    var contactWalking = false
+    var sayText: String? = null
+    var sayT = 0f
+    private val contactPath = ArrayDeque<Pair<Int, Int>>()
+    private var contactTravel = 0f
+    private var contactRepath = 0f
+    /** Which step of crossing himself the contact is on (0 forehead, 1 chest, 2 left shoulder, 3 right shoulder), or -1. */
+    val crossFrame: Int get() { if (sayText == null) return -1; val u = sayT - 1.8f; return if (u < 0f || u > 2.8f) -1 else (u / 0.7f).toInt().coerceIn(0, 3) }
 
     private fun turnTo(a: Actor, target: Float, dt: Float, rate: Float): Boolean {
         var diff = target - a.face
@@ -330,34 +342,69 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         return abs(diff) <= m
     }
 
-    /** The cop at the fork: waits in the fog, then dots, turns, and leaves. */
+    private fun turnContact(target: Float, dt: Float, rate: Float) {
+        var diff = target - contactFace
+        while (diff > PI) diff -= 2 * PI.toFloat(); while (diff < -PI) diff += 2 * PI.toFloat()
+        val m = rate * dt
+        contactFace += diff.coerceIn(-m, m)
+    }
+
+    /**
+     * The cop at the fork waits in the fog already looking down the passage at me. When the fog clears he says "...", lowers his
+     * head and his torch, and walks slowly out of the street to the left. The contact watches him go, then watches me, comes
+     * out to meet me, waits, and (when I get close) says something and crosses himself.
+     */
     private fun sceneUpdate(dt: Float) {
         val s = spec.scene ?: return
         val a = cop ?: return
         sceneT += dt
+        if (sayText != null) sayT += dt
         when (sceneStage) {
-            0 -> { a.face = 0.25f * sin(t * 0.7f); if (py < s.triggerY) { sceneStage = 1; sceneT = 0f } }            // I rounded the corner
-            1 -> { fog = (1f - sceneT / 2.5f).coerceIn(0f, 1f); if (sceneT > 3.2f) { sceneStage = 2; sceneT = 0f } }  // the fog clears
-            2 -> { a.dots = min(3, 1 + (sceneT / 1.3f).toInt()); if (sceneT > 4.4f) { sceneStage = 3; sceneT = 0f } }  // . .. ...  one at a time
-            3 -> { if (turnTo(a, atan2(py - a.y, px - a.x), dt, 1.1f) && sceneT > 1.5f) { sceneStage = 4; sceneT = 0f } }   // turns around
-            4 -> { if (sceneT > 2.2f) { sceneStage = 5; sceneT = 0f } }                                               // a long look
-            5 -> {
-                a.dots = 0; a.torch = false
+            0 -> { a.face = PI.toFloat() / 2 + 0.05f * sin(t * 0.7f); if (py < s.triggerY) { sceneStage = 1; sceneT = 0f } }     // I rounded the corner
+            1 -> { fog = (1f - sceneT / 2.5f).coerceIn(0f, 1f); if (sceneT > 3.2f) { sceneStage = 2; sceneT = 0f } }              // the fog clears
+            2 -> { a.dots = min(3, 1 + (sceneT / 1.3f).toInt()); if (sceneT > 4.4f) { sceneStage = 3; sceneT = 0f } }              // . .. ...  one at a time
+            3 -> { a.dots = 0; a.headDown = true; a.torch = false; if (sceneT > 1.5f) { sceneStage = 4; sceneT = 0f } }            // his head goes down
+            4 -> {
                 val tgt = s.exit.firstOrNull()
-                val ang = if (tgt != null) atan2(tgt.second - a.y, tgt.first - a.x) else 0f
-                if (turnTo(a, ang, dt, 1.4f)) { sceneStage = 6; sceneT = 0f; a.walking = true }
+                val ang = if (tgt != null) atan2(tgt.second - a.y, tgt.first - a.x) else PI.toFloat()
+                if (turnTo(a, ang, dt, 1.2f)) { sceneStage = 5; sceneT = 0f; a.walking = true }
             }
-            6 -> {
+            5 -> {
                 val tgt = s.exit.getOrNull(exitIdx)
-                if (tgt == null) { a.visible = false; a.walking = false; sceneStage = 7 } else {
+                if (tgt == null) { a.visible = false; a.walking = false; sceneStage = 6; sceneT = 0f } else {
                     val dx = tgt.first - a.x; val dy = tgt.second - a.y; val d = hypot(dx, dy)
                     a.face = atan2(dy, dx)
-                    val mv = min(1.5f * dt, d)
+                    val mv = min(0.85f * dt, d)                                                                                   // slowly
                     if (d > 0.001f) { a.x += dx / d * mv; a.y += dy / d * mv }
                     if (d - mv < 0.05f) exitIdx++
                 }
             }
+            6 -> {   // the contact comes out from behind his stand toward me, but only part of the way
+                contactRepath -= dt
+                if (contactTravel < CONTACT_WALK && hypot(px - contactX, py - contactY) > 3f) {
+                    if (contactRepath <= 0f || contactPath.isEmpty()) {
+                        contactRepath = 0.4f
+                        contactPath.clear(); contactPath.addAll(route(floor(contactX).toInt() to floor(contactY).toInt(), floor(px).toInt() to floor(py).toInt()))
+                    }
+                    val tgt = contactPath.firstOrNull()
+                    if (tgt != null) {
+                        val dx = tgt.first + 0.5f - contactX; val dy = tgt.second + 0.5f - contactY; val d = hypot(dx, dy)
+                        turnContact(atan2(dy, dx), dt, 6f)
+                        val mv = min(1.5f * dt, d)
+                        if (d > 0.001f) { contactX += dx / d * mv; contactY += dy / d * mv; contactTravel += mv }
+                        if (d - mv < 0.02f) contactPath.removeFirst()
+                        contactWalking = true
+                    } else contactWalking = false
+                } else { contactWalking = false; sceneStage = 7; sceneT = 0f }
+            }
+            7 -> {   // he waits for me, watching me come, and speaks when I am near
+                contactWalking = false
+                if (sayText == null && hypot(px - contactX, py - contactY) < 6.5f) { sayText = s.contactLine; sayT = 0f }
+            }
         }
+        // while the cop leaves, the contact watches him; after that, he watches me
+        if (sceneStage in 3..5 && a.visible) turnContact(atan2(a.y - contactY, a.x - contactX), dt, 3f)
+        else if (sceneStage >= 6 && !contactWalking) turnContact(atan2(py - contactY, px - contactX), dt, 3f)
     }
 
     val guards = spec.guards.map { Guard(it) }
@@ -543,6 +590,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         const val CHASE_SPEED = 3.4f
         const val CATCH = 0.55f
         const val RADIO = 6f            // a guard who locks on calls others this close
+        const val CONTACT_WALK = 6.5f       // how far the contact walks out to meet me in a walking scene
         const val TAKEDOWN_REACH = 1.25f   // how close behind a guard I must be to silence him
         const val BODY_RADIO = 14f         // who goes to look when a body is found
         const val ZONE = 7f             // how far from his contact you can be and still be covered

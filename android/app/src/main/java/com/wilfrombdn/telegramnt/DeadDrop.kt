@@ -31,7 +31,8 @@ internal fun MainActivity.showDeadDrop() {
     val prefs = getSharedPreferences("dead_drop", Context.MODE_PRIVATE)
     val game = DeadDropView(this, prefs.getInt("level", 0), prefs.getBoolean("sound", false),
         saveLevel = { prefs.edit().putInt("level", it).apply() }, saveSound = { prefs.edit().putBoolean("sound", it).apply() }, onExit = { showSettings() })
-    setContentView(page(topBar("Dead Letter", "Six letters. One truth.", left = icon(R.drawable.ic_back) { showSettings() }), game))
+    // restart (the level you are on) on the left, exit on the right, across from the title
+    setContentView(page(topBar("Dead Letter", "Six letters. One truth.", left = icon(R.drawable.ic_restart) { game.restart() }, icon(R.drawable.ic_close) { showSettings() }), game))
 }
 
 internal class DeadDropView(
@@ -79,6 +80,9 @@ internal class DeadDropView(
     private val bc get() = if (lastLevel && world.state == StealthWorld.State.WON) ((wt - 1.2f) / 2.5f).coerceIn(0f, 1f) else 0f
 
     init { load(false) }
+
+    /** Start the level you are on again from the beginning. */
+    internal fun restart() { load(false) }
 
     // for the picture-taking test
     internal fun debugLevel(i: Int) { levelIdx = i; load(false); sinceLoad = 9f; attempt = 2 }
@@ -231,6 +235,7 @@ internal class DeadDropView(
         drawHud(c, w, h, pal)
         if (touching) drawThumb(c)
         drawClue(c, w, h, pal)
+        drawSay(c, w, h, pal)
         drawOverlays(c, w, h, pal)
     }
 
@@ -773,8 +778,19 @@ internal class DeadDropView(
     }
 
     private fun drawClue(c: Canvas, w: Float, h: Float, pal: Palette) {
+        if (world.sayText != null) return
         val t = clueText ?: return
-        val f = clueAlpha
+        panel(c, w, h, pal, t, clueAlpha, (clueT * 70f).toInt())
+    }
+
+    /** What the contact says as you walk up to him. */
+    private fun drawSay(c: Canvas, w: Float, h: Float, pal: Palette) {
+        val t = world.sayText ?: return
+        if (world.state != StealthWorld.State.PLAY) return
+        panel(c, w, h, pal, spec.contact.uppercase() + ": “" + t + "”", 1f, (world.sayT * 45f).toInt())
+    }
+
+    private fun panel(c: Canvas, w: Float, h: Float, pal: Palette, t: String, f: Float, typed: Int) {
         if (f <= 0.02f) return
         p.style = Paint.Style.FILL; p.typeface = mono; p.textSize = 13f * d; p.textAlign = Paint.Align.LEFT; p.letterSpacing = 0f
         val lines = clueLines(t, w - 60f * d)
@@ -784,7 +800,7 @@ internal class DeadDropView(
         p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(pal.accent, (f * 0x90).toInt()); c.drawRoundRect(rect, 4f * d, 4f * d, p)
         p.style = Paint.Style.FILL; p.color = a(Color.WHITE, (f * 0xF0).toInt())
         // typed out like a radio or a terminal: a few letters at a time
-        var left = (clueT * 70f).toInt()
+        var left = typed
         var yy = y0 + 22f * d
         for (ln in lines) {
             if (left <= 0) break

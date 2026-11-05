@@ -19,6 +19,8 @@ internal object StealthLevels {
         fun fill(c0: Int, r0: Int, c1: Int, r1: Int) { for (r in r0..r1) for (c in c0..c1) g[r][c] = '.' }
         fun put(c: Int, r: Int, ch: Char) { g[r][c] = ch }
         fill(1, 5, 14, 10)      // the street
+        fill(0, 7, 0, 9)        // and a way out of it to the west: a side street the cop walks off into
+        put(0, 9, 'L')          // a lamp at its mouth
         fill(1, 11, 4, 22)      // the passage up to it
         fill(1, 23, 14, 25)     // alley 3
         fill(12, 26, 14, 33)    // passage
@@ -45,7 +47,7 @@ internal object StealthLevels {
             pal(0xFF0B1230, 0xFF121D47, 0xFF03050A, 0xFF1B2B66, 0xFF29F0FF, 0xFFDCEBFF, 0xFFFF3B55),
             backstreetsMap(),
             cover = "bin", pixel = true, walk = true,
-            scene = SceneSpec(3.5f, 9.5f, 22.5f, intArrayOf(0, 0, 15, 21), listOf(14.5f to 9.5f, 16.5f to 9.5f)),
+            scene = SceneSpec(3.5f, 9.5f, 22.5f, intArrayOf(0, 0, 15, 21), listOf(1.2f to 8.5f, -2.0f to 8.5f), contactLine = "Thank God I didn't need to shoot."),
             flashers = listOf(15.5f to 45.5f, 0.2f to 35.5f, 15.8f to 24.5f, 0.2f to 8.0f, 15.8f to 7.0f),
             beams = listOf(
                 CamSpec(0.9f, 35.5f, 0f, 22f, 7.0f, 0f, range = 9f, half = 0.16f),
@@ -68,6 +70,7 @@ internal object StealthLevels {
                 Prop("stuff", 5.5f, 45.5f, text = "Your old apartment is two streets over. Everything you owned, on the floor."),
                 Prop("car", 13.0f, 6.5f, w = 2), Prop("car", 2.0f, 5.5f, w = 2),
                 Prop("stand", 10.5f, 8.5f, w = 3),
+                Prop("streetsign", 0.5f, 6.5f),
             ),
         ),
         // ------------------------------------------------------------------ 2

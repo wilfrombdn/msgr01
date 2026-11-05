@@ -122,6 +122,7 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
             "poster" -> poster(c, (pr.x * S).toInt(), (pr.y * S).toInt())
             "news" -> news(c, (pr.x * S).toInt(), (pr.y * S).toInt())
             "stuff" -> stuff(c, (pr.x * S).toInt(), (pr.y * S).toInt())
+            "streetsign" -> streetSign(c, (pr.x * S).toInt(), (pr.y * S).toInt())
         }
         // light: lamp pools and window glow that never change
         val g = Canvas(glowBase); val h = Canvas(darkBase)
@@ -257,6 +258,13 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
         for (k in 0..3) px(c, x + 9 + k / 2, y + 6 - k, C.ICE)                                // its aerial
     }
 
+    /** A street-name plate on the corner of the passage that leads out of the street to the side street. */
+    private fun streetSign(c: Canvas, cx: Int, cy: Int) {
+        rect(c, cx - 6, cy - 3, 13, 7, C.K); rect(c, cx - 5, cy - 2, 11, 5, 0xFF1E4FB8.toInt()); rect(c, cx - 5, cy - 2, 11, 1, C.ICE)
+        rect(c, cx - 4, cy, 4, 1, C.W); rect(c, cx + 1, cy, 4, 1, C.W); rect(c, cx - 3, cy + 2, 7, 1, C.W)
+        rect(c, cx, cy + 4, 1, 4, C.K)
+    }
+
     private fun poster(c: Canvas, cx: Int, cy: Int) {
         rect(c, cx - 4, cy - 5, 9, 11, C.K); rect(c, cx - 3, cy - 4, 7, 9, C.ICE)
         rect(c, cx - 3, cy - 4, 7, 2, C.RED)
@@ -352,7 +360,7 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
     private val vendor = Outfit(C.SKIN, 0xFF59647A.toInt(), 0xFF59647A.toInt(), 0xFF3A4458.toInt(), 0xFFE8E0C8.toInt(), null, 0xFF3A4458.toInt(), C.K, null, apron = 0xFF2E8F66.toInt())
 
     /** Draws one person standing with their feet at (fx, fy). [dir]: 0 away from you, 1 right, 2 toward you, 3 left. */
-    private fun folk(c: Canvas, fx: Int, fy: Int, dir: Int, frame: Int, o: Outfit, torch: Boolean, letter: Boolean) {
+    private fun folk(c: Canvas, fx: Int, fy: Int, dir: Int, frame: Int, o: Outfit, torch: Boolean, letter: Boolean, hd: Int = 0, cross: Int = -1) {
         rect(c, fx - 5, fy - 1, 11, 3, a(C.K, 0x70))     // shadow
         c.save()
         if (dir == 3) c.scale(-1f, 1f, fx.toFloat() + 0.5f, 0f)
@@ -376,21 +384,27 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
             // arms
             val sleeve = o.coat ?: o.shirt
             val swing = if (frame == 1) 1 else 0
-            rect(c, fx - 6, fy - 12 + swing, 2, 6, sleeve); rect(c, fx + 5, fy - 12 - swing, 2, 6, sleeve)
-            rect(c, fx - 6, fy - 6 + swing, 2, 1, o.skin); rect(c, fx + 5, fy - 6 - swing, 2, 1, o.skin)
+            rect(c, fx - 6, fy - 12 + swing, 2, 6, sleeve); rect(c, fx - 6, fy - 6 + swing, 2, 1, o.skin)
+            if (cross < 0 || dir != 2) { rect(c, fx + 5, fy - 12 - swing, 2, 6, sleeve); rect(c, fx + 5, fy - 6 - swing, 2, 1, o.skin) }
+            else {   // crossing himself: forehead, chest, left shoulder, right shoulder
+                val hx = intArrayOf(fx, fx, fx - 4, fx + 4)[cross]; val hy = intArrayOf(fy - 16, fy - 9, fy - 11, fy - 11)[cross]
+                val sx = fx + 5; val sy = fy - 11
+                for (i in 0..6) rect(c, sx + (hx - sx) * i / 6, sy + (hy - sy) * i / 6, 2, 2, sleeve)
+                rect(c, hx - 1, hy - 1, 2, 2, o.skin)
+            }
             if (letter && dir == 2) { rect(c, fx + 4, fy - 8, 5, 4, C.K); rect(c, fx + 5, fy - 7, 3, 2, C.W); px(c, fx + 6, fy - 7, C.RED) }
             // head
-            if (dir == 0) rect(c, fx - 3, fy - 18, 7, 7, o.hair) else {
-                rect(c, fx - 3, fy - 18, 7, 7, o.skin)
-                rect(c, fx - 3, fy - 18, 7, 2, o.hair); rect(c, fx - 3, fy - 18, 1, 4, o.hair); rect(c, fx + 3, fy - 18, 1, 4, o.hair)
-                px(c, fx - 2, fy - 15, C.K); px(c, fx + 2, fy - 15, C.K)
-                if (o.glasses) { rect(c, fx - 3, fy - 15, 3, 1, C.ICE); rect(c, fx + 1, fy - 15, 3, 1, C.ICE); px(c, fx - 2, fy - 15, C.K); px(c, fx + 2, fy - 15, C.K) }
-                px(c, fx, fy - 13, o.skin - 0x00301818)
+            if (dir == 0) rect(c, fx - 3, fy - 18 + hd, 7, 7, o.hair) else {
+                rect(c, fx - 3, fy - 18 + hd, 7, 7, o.skin)
+                rect(c, fx - 3, fy - 18 + hd, 7, 2, o.hair); rect(c, fx - 3, fy - 18 + hd, 1, 4, o.hair); rect(c, fx + 3, fy - 18 + hd, 1, 4, o.hair)
+                px(c, fx - 2, fy - 15 + hd, C.K); px(c, fx + 2, fy - 15 + hd, C.K)
+                if (o.glasses) { rect(c, fx - 3, fy - 15 + hd, 3, 1, C.ICE); rect(c, fx + 1, fy - 15 + hd, 3, 1, C.ICE); px(c, fx - 2, fy - 15 + hd, C.K); px(c, fx + 2, fy - 15 + hd, C.K) }
+                px(c, fx, fy - 13 + hd, o.skin - 0x00301818)
             }
             if (o.hat != null) {
-                rect(c, fx - 4, fy - 20, 9, 3, o.hat); rect(c, fx - 4, fy - 20, 9, 1, o.hat + 0x00101820)
-                if (dir == 2 && o.brim != null) rect(c, fx - 4, fy - 17, 9, 1, o.brim)
-                if (o.badge && dir == 2) px(c, fx, fy - 19, C.GOLD)
+                rect(c, fx - 4, fy - 20 + hd, 9, 3, o.hat); rect(c, fx - 4, fy - 20 + hd, 9, 1, o.hat + 0x00101820)
+                if (dir == 2 && o.brim != null) rect(c, fx - 4, fy - 17 + hd, 9, 1, o.brim)
+                if (o.badge && dir == 2) px(c, fx, fy - 19 + hd, C.GOLD)
             }
             if (torch && dir == 2) { rect(c, fx + 5, fy - 7, 2, 3, C.K); px(c, fx + 5, fy - 4, C.W); px(c, fx + 6, fy - 4, C.LAMP) }
         } else {
@@ -409,14 +423,14 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
             if (torch) { rect(c, fx + 1, fy - 8, 4, 2, C.K); rect(c, fx + 4, fy - 8, 2, 2, C.W); px(c, fx + 6, fy - 8, C.LAMP) }
             if (letter) { rect(c, fx + 1, fy - 9, 5, 4, C.K); rect(c, fx + 2, fy - 8, 3, 2, C.W); px(c, fx + 3, fy - 8, C.RED) }
             // head, in profile
-            rect(c, fx - 2, fy - 18, 7, 7, o.skin)
-            rect(c, fx - 3, fy - 18, 5, 7, o.hair); rect(c, fx - 2, fy - 18, 7, 2, o.hair)
-            px(c, fx + 3, fy - 15, C.K); px(c, fx + 5, fy - 14, o.skin - 0x00301818)
-            if (o.glasses) { px(c, fx + 4, fy - 15, C.ICE); px(c, fx + 5, fy - 15, C.ICE) }
+            rect(c, fx - 2, fy - 18 + hd, 7, 7, o.skin)
+            rect(c, fx - 3, fy - 18 + hd, 5, 7, o.hair); rect(c, fx - 2, fy - 18 + hd, 7, 2, o.hair)
+            px(c, fx + 3, fy - 15 + hd, C.K); px(c, fx + 5, fy - 14 + hd, o.skin - 0x00301818)
+            if (o.glasses) { px(c, fx + 4, fy - 15 + hd, C.ICE); px(c, fx + 5, fy - 15 + hd, C.ICE) }
             if (o.hat != null) {
-                rect(c, fx - 3, fy - 20, 8, 3, o.hat); rect(c, fx - 3, fy - 20, 8, 1, o.hat + 0x00101820)
-                if (o.brim != null) rect(c, fx + 2, fy - 17, 5, 1, o.brim)
-                if (o.badge) px(c, fx + 3, fy - 19, C.GOLD)
+                rect(c, fx - 3, fy - 20 + hd, 8, 3, o.hat); rect(c, fx - 3, fy - 20 + hd, 8, 1, o.hat + 0x00101820)
+                if (o.brim != null) rect(c, fx + 2, fy - 17 + hd, 5, 1, o.brim)
+                if (o.badge) px(c, fx + 3, fy - 19 + hd, C.GOLD)
             }
         }
         c.restore()
@@ -450,11 +464,12 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
         val walkFrame = if (world.speed > 0.05f) ((clock * (3f + world.speed * 2.2f)).toInt() % 2) else 0
         list += Item(pyy.toFloat()) { cv -> folk(cv, pxx, pyy, dirOf(world.face), walkFrame, clerk, false, true) }
         val vx = (world.contactX * S).roundToInt(); val vy = (world.contactY * S).roundToInt() + 6
-        list += Item(vy.toFloat()) { cv -> folk(cv, vx, vy, 2, 0, vendor, false, false) }
+        val vFrame = if (world.contactWalking) ((clock * 5f).toInt() % 2) else 0
+        list += Item(vy.toFloat()) { cv -> folk(cv, vx, vy, dirOf(world.contactFace), vFrame, vendor, false, false, 0, world.crossFrame) }
         world.cop?.let { cop ->
             if (cop.visible) {
                 val fx = (cop.x * S).roundToInt(); val fy = (cop.y * S).roundToInt() + 6
-                list += Item(fy.toFloat()) { cv -> folk(cv, fx, fy, dirOf(cop.face), if (cop.walking) ((clock * 4f).toInt() % 2) else 0, police, cop.torch, false) }
+                list += Item(fy.toFloat()) { cv -> folk(cv, fx, fy, dirOf(cop.face), if (cop.walking) ((clock * 2.2f).toInt() % 2) else 0, police, cop.torch, false, if (cop.headDown) 2 else 0) }
             }
         }
         for (g in world.guards) if (!g.dead) {

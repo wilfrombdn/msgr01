@@ -37,12 +37,17 @@ class DeadDropShotTest {
         w().px = 2.5f; w().py = 40.0f; v.debugAdvance(0.5f); shot(v, "deadletter-passage")
         w().px = 3.0f; w().py = 24.5f; v.debugAdvance(0.5f); shot(v, "deadletter-fog-before")
         w().px = 2.5f; w().py = 21.5f; v.debugAdvance(2.0f); shot(v, "deadletter-fog-clearing")
-        v.debugAdvance(3.0f); shot(v, "deadletter-cop-stands")
-        v.debugAdvance(2.4f); shot(v, "deadletter-cop-dots")
-        v.debugAdvance(3.0f); shot(v, "deadletter-cop-turns")
-        v.debugAdvance(5.0f); shot(v, "deadletter-cop-leaves")
-        w().px = 2.5f; w().py = 12.0f; v.debugAdvance(8.0f); shot(v, "deadletter-street")
-        w().px = 9.5f; w().py = 7.5f; v.debugAdvance(1.5f); shot(v, "deadletter-vendor")
+        v.debugAdvance(2.2f); shot(v, "deadletter-cop-stands")
+        v.debugAdvance(2.6f); shot(v, "deadletter-cop-dots")
+        v.debugAdvance(2.6f); shot(v, "deadletter-cop-headdown")
+        v.debugAdvance(3.0f); shot(v, "deadletter-cop-walks")
+        v.debugAdvance(3.2f); shot(v, "deadletter-cop-exits")
+        v.debugAdvance(3.0f); shot(v, "deadletter-cop-gone")
+        v.debugAdvance(3.0f); shot(v, "deadletter-contact-walks")
+        w().px = 3.5f; w().py = 14.0f; v.debugAdvance(5.0f); shot(v, "deadletter-contact-waits")
+        w().px = 3.5f; w().py = 11.5f; v.debugAdvance(1.0f); shot(v, "deadletter-contact-says")
+        v.debugAdvance(1.6f); shot(v, "deadletter-contact-cross1")
+        v.debugAdvance(1.0f); shot(v, "deadletter-contact-cross2")
     }
 
     @Test fun otherLevels() {
