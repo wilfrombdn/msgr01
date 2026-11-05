@@ -696,16 +696,19 @@ internal class DeadDropView(
             // pixel-art level: the scene is drawn small and scaled up by a whole number so every pixel is the same size.
             // Tall maps scroll: the view follows the courier (kept to whole art pixels so nothing shimmers).
             // fills the whole screen edge to edge: scaled to the width (or the height for short maps), the extra is cropped
-            T = max(w / world.cols, h / world.rows)
+            // a short room (like the maintenance room under the street) fits the width and sits in the middle of the screen,
+            // so you see all of it instead of a zoomed-in, cropped slice
+            val short = world.rows * (w / world.cols) <= h - barH
+            T = if (short) w / world.cols else max(w / world.cols, h / world.rows)
             offX = (w - T * world.cols) / 2f
             val viewRows = min(world.rows.toFloat(), h / T)
-            scrollY = ((world.py - viewRows * 0.68f).coerceIn(0f, world.rows - viewRows) * 16f).toInt() / 16f   // look ahead: you sit low on the screen
-            offY = 0f
+            scrollY = if (short) 0f else ((world.py - viewRows * 0.68f).coerceIn(0f, world.rows - viewRows) * 16f).toInt() / 16f   // look ahead: you sit low on the screen
+            offY = if (short) (barH + (h - barH - T * world.rows) / 2f).toInt().toFloat() else 0f
             val srcTop = (scrollY * 16f).toInt()
             val srcH = min(pix.H - srcTop, ceil(h / T * 16f).toInt())
             c.drawColor(0xFF03050A.toInt())
             val src = android.graphics.Rect(0, srcTop, pix.W, srcTop + srcH)
-            rect.set(offX, 0f, offX + T * world.cols, srcH * T / 16f)
+            rect.set(offX, offY, offX + T * world.cols, offY + srcH * T / 16f)
             c.drawBitmap(pix.render(clock, read, bc), src, rect, nearest)
         } else {
         c.save(); c.translate(offX, offY); c.scale(T, T)
