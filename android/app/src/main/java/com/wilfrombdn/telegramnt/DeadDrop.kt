@@ -29,7 +29,7 @@ import kotlin.math.sin
 internal fun MainActivity.showDeadDrop() {
     screen = Screen.DEAD_DROP
     val prefs = getSharedPreferences("dead_drop", Context.MODE_PRIVATE)
-    val game = DeadDropView(this, prefs.getInt("level", 0), prefs.getBoolean("sound", false),
+    val game = DeadDropView(this, prefs.getInt("level", 0), prefs.getBoolean("sound", true),
         saveLevel = { prefs.edit().putInt("level", it).apply() }, saveSound = { prefs.edit().putBoolean("sound", it).apply() }, onExit = { showSettings() })
     // on the right: restart (tap = this level, hold = back to level 1) next to exit
     val skip = icon(R.drawable.ic_skip) { game.skipLevel(); toast("Skipped") }
@@ -62,6 +62,27 @@ internal class DeadDropView(
     private var clueText: String? = null
     private var clueAlpha = 0f
     private val music = DeadLetterMusic()
+    private val tracks = DeadLetterTracks(ctx)
+    private var cue = ""
+    private fun applyCue() { if (soundOn) tracks.play(cue) else tracks.stop() }
+
+    /** Which song should be on right now ("" = silence, null = leave it alone). */
+    private fun wantedCue(): String? {
+        when (mgName) {
+            "belt" -> { val b = belt ?: return ""; return if (b.phase == BeltWorld.Phase.RIDE && b.phaseT >= 1f) "l3" else "" }
+            "fly" -> { val f = fly ?: return ""; return if (f.phase != FlyWorld.Phase.DONE) "l3b" else "" }
+            "cine0", "cine1" -> return ""
+            "shoot" -> { val sw = shoot ?: return ""; return when (sw.phase) { ShootWorld.Phase.PLAY -> "l4"; ShootWorld.Phase.DEAD -> null; else -> "" } }
+        }
+        if (levelIdx == 0) return "l1"
+        if (levelIdx == 1) {
+            if (stage == 0) return "l1"
+            val pw = pac ?: return ""
+            return when (pw.phase) { PacWorld.Phase.PLAY -> if (pw.phaseT >= 1f) "l2" else if (cue == "l2") "l2" else ""; PacWorld.Phase.CAUGHT -> null; else -> "" }
+        }
+        if (levelIdx == 5) return "l6"
+        return ""
+    }
     private var pixelScene: PixelScene? = null
     private val nearest = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
 
@@ -157,7 +178,8 @@ internal class DeadDropView(
                 val sw = shoot
                 if (sw != null && sw.phase == ShootWorld.Phase.DEAD) { if (deadT > 0.5f) startMg(mgIdx); return true }
                 val m = mgName
-                if ((m == "belt" || m == "shoot") && hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) }
+                if (m == "belt") { belt?.leap(if (x < width / 2f) -1 else 1) }
+                else if (m == "shoot" && hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) }
                 else if (m == "shoot" && hypot(x - aimCx, y - joyCy) < joyR * 1.7f) { aimId = id; readAim(x, y) }
                 else if (m == "fly") thrustId = id
             }
@@ -171,7 +193,7 @@ internal class DeadDropView(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
                 if (soundTap && act != MotionEvent.ACTION_POINTER_UP) {
                     soundTap = false
-                    if (act == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); if (soundOn) music.start() else music.stop() }
+                    if (act == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); applyCue() }
                     return true
                 }
                 if (act == MotionEvent.ACTION_CANCEL) { joyId = -1; aimId = -1; thrustId = -1 }
@@ -203,8 +225,8 @@ internal class DeadDropView(
             belt?.let { b ->
                 mgText(c, "LIVES  " + "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
                 if (b.phase == BeltWorld.Phase.FALL) mgText(c, "YOU FELL", w / 2f, oy + bmp.height * sc / 2f, 22f, danger)
-                if (b.phase == BeltWorld.Phase.PICKUP) mgText(c, "GRAB THE JETPACK", w / 2f, oy - 10f * d - 18f * d, 12f, 0xFFFFD84D.toInt())
-                if (b.t < 6f) mgText(c, "Dodge boxes, tools, cables, machines.", w / 2f, bt + 14f * d, 10.5f, a(Color.WHITE, 0x99), false)
+                if (b.phase == BeltWorld.Phase.LAUNCH || b.phase == BeltWorld.Phase.PICKUP) mgText(c, "THE JETPACK!", w / 2f, oy - 10f * d - 18f * d, 12f, 0xFFFFD84D.toInt())
+                if (b.t < 6f) mgText(c, "TAP LEFT OR RIGHT TO LEAP TO THE NEXT BELT.", w / 2f, bt + 14f * d, 10.5f, a(Color.WHITE, 0x99), false)
             }
             fly?.let { f ->
                 mgText(c, "COINS  ${f.coins} / ${f.spec.coinGoal}", w / 2f, oy - 10f * d, 14f, 0xFFFFD84D.toInt())
@@ -221,7 +243,7 @@ internal class DeadDropView(
                 }
             }
         }
-        if (mgName == "belt" || mgName == "shoot") drawJoystick(c)
+        if (mgName == "shoot") drawJoystick(c)
         if (mgName == "shoot" && shoot?.phase == ShootWorld.Phase.PLAY) {
             val cx = aimCx; val cy = joyCy; val r = joyR
             p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(cx, cy, r + 4f * d, p)
@@ -285,8 +307,8 @@ internal class DeadDropView(
         if (carryFade) { carryFade = false; fade = 1f; fadeDir = -1 }
     }
 
-    override fun onAttachedToWindow() { super.onAttachedToWindow(); running = true; last = 0L; if (soundOn) music.start(); postOnAnimation(tick) }
-    override fun onDetachedFromWindow() { running = false; music.stop(); super.onDetachedFromWindow() }
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); running = true; last = 0L; applyCue(); postOnAnimation(tick) }
+    override fun onDetachedFromWindow() { running = false; tracks.stop(); super.onDetachedFromWindow() }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -305,6 +327,7 @@ internal class DeadDropView(
                     left -= s
                 }
                 updateClue(raw)
+                wantedCue()?.let { if (it != cue) { cue = it; applyCue() } }
                 if (lastLevel && world.state == StealthWorld.State.WON) music.setCalm(true)
             }
             last = now
@@ -394,14 +417,14 @@ internal class DeadDropView(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (soundTap) {
                     soundTap = false
-                    if (e.actionMasked == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); if (soundOn) music.start() else music.stop() }
+                    if (e.actionMasked == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); applyCue() }
                     return true
                 }
                 joyActive = false; mag = 0f; knobX = 0f; knobY = 0f
                 if (e.actionMasked == MotionEvent.ACTION_UP && overlayAtDown) when (world.state) {
                     StealthWorld.State.CAUGHT -> if (world.stateT > 0.5f) { attempt++; if (stage == 1) restartPac() else load(true) }
                     StealthWorld.State.WON -> if (lastLevel) {
-                        if (wt > 12f) { saveLevel(0); music.stop(); onExit() }
+                        if (wt > 12f) { saveLevel(0); tracks.stop(); onExit() }
                     } else if (wt > 0.8f) { levelIdx++; saveLevel(levelIdx); load(false) }
                     else -> {}
                 }

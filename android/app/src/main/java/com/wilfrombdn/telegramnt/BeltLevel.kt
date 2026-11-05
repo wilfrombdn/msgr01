@@ -1,40 +1,71 @@
 package com.wilfrombdn.telegramnt
 
-/** The conveyor run of level 3: three belts, each shifted sideways from the last, then a platform with the jetpack. */
+import java.util.Random
+
+/** The conveyor run of level 3: three raised belts side by side, rows of trouble coming down them, always one safe belt per row. */
 internal object BeltLevel {
-    val warehouse = BeltSpec(
-        segs = listOf(
-            BeltSeg(0f, 44f, 7.0f, 2.6f, 5.2f),
-            BeltSeg(47f, 92f, 4.6f, 2.6f, 6.2f),
-            BeltSeg(95f, 140f, 9.0f, 2.6f, 7.2f),
-        ),
-        obstacles = listOf(
-            // belt one: boxes and a tool
-            BeltObs(BeltWorld.BOX, 8f, 5.8f, 1.6f, 1.6f),
-            BeltObs(BeltWorld.TOOL, 14f, 8.6f, 1.0f, 2.4f),
-            BeltObs(BeltWorld.BOX, 20f, 8.4f, 1.6f, 1.6f),
-            BeltObs(BeltWorld.CABLE, 26f, 7.0f, 1.0f, 1.0f, amp = 1.3f, period = 3.2f),
-            BeltObs(BeltWorld.BOX, 32f, 5.6f, 1.6f, 1.6f),
-            BeltObs(BeltWorld.BOX, 35f, 8.6f, 1.6f, 1.6f),
-            BeltObs(BeltWorld.TOOL, 40f, 7.0f, 2.2f, 0.8f),
-            // belt two: cables and a press
-            BeltObs(BeltWorld.BOX, 52f, 3.6f, 1.6f, 1.6f),
-            BeltObs(BeltWorld.CABLE, 58f, 5.0f, 1.0f, 1.0f, amp = 1.5f, period = 2.8f),
-            BeltObs(BeltWorld.MACHINE, 65f, 3.2f, 2.4f, 1.8f, period = 2.6f),
-            BeltObs(BeltWorld.TOOL, 71f, 6.2f, 1.0f, 2.0f),
-            BeltObs(BeltWorld.CABLE, 77f, 3.5f, 1.0f, 1.0f, amp = 1.2f, period = 3.0f),
-            BeltObs(BeltWorld.BOX, 83f, 5.8f, 1.6f, 1.6f),
-            BeltObs(BeltWorld.BOX, 87f, 3.4f, 1.6f, 1.6f),
-            // belt three: faster, with presses and swinging cables
-            BeltObs(BeltWorld.MACHINE, 101f, 10.4f, 2.4f, 1.8f, period = 2.4f),
-            BeltObs(BeltWorld.BOX, 107f, 8.0f, 1.6f, 1.6f),
-            BeltObs(BeltWorld.CABLE, 113f, 9.0f, 1.0f, 1.0f, amp = 1.6f, period = 2.6f),
-            BeltObs(BeltWorld.TOOL, 119f, 7.4f, 1.0f, 2.2f),
-            BeltObs(BeltWorld.TOOL, 119f, 10.8f, 1.0f, 2.2f),
-            BeltObs(BeltWorld.MACHINE, 125f, 7.6f, 2.4f, 1.8f, period = 2.4f, phase = 1.2f),
-            BeltObs(BeltWorld.CABLE, 131f, 10.0f, 1.0f, 1.0f, amp = 1.4f, period = 2.4f),
-            BeltObs(BeltWorld.BOX, 136f, 8.8f, 1.6f, 1.6f),
-        ),
-        platformS = 140f, endS = 152f, pickupX = 7f,
-    )
+    private val laneX = floatArrayOf(3.2f, 7.0f, 10.8f)
+    const val END = 140f
+
+    private fun build(seed: Int): BeltSpec {
+        val r = Random(seed.toLong())
+        val obs = ArrayList<BeltObs>()
+        var s = 13f; var row = 0
+        val w = BeltWorld(BeltSpec(emptyList(), END, laneX))
+        while (s < END - 10f) {
+            val p = s / END
+            val sp = w.speedAt(s)
+            val gap = maxOf(8.0f, sp * 0.95f)
+            val kinds = when {
+                row < 3 -> listOf(0)
+                p < 0.30f -> listOf(0, 1, 2)
+                p < 0.55f -> listOf(1, 2, 3, 4, 5)
+                p < 0.80f -> listOf(2, 3, 4, 5, 6, 7)
+                else -> listOf(3, 4, 5, 6, 7, 2)
+            }
+            val k = kinds[r.nextInt(kinds.size)]
+            val ph = r.nextFloat() * 3f
+            when (k) {
+                0 -> { // crates in one or two belts
+                    val free = r.nextInt(3)
+                    for (l in 0..2) if (l != free && (r.nextInt(3) != 0 || row < 3)) obs += BeltObs(BeltWorld.BOX, s, laneX[l], 0.8f, 0.8f)
+                    if (obs.none { it.s == s }) obs += BeltObs(BeltWorld.BOX, s, laneX[(free + 1) % 3], 0.8f, 0.8f)
+                }
+                1 -> { // a big spanner and a toolbox
+                    val free = r.nextInt(3); val a = (free + 1) % 3; val b = (free + 2) % 3
+                    obs += BeltObs(BeltWorld.TOOL, s, laneX[a], 0.6f, 1.3f)
+                    if (r.nextBoolean()) obs += BeltObs(BeltWorld.BOX, s + 2.2f, laneX[b], 0.8f, 0.8f)
+                }
+                2, 5 -> { // a cable (or a crane hook) swinging between two belts; the third is clear
+                    val free = r.nextInt(3); val a = if (free == 0) 1 else 0; val b = if (free == 2) 1 else 2
+                    val mid = (laneX[a] + laneX[b]) / 2f; val amp = (laneX[b] - laneX[a]) / 2f
+                    obs += BeltObs(if (k == 2) BeltWorld.CABLE else BeltWorld.HOOK, s, mid, if (k == 2) 0.5f else 0.8f, if (k == 2) 0.5f else 0.8f, amp, 2.6f + r.nextFloat() * 0.8f, ph)
+                }
+                3 -> { // a press slamming on one belt and a crate on another
+                    val free = r.nextInt(3); val a = (free + 1) % 3; val b = (free + 2) % 3
+                    obs += BeltObs(BeltWorld.PRESS, s, laneX[a], 1.3f, 1.0f, 0f, 2.4f, ph, 0.5f)
+                    obs += BeltObs(BeltWorld.BOX, s, laneX[b], 0.8f, 0.8f)
+                }
+                4 -> { // sparks arcing across two belts
+                    val free = if (r.nextBoolean()) 0 else 2
+                    val a = if (free == 0) 1 else 0; val b = a + 1
+                    obs += BeltObs(BeltWorld.ARC, s, (laneX[a] + laneX[b]) / 2f, (laneX[b] - laneX[a]) / 2f + 1.4f, 0.8f, 0f, 2.2f, ph, 0.55f)
+                }
+                6 -> { // barrels standing in two belts
+                    val free = r.nextInt(3)
+                    for (l in 0..2) if (l != free) obs += BeltObs(BeltWorld.BARREL, s + (if (l % 2 == 0) 0f else 1.3f), laneX[l], 0.7f, 0.7f)
+                }
+                else -> { // a barrel thrown down the belt, with a crate beside it
+                    val free = r.nextInt(3); val a = (free + 1) % 3; val b = (free + 2) % 3
+                    obs += BeltObs(BeltWorld.FLYER, s + 8f, laneX[a], 0.7f, 0.9f)
+                    obs += BeltObs(BeltWorld.BOX, s, laneX[b], 0.8f, 0.8f)
+                }
+            }
+            s += gap; row++
+        }
+        return BeltSpec(obs, END, laneX)
+    }
+
+    /** A fresh copy every attempt (the flying barrels remember when they were thrown). */
+    val warehouse: BeltSpec get() = build(21)
 }

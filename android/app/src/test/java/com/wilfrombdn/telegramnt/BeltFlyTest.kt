@@ -5,51 +5,86 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BeltFlyTest {
-    private fun run(w: BeltWorld, secs: Float, ix: Float = 0f, iy: Float = 0f, mag: Float = 0f) { var t = 0f; while (t < secs && w.phase != BeltWorld.Phase.FALL) { w.update(0.02f, ix, iy, mag); t += 0.02f } }
+    private fun spec() = BeltLevel.warehouse
 
-    @Test fun anIdleCourierRidesIntoTrouble() {
-        val w = BeltWorld(BeltLevel.warehouse)
+    /** A bot that looks ahead and leaps away from trouble. */
+    private fun bot(w: BeltWorld) {
+        if (w.phase != BeltWorld.Phase.RIDE || w.leaping) return
+        val sp = w.speedNow
+        fun danger(lane: Int, far: Float): Boolean {
+            for (o in w.spec.obstacles) {
+                val ahead = o.curS - w.s
+                if (ahead < -1.2f || ahead > far) continue
+                val rel = if (o.kind == BeltWorld.FLYER && o.armed) sp + 7f else sp
+                val tt = (ahead / rel).coerceAtLeast(0f)
+                val half = (o.hs + 0.5f) / rel
+                if (listOf(-1f, -0.5f, 0f, 0.5f, 1f).none { w.liveAt(o, w.t + tt + it * half) }) continue
+                if (kotlin.math.abs(w.obsXAt(o, w.t + tt) - w.spec.laneX[lane]) < o.hw + 0.95f) return true
+            }
+            return false
+        }
+        val far = 3.0f + sp * 0.55f
+        if (!danger(w.lane, far)) return
+        val best = (0..2).filter { !danger(it, far) }.minByOrNull { kotlin.math.abs(it - w.lane) } ?: return
+        w.leap(if (best > w.lane) 1 else -1)
+    }
+
+    private fun run(w: BeltWorld, secs: Float, useBot: Boolean = false) {
+        var t = 0f
+        while (t < secs && w.phase != BeltWorld.Phase.FALL && w.phase != BeltWorld.Phase.DONE) { if (useBot) bot(w); w.update(0.01f); t += 0.01f }
+    }
+
+    @Test fun anIdleCourierGetsHurt() {
+        val w = BeltWorld(spec())
         run(w, 60f)
-        // standing still in the middle he is hit by things and eventually falls or reaches the end unhurt only by luck
-        assertTrue(w.lives < 3 || w.phase == BeltWorld.Phase.FALL || w.phase == BeltWorld.Phase.PICKUP)
+        assertTrue(w.hits > 0)
     }
 
-    @Test fun missingTheGapMakesYouFall() {
-        val w = BeltWorld(BeltLevel.warehouse)
-        run(w, 4f)
+    @Test fun leapingChangesBelt() {
+        val w = BeltWorld(spec())
+        run(w, 3f)
         assertEquals(BeltWorld.Phase.RIDE, w.phase)
-        w.s = 43.5f; w.x = 9.4f      // far right of belt one: belt two is further left
-        run(w, 1f)
-        assertEquals(BeltWorld.Phase.FALL, w.phase)
+        assertEquals(1, w.lane)
+        w.leap(-1)
+        run(w, 0.4f)
+        assertEquals(0, w.lane)
+        assertEquals(w.spec.laneX[0], w.x, 0.01f)
+        w.leap(-1); run(w, 0.4f)
+        assertEquals("cannot leap off the edge", 0, w.lane)
     }
 
-    @Test fun hoppingToTheNextBeltWorks() {
-        val w = BeltWorld(BeltLevel.warehouse)
-        run(w, 4f)
-        w.s = 43.5f; w.x = 6.0f
-        w.update(0.02f, -1f, 0f, 1f)
-        run(w, 1.2f, -1f, 0f, 1f)
-        assertTrue(w.phase != BeltWorld.Phase.FALL)
-        assertTrue(w.s > 47f)
+    @Test fun theBeltsSpeedUpToAboutDouble() {
+        val w = BeltWorld(spec())
+        assertEquals(2.0f, w.speedAt(w.spec.endS) / w.speedAt(0f), 0.05f)
     }
 
     @Test fun aBoxHurtsOnce() {
-        val w = BeltWorld(BeltLevel.warehouse)
-        run(w, 4f)
-        w.s = 7.4f; w.x = 5.8f; w.invuln = 0f; w.lives = 3
-        w.update(0.05f, 0f, 0f, 0f)
+        val w = BeltWorld(spec())
+        run(w, 1f)
+        val box = w.spec.obstacles.first { it.kind == BeltWorld.BOX }
+        w.s = box.s - 0.5f; w.x = box.x; w.invuln = 0f; w.lives = 3
+        run(w, 0.2f)
         assertEquals(2, w.lives)
-        w.update(0.05f, 0f, 0f, 0f)
+        run(w, 0.1f)
         assertEquals("invulnerable for a moment after a hit", 2, w.lives)
     }
 
-    @Test fun thePlatformHasTheJetpack() {
-        val w = BeltWorld(BeltLevel.warehouse)
-        run(w, 3f)
-        w.s = 140.2f; w.x = 9f; w.update(0.02f, 0f, 0f, 0f)
-        assertEquals(BeltWorld.Phase.PICKUP, w.phase)
-        w.x = 7f; w.s = 149.6f; w.update(0.02f, 0f, 0f, 0f)
+    @Test fun aBotThatLooksAheadFinishesWithLivesLeft() {
+        val w = BeltWorld(spec())
+        var last = w.lives; var t = 0f
+        while (t < 80f && (w.phase == BeltWorld.Phase.INTRO || w.phase == BeltWorld.Phase.RIDE)) { bot(w); w.update(0.01f); t += 0.01f; if (w.lives != last) { last = w.lives; val o = w.spec.obstacles.minByOrNull { kotlin.math.abs(it.curS - w.s) }!!; println("HIT kind=${o.kind} s=${w.s} lane=${w.lane} x=${w.x} ox=${w.obsX(o)} os=${o.curS} sp=${w.speedNow} leaping=${w.leaping}") } }
+        println("belt bot: phase=${w.phase} lives=${w.lives} hits=${w.hits} s=${w.s}")
+        assertTrue("reaches the kicker", w.phase == BeltWorld.Phase.LAUNCH || w.phase == BeltWorld.Phase.PICKUP || w.phase == BeltWorld.Phase.DONE)
+        assertTrue(w.lives >= 1)
+    }
+
+    @Test fun theKickerThrowsYouToTheJetpack() {
+        val w = BeltWorld(spec())
+        run(w, 1f)
+        w.s = w.spec.endS - 0.05f; w.invuln = 5f
+        run(w, 6f)
         assertEquals(BeltWorld.Phase.DONE, w.phase)
+        assertTrue(w.s > w.spec.endS + 8f)
     }
 
     @Test fun flyingCollectsCoinsAndTheJetpackGivesOut() {
