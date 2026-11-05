@@ -192,6 +192,44 @@ class PrisonTest {
         step2(1.2f); save(s2.render(t2), "l5-drown-splash")
     }
 
+    @Test fun aGuardFetchesYouForBreakfastAndKeepsWatch() {
+        val w = awake()
+        run(w, 31f)
+        assertEquals(PrisonWorld.Period.BREAKFAST, w.period)
+        val g = w.escort!!
+        assertTrue("he turns up next to you", kotlin.math.hypot(g.x - w.px, g.y - w.py) < 4.5f)
+        assertEquals("FOLLOW THE GUARD", w.nextStep().first)
+        at(w, 15.5f, 18.5f)                                   // you get to the dining hall
+        var t = 0f; while (!w.escortArrived && t < 40f) { w.update(0.05f, 0f, 0f, 0f); t += 0.05f }
+        assertTrue("he got there and keeps watch", w.escortArrived && g.post != null)
+    }
+
+    @Test fun aWatchingGuardStopsYouStealingADistractedOneDoesnt() {
+        val w = awake()
+        w.clock = 419.9f; run(w, 0.2f)                         // breakfast
+        for (n in w.npcs) if (n.guard) { n.x = 70.5f; n.y = 44.5f; n.path.clear(); n.post = null; n.escorting = false }
+        val g = w.npcs.first { it.guard }
+        g.x = 15.5f; g.y = 17.5f; g.post = 15 to 17; g.attn = PrisonWorld.WATCH; g.attnT = 99f
+        at(w, 12.5f, 11.5f)                                    // next to a table
+        assertEquals("TAKE A SPOON", w.prompt())
+        w.update(0.05f, 0f, 0f, 0f); g.x = 15.5f; g.y = 17.5f
+        assertFalse(w.act()); assertFalse(w.has(PrisonWorld.Item.SPOON))
+        g.attn = PrisonWorld.DISTRACT; g.attnT = 99f
+        assertTrue(w.act()); assertTrue(w.has(PrisonWorld.Item.SPOON))
+    }
+
+    @Test fun inmatesHaveThingsToSay() {
+        val w = awake()
+        val doc = w.npcs.first { it.persona?.name == "DOC" }
+        at(w, doc.x + 0.8f, doc.y)
+        assertEquals("TALK TO DOC", w.prompt())
+        w.act()
+        assertTrue(doc.say.contains("MIRROR"))
+        val rook = w.npcs.first { it.persona?.name == "ROOK" }
+        at(w, rook.x + 0.8f, rook.y); w.talk(rook)
+        assertEquals("...", rook.say)
+    }
+
     @Test fun shots() {
         val w = PrisonWorld(PrisonLevel.rock()); val s = PrisonScene(w)
         var t = 0f

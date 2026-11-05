@@ -731,6 +731,11 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
     private val guardOutfit = Outfit(PX.SKIN, 0xFF1A1420.toInt(), 0xFF2A303C.toInt(), 0xFF101418.toInt(), 0xFF5E6676.toInt(), null, 0xFF2A303C.toInt(), PX.K, PX.K, badge = true)
 
     private class DItem(val y: Float, val draw: () -> Unit)
+    private val outfitCache = HashMap<Int, Outfit>()
+    private fun outfitOf(n: PrisonWorld.Npc): Outfit = outfitCache.getOrPut(n.id) {
+        val pr = n.persona ?: return@getOrPut inmates[n.id % inmates.size]
+        Outfit(pr.skin, if (pr.bald) lite(pr.skin, -24) else pr.hair, null, null, pr.shirt, null, 0xFF8A8670.toInt(), 0xFF1A1410.toInt(), null, glasses = pr.glasses)
+    }
 
     /** Light a sprite by the light where it stands: compare the lit floor with its plain colour a few pixels around the feet. */
     private var lit: Bitmap? = null
@@ -853,12 +858,37 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
             items += DItem(n.y) {
                 val fx = (n.x * S).roundToInt(); val fy = (n.y * S).roundToInt() + 6
                 val fr = if (n.moving) 1 + ((clock * 7f + n.id).toInt() % 2) else 0
+                val o = if (n.guard) guardOutfit else outfitOf(n)
                 tintAt(fx, fy)
-                folk(c, fx, fy, dirOf(n.face), fr, if (n.guard) guardOutfit else inmates[n.id % inmates.size], false, false)
+                when (val act = world.activityOf(n)) {
+                    "pushups" -> { val up = (clock * 1.6f + n.id).toInt() % 2 == 0; lying(c, fx, fy - (if (up) 2 else 0), o, n.id % 2 == 0, false); rect(c, fx + (if (n.id % 2 == 0) -9 else 7), fy - 4, 2, if (up) 4 else 2, o.skin) }
+                    "weights" -> { val up = (clock * 1.2f + n.id).toInt() % 2 == 0; folk(c, fx, fy, 2, 0, o, false, false); val by = fy - (if (up) 24 else 16); rect(c, fx - 10, by, 21, 2, STEEL_D); rect(c, fx - 12, by - 2, 3, 6, PX.K); rect(c, fx + 10, by - 2, 3, 6, PX.K); rect(c, fx - 6, by + 2, 2, if (up) 8 else 2, o.skin); rect(c, fx + 5, by + 2, 2, if (up) 8 else 2, o.skin) }
+                    "reader" -> { folk(c, fx, fy, 0, 0, o, false, false); rect(c, fx - 3, fy - 12, 7, 5, K(0xFF7A2A2A)); rect(c, fx - 2, fy - 11, 5, 3, K(0xFFE8E4D4)) }
+                    "cards" -> { folk(c, fx, fy, 0, 0, o, false, false); if ((clock * 0.8f + n.id).toInt() % 3 == 0) { rect(c, fx - 4, fy - 20, 4, 5, PX.W); px(c, fx - 3, fy - 19, PX.RED) } }
+                    "sleeper" -> { val (hc, hr) = n.home; lying(c, hc * S + 9, (hr - 1) * S + 12, o, true, false); if ((clock * 0.7f).toInt() % 2 == 0) rect(c, hc * S + 12, (hr - 1) * S - 2, 3, 1, a(PX.W, 0xB0)) }
+                    else -> {
+                        folk(c, fx, fy, dirOf(n.face), fr, o, false, false)
+                        if (act == "sweeper" || (!n.guard && n.persona?.activity == "sweeper")) { rect(c, fx + 6, fy - 12, 1, 12, K(0xFF8A6A3A)); rect(c, fx + 4, fy - 1, 6, 2, K(0xFFC8B070)) }   // a broom
+                    }
+                }
+                // the little things that make each man himself: a beard, tattoos
+                val pr = n.persona
+                if (pr != null && world.activityOf(n) !in setOf("pushups", "sleeper")) {
+                    val d0 = dirOf(n.face)
+                    if (pr.beard && d0 == 2) { rect(c, fx - 3, fy - 14, 7, 3, pr.hair); px(c, fx, fy - 14, pr.skin) }
+                    if (pr.beard && (d0 == 1 || d0 == 3)) rect(c, fx + (if (d0 == 1) 1 else -4), fy - 14, 4, 3, pr.hair)
+                    if (pr.tattoo) { px(c, fx - 6, fy - 9, K(0xFF2A4A6A)); px(c, fx + 6, fy - 10, K(0xFF2A4A6A)) }
+                }
                 if (n.guard) rect(c, fx - 6, fy - 8, 2, 6, K(0xFF2A1C14))                                       // the baton
                 noTint()
                 if (n.guard && dark) { val d0 = dirOf(n.face); val tx0 = fx + (if (d0 == 1) 6 else if (d0 == 3) -6 else 5); px(c, tx0, fy - 7, PX.W); px(c, tx0, fy - 6, PX.LAMP) }   // a torch at night
-                if (n.id in world.watchers) { rect(c, fx - 2, fy - 31, 5, 8, PX.K); rect(c, fx - 1, fy - 30, 3, 5, PX.RED); rect(c, fx - 2, fy - 23, 5, 4, PX.K); rect(c, fx - 1, fy - 22, 3, 2, PX.RED) }
+                // a guard keeping watch shows what he's doing: an open eye when he's watching you, dots when he isn't
+                if (n.guard && (n.post != null || n.escorting) && world.phase == PrisonWorld.Phase.PLAY) {
+                    val ix0 = fx - 4; val iy0 = fy - 32
+                    if (n.attn == PrisonWorld.WATCH) { rect(c, ix0, iy0, 9, 5, PX.K); rect(c, ix0 + 1, iy0 + 1, 7, 3, PX.W); rect(c, ix0 + 3, iy0 + 1, 3, 3, if (n.id in world.watchers) PX.RED else K(0xFF1A2A4A)) }
+                    else if (n.attn == PrisonWorld.DISTRACT) { rect(c, ix0, iy0 + 1, 9, 3, a(PX.K, 0xA0)); for (k in 0..2) px(c, ix0 + 2 + k * 2, iy0 + 2, PX.W) }
+                }
+                if (n.id in world.watchers && !(n.post != null || n.escorting)) { rect(c, fx - 2, fy - 31, 5, 8, PX.K); rect(c, fx - 1, fy - 30, 3, 5, PX.RED); rect(c, fx - 2, fy - 23, 5, 4, PX.K); rect(c, fx - 1, fy - 22, 3, 2, PX.RED) }
             }
         }
         items += DItem(world.py) {
@@ -880,6 +910,19 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
         }
         items.sortBy { it.y }
         for (it in items) it.draw()
+
+        // what people are saying
+        for (n in world.npcs) if (n.sayT > 0f && n.say.isNotEmpty() && n.x >= c0 && n.x <= c1 && n.y >= r0 && n.y <= r1) {
+            val shown = ((3.2f - n.sayT + n.say.length * 0.035f) * 30f).toInt().coerceAtLeast(1)
+            bubble(c, n.say, (n.x * S).roundToInt(), (n.y * S).roundToInt() - 26, shown, (cxT * S).roundToInt() + W)
+        }
+        // a bouncing arrow over what to do next
+        world.nextStep().second?.let { (tc, tr) ->
+            if (world.phase == PrisonWorld.Phase.PLAY && (clock * 2f).toInt() % 3 != 2) {
+                val ax = tc * S + 8; val ay = tr * S - 10 - ((sin(clock * 6f) + 1f) * 2f).toInt()
+                rect(c, ax - 4, ay - 3, 9, 3, PX.K); rect(c, ax - 3, ay - 2, 7, 1, PX.GOLD); rect(c, ax - 3, ay, 7, 2, PX.K); rect(c, ax - 2, ay, 5, 1, PX.GOLD); rect(c, ax - 1, ay + 1, 3, 2, PX.K); px(c, ax, ay + 1, PX.GOLD); px(c, ax, ay + 3, PX.K)
+            }
+        }
 
         // the atmosphere
         if (!dark) { dust(c, clock, cxT, cyT); flicker(c, clock) }

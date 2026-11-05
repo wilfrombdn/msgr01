@@ -142,6 +142,10 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     val machines = ArrayList<Machine>()
     class Station(val c: Int, val r: Int, val kind: Char)
 
+    /** Who an inmate is: a name, a look, what he does with his free time, and what (if anything) he says when you walk up. */
+    class Persona(val name: String, val activity: String, val lines: List<String>, val skin: Int, val hair: Int, val shirt: Int,
+                  val bald: Boolean = false, val beard: Boolean = false, val glasses: Boolean = false, val tattoo: Boolean = false)
+
     class Npc(val id: Int, var x: Float, var y: Float, val guard: Boolean) {
         var face = 0f
         var path = ArrayList<Pair<Int, Int>>()
@@ -149,6 +153,17 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         var moving = false
         var stay = false          // standing where the routine put them until the next part of the day
         var home = 0 to 0         // the inmate's own cell
+        var persona: Persona? = null
+        // guards: are they watching, distracted, or have they stepped out?
+        var attn = WATCH; var attnT = 6f
+        var post: Pair<Int, Int>? = null          // keeping watch over a room from here
+        var awayStage = -1                        // stepping out: 0 going, 1 out, 2 coming back
+        var escorting = false; var hold = false   // walking you somewhere (and waiting for you to catch up)
+        // what they're saying right now
+        var say = ""; var sayT = 0f
+        var lineAt = 0
+        val talking get() = sayT > 0f
+        var heard = 0f           // seconds left facing you after you spoke to them
     }
     val npcs = ArrayList<Npc>()
     private val rnd = Random(seed)
@@ -168,6 +183,31 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         const val DRY_S = 8f
         const val FOLD_S = 2f
         const val SEE = 7f                // how far the guards see
+        const val CONE = 1.15f            // ... and how wide (radians either side of where they look)
+        const val WATCH = 0; const val DISTRACT = 1; const val AWAY = 2
+        private fun K(v: Long) = v.toInt()
+        /** The men inside. Some talk (gossip, hints, the story), some don't. */
+        val PERSONAS = listOf(
+            Persona("BIG LOU", "weights", listOf("YARD WALL'S LOWEST BY THE TOWER. NOT THAT I'D KNOW.", "THEY DON'T WATCH THE BOTTOM WALL IN FREE TIME. MUCH."), K(0xFF8A6048), K(0xFF0E0A0A), K(0xFF5A7FB0), bald = true, tattoo = true),
+            Persona("DOC", "reader", listOf("THE SHOWERS HAVE A BROKEN MIRROR BY THE FIRST STALL.", "A MIRROR CATCHES THE LIGHT. A BOAT CAN SEE THAT FROM MILES OUT."), K(0xFFE2B590), K(0xFF8A8A92), K(0xFF6A8CBC), glasses = true),
+            Persona("ROOK", "loner", emptyList(), K(0xFFC89A78), K(0xFF1A1420), K(0xFF4E72A4)),
+            Persona("MAGS", "cards", listOf("SPOONS GO MISSING EVERY WEEK. THEY COUNT THE FORKS, NOT THE SPOONS.", "FLOOR UNDER THE BUNKS IS OLD. SOFT, EVEN."), K(0xFFA87858), K(0xFF6A3A1A), K(0xFF5A7FB0), beard = true),
+            Persona("FELIX", "talker", listOf("WANT TO LOOK LIKE A SCREW? COME SIT IN MY CHAIR AT FREE TIME.", "BARBER'S BY THE VISITING ROOM. EAST END."), K(0xFF6A4434), K(0xFF0A0808), K(0xFF52769E)),
+            Persona("OLD SAL", "sleeper", listOf("THE LAUNDRY CARTS GO DOWN TO THE DOCK EVERY AFTERNOON.", "NOBODY LOOKS INSIDE A CART OF CLEAN SHEETS."), K(0xFFE2B590), K(0xFFC8C8D0), K(0xFF6A8CBC), beard = true),
+            Persona("TANK", "pushups", listOf("MIND YOUR BUSINESS, NEW GUY."), K(0xFF8A6048), K(0xFF0E0A0A), K(0xFF4E72A4), bald = true, tattoo = true),
+            Persona("WHISPER", "pacer", listOf("TELLEM... IS THAT REALLY YOU? THEY SAID YOU WERE DEAD.", "THEY SAY YOU HAVE LETTERS. THEY SAY IT LIKE IT'S A CRIME."), K(0xFFC89A78), K(0xFF3A2A1E), K(0xFF5A7FB0)),
+            Persona("PREACHER", "reader", listOf("THE TRUTH GETS OUT. IT ALWAYS DOES.", "PRAY IF YOU LIKE. THEN DIG IF YOU HAVE TO."), K(0xFF6A4434), K(0xFFB8B8C0), K(0xFF6A8CBC), glasses = true),
+            Persona("KID", "talker", listOf("IS IT TRUE YOU BLEW UP THE BRIDGE?", "I'M IN FOR A PARKING TICKET. NO, REALLY."), K(0xFFE2B590), K(0xFFB86A2A), K(0xFF5A7FB0)),
+            Persona("VIC", "sweeper", listOf("THE VENTS BEHIND THE SINKS ARE SOFT. RUST.", "A FILE FROM THE KITCHEN WOULD GO RIGHT THROUGH."), K(0xFFA87858), K(0xFF2A1A10), K(0xFF52769E)),
+            Persona("DUTCH", "cards", listOf("SHEETS, MAN. THREE SHEETS MAKE A ROPE. EVERYBODY KNOWS.", "A FORK AND A PIPE. BEND IT. NOW YOU'VE GOT A HOOK."), K(0xFFE2B590), K(0xFFD8C890), K(0xFF4E72A4), beard = true),
+            Persona("GHOST", "loner", emptyList(), K(0xFFC8C8C8), K(0xFF1A1420), K(0xFF6A8CBC), bald = true),
+            Persona("MOE", "weights", listOf("MASHED POTATOES AGAIN.", "GUARDS STEP OUT FOR A SMOKE. EVERY HOUR, LIKE A CLOCK."), K(0xFF8A6048), K(0xFF0E0A0A), K(0xFF5A7FB0)),
+            Persona("NUMBERS", "pacer", listOf("SEVEN MINUTES BETWEEN ROUNDS. I'VE COUNTED.", "THE ONE IN THE LAUNDRY TURNS HIS BACK WHEN HIS RADIO GOES."), K(0xFFC89A78), K(0xFF3A2A1E), K(0xFF6A8CBC), glasses = true),
+            Persona("BISHOP", "talker", listOf("THE MAYOR PUT HALF OF US IN HERE.", "THEY KEEP THE UNIFORMS IN THE LAUNDRY. FUNNY, THAT."), K(0xFF6A4434), K(0xFF0A0808), K(0xFF52769E), beard = true),
+            Persona("RAY", "pushups", emptyList(), K(0xFFE2B590), K(0xFF4A2E1B), K(0xFF4E72A4), tattoo = true),
+            Persona("COOKIE", "sweeper", listOf("KITCHEN'S GOT FILES FOR THE KNIVES. NOBODY COUNTS THOSE EITHER."), K(0xFFA87858), K(0xFF1A1420), K(0xFF5A7FB0), bald = true),
+            Persona("SLIM", "sleeper", listOf("ZZZ..."), K(0xFFC89A78), K(0xFF6A3A1A), K(0xFF6A8CBC)),
+        )
         const val SIGNAL_S = 6f           // the mirror scene
         const val ESCAPE_RESCUED = 9.5f   // the escape scene when the boat picks you up
         const val DROWN_S = 6f            // ...and when it doesn't
@@ -216,7 +256,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
             12 to 11, 18 to 14, 11 to 23, 19 to 26,
             35 to 18, 50 to 19, 40 to 6, 47 to 31, 30 to 34, 25 to 10,
         )
-        for ((i, s) in start.withIndex()) npcs += Npc(i, s.first + 0.5f, s.second + 0.5f, false).also { it.wait = rnd.nextFloat() * 3f; it.home = homes[(i * 7) % homes.size] }
+        for ((i, s) in start.withIndex()) npcs += Npc(i, s.first + 0.5f, s.second + 0.5f, false).also { it.wait = rnd.nextFloat() * 3f; it.home = homes[(i * 7) % homes.size]; it.persona = PERSONAS[i % PERSONAS.size] }
         val posts = listOf(26 to 18, 43 to 6, 52 to 31, 59 to 18, 25 to 3, 38 to 43, 15 to 19, 62 to 43)
         for ((i, s) in posts.withIndex()) npcs += Npc(100 + i, s.first + 0.5f, s.second + 0.5f, true).also { it.wait = 1f + rnd.nextFloat() * 4f }
         // the first morning: everyone's at roll call by their cells
@@ -251,6 +291,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
                 move(ix * sp * dt, iy * sp * dt)
             }
             laundryTick(dt)
+            escortTick(dt)
             rules(dt)
             zone.let { if (it.isNotEmpty()) visited += it }
         }
@@ -331,9 +372,62 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
             } else say("${p.label}: GO TO THE ${p.place}.")
         }
         routineForNpcs(p)
+        assignEscort(p)
     }
 
     private var startPeriodMsg: String? = null
+
+    // ---------- the escort: a guard comes for you at each part of the day and walks you there, then keeps watch ----------
+    var escort: Npc? = null; private set
+    var escortArrived = false; private set
+    private var escortGoal: Pair<Int, Int>? = null
+    /** Where each part of the day happens (the tile you're walked to). */
+    fun goalFor(p: Period): Pair<Int, Int>? = when (p) {
+        Period.BREAKFAST, Period.LUNCH, Period.DINNER -> 15 to 18
+        Period.WORK_AM, Period.WORK_PM -> 64 to 44
+        Period.SHOWERS -> 11 to 3
+        Period.ROLL_PM -> myCell to 17
+        else -> null
+    }
+    private fun assignEscort(p: Period) {
+        // last part's guards go back to their rounds
+        for (n in npcs) if (n.guard) { n.post = null; n.escorting = false; n.hold = false; n.attn = WATCH; n.awayStage = -1 }
+        escort = null; escortArrived = false; escortGoal = null
+        val goal = goalFor(p) ?: return
+        if (solitary || disguised || phase != Phase.PLAY) return
+        val g = npcs.filter { it.guard }.minByOrNull { hypot(it.x - px, it.y - py) } ?: return
+        // he turns up a couple of steps from you
+        nearTile(floor(px).toInt() to floor(py).toInt(), 2, 3)?.let { (c, r) -> g.x = c + 0.5f; g.y = r + 0.5f }
+        g.escorting = true; g.path = route(floor(g.x).toInt() to floor(g.y).toInt(), goal); g.wait = 0f
+        speak(g, when (p) { Period.ROLL_PM -> "COUNT. BACK TO YOUR CELL, TELLEM."; Period.SHOWERS -> "SHOWERS. MOVE."; else -> "MOVE, TELLEM. ${p.label}." })
+        escort = g; escortGoal = goal
+    }
+    /** A walkable tile between [lo] and [hi] steps from [from] (for the escort to turn up on). */
+    private fun nearTile(from: Pair<Int, Int>, lo: Int, hi: Int): Pair<Int, Int>? {
+        val seen = HashMap<Pair<Int, Int>, Int>(); val q = ArrayDeque<Pair<Int, Int>>(); seen[from] = 0; q.add(from)
+        while (q.isNotEmpty()) {
+            val cur = q.removeFirst(); val d = seen[cur]!!
+            if (d in lo..hi && tile(cur.first, cur.second) in ".,ozh") return cur
+            if (d >= hi) continue
+            for ((dc, dr) in listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)) { val n = (cur.first + dc) to (cur.second + dr); if (n !in seen && (walkable(n.first, n.second) || tile(n.first, n.second) == 'O')) { seen[n] = d + 1; q.add(n) } }
+        }
+        return null
+    }
+    private fun escortTick(dt: Float) {
+        val g = escort ?: return
+        if (escortArrived) return
+        val d = hypot(g.x - px, g.y - py)
+        val p = period
+        val there = atPlace(p.place)                        // already where you're meant to be: he just follows on
+        g.hold = d > 3.2f && !there                         // otherwise he waits for you to catch up
+        if (d > 6f && !there) { heat += 5f * dt; if (g.sayT <= 0f) speak(g, "KEEP UP, TELLEM.") }
+        if (d > 12f && !atPlace(p.place)) {                 // too far: he comes and gets you
+            px = g.x; py = g.y + 0.6f; if (!walkable(floor(px).toInt(), floor(py).toInt())) { px = g.x; py = g.y }
+            heat += 10f; say("THE GUARD GRABS YOUR ARM AND DRAGS YOU ALONG.", true)
+        }
+        if (g.path.isEmpty()) { escortArrived = true; g.escorting = false; g.hold = false; g.post = escortGoal; g.attn = WATCH; g.attnT = 7f + rnd.nextFloat() * 3f; speak(g, "IN YOU GO. I'M WATCHING.") }
+    }
+    private fun speak(n: Npc, line: String) { n.say = line; n.sayT = 2.8f + line.length * 0.035f }
 
     private fun rules(dt: Float) {
         val p = period
@@ -372,7 +466,10 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
 
     /** Can this guard see you (close enough, and no wall in the way)? */
     fun sees(n: Npc): Boolean {
-        if (hypot(n.x - px, n.y - py) > SEE) return false
+        if (n.attn != WATCH) return false
+        val d = hypot(n.x - px, n.y - py)
+        if (d > SEE) return false
+        if (d > 1.6f) { var da = kotlin.math.atan2(py - n.y, px - n.x) - n.face; while (da > Math.PI) da -= (2 * Math.PI).toFloat(); while (da < -Math.PI) da += (2 * Math.PI).toFloat(); if (abs(da) > CONE) return false }
         return clearLine(n.x, n.y, px, py)
     }
     private fun clearLine(x0: Float, y0: Float, x1: Float, y1: Float): Boolean {
@@ -383,6 +480,36 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
             if (ch == '#' || ch == 'v' || ch == 'L' || ch == 'X' || ch == 'W' || ch == 'r') return false
         }
         return true
+    }
+
+    /** What you should do right now, in plain words, and the tile to point an arrow at (or null). */
+    fun nextStep(): Pair<String, Pair<Int, Int>?> {
+        val p = period
+        if (phase != Phase.PLAY) return "" to null
+        if (solitary) return "SOLITARY. WAIT FOR MORNING." to null
+        val g = escort
+        if (g != null && !escortArrived) return "FOLLOW THE GUARD" to (floor(g.x).toInt() to floor(g.y).toInt())
+        if (p.work && !shiftDone) {
+            if (!atPlace("LAUNDRY")) return "GO TO THE LAUNDRY" to goalFor(p)
+            if (folding >= 0f) return "HOLD STILL, FOLDING..." to null
+            fun idle(dryer: Boolean) = machines.firstOrNull { it.dryer == dryer && !it.running && !it.ready }
+            return when (carry) {
+                Carry.NONE -> machines.firstOrNull { it.ready }?.let { (if (it.dryer) "TAKE THE DRY LAUNDRY OUT" else "TAKE THE WET LAUNDRY OUT") to (it.c to it.r) }
+                    ?: if (dirtyBags > 0) "TAKE A DIRTY BAG FROM THE CART" to (61 to 45) else "WAIT FOR THE MACHINES" to null
+                Carry.DIRTY -> idle(false)?.let { "PUT IT IN A WASHER" to (it.c to it.r) } ?: ("WAIT FOR A FREE WASHER" to null)
+                Carry.WET -> idle(true)?.let { "PUT IT IN A DRYER" to (it.c to it.r) } ?: ("WAIT FOR A FREE DRYER" to null)
+                Carry.DRY -> "FOLD IT ON THE TABLE" to (65 to 42)
+                Carry.FOLDED -> "PUT IT IN THE CLEAN CART" to (69 to 45)
+            }
+        }
+        val due = dueAt
+        if (due != null) return (if (due == "YOUR CELL") "STAND AT YOUR CELL DOOR" else "GO TO THE $due") to (if (due == "YOUR CELL") myCell to 17 else goalFor(p))
+        return when {
+            p == Period.FREE -> "FREE TIME. LOOK AROUND, TALK, PLAN." to null
+            p == Period.LIGHTS_OUT -> "LIGHTS OUT" to null
+            p.work -> "LOAD DONE. KEEP YOUR HEAD DOWN." to null
+            else -> "STAY PUT UNTIL THE GUARD MOVES YOU." to null
+        }
     }
 
     // ---------- the laundry ----------
@@ -527,7 +654,37 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         }
         // out the front gate in uniform
         if (disguised && !night && nearTile("X")) o += Option("WALK OUT THE GATE") { escape(Route.GATE); true }
+        // talk to whoever's next to you
+        npcs.filter { hypot(it.x - px, it.y - py) < 1.5f }.minByOrNull { hypot(it.x - px, it.y - py) }?.let { n ->
+            o += Option(if (n.guard) "TALK TO THE GUARD" else "TALK TO ${n.persona?.name ?: "HIM"}") { talk(n); true }
+        }
         return o
+    }
+
+    /** What someone says when you walk up to them. */
+    fun talk(n: Npc) {
+        n.face = kotlin.math.atan2(py - n.y, px - n.x); n.heard = 3f
+        if (n.guard) {
+            val p = period
+            val line = when {
+                heat >= 70f -> listOf("ONE MORE STEP OUT OF LINE AND IT'S THE HOLE, TELLEM.", "I'VE WRITTEN YOUR NAME DOWN TWICE TODAY.").random(rnd)
+                heat >= 30f -> listOf("I'VE GOT MY EYE ON YOU, TELLEM.", "QUIET DAY. KEEP IT THAT WAY.").random(rnd)
+                else -> when (p) {
+                    Period.ROLL_AM, Period.ROLL_PM -> "STAND AT YOUR DOOR FOR THE COUNT."
+                    Period.BREAKFAST -> "EAT. YOU'VE GOT LAUNDRY AFTER."
+                    Period.LUNCH -> "BACK TO THE LAUNDRY AFTER THIS. SECOND LOAD."
+                    Period.WORK_AM, Period.WORK_PM -> "THREE BAGS. WASHED, DRIED, FOLDED. MOVE."
+                    Period.FREE -> "FREE TIME. DON'T MAKE ME REGRET IT."
+                    Period.DINNER -> "LAST MEAL OF THE DAY. SHOWERS AFTER."
+                    Period.SHOWERS -> "IN AND OUT, TELLEM."
+                    Period.LIGHTS_OUT -> "LIGHTS OUT. GET IN YOUR CELL."
+                }
+            }
+            speak(n, line); return
+        }
+        val pr = n.persona ?: return
+        if (pr.lines.isEmpty()) { speak(n, "..."); say("${pr.name} DOESN'T SAY ANYTHING."); return }
+        speak(n, pr.lines[n.lineAt % pr.lines.size]); n.lineAt++
     }
 
     /** After drowning: you wake up in your cell the next morning with everything you had. */
@@ -569,7 +726,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
                 Period.BREAKFAST, Period.LUNCH, Period.DINNER -> spot("DINING HALL")
                 Period.SHOWERS -> spot("SHOWERS")
                 Period.WORK_AM, Period.WORK_PM -> when (n.id % 5) { 0 -> spot("KITCHEN"); 1 -> spot("LIBRARY"); 2 -> spot("LAUNDRY"); else -> spot("RECREATION YARD") }
-                Period.FREE -> null
+                Period.FREE -> freeSpot(n)
             }
             if (target == null) { n.stay = false; n.wait = rnd.nextFloat() * 4f; continue }
             n.stay = true
@@ -578,10 +735,33 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         }
     }
 
+    /** Where an inmate spends his free time, by what he likes doing (null = he wanders). */
+    private fun freeSpot(n: Npc): Pair<Int, Int>? = when (n.persona?.activity) {
+        "weights" -> (30 + n.id % 6 * 3) to 43
+        "pushups" -> (14 + n.id % 4 * 4) to 45
+        "reader" -> (29 + n.id % 5) to 33
+        "cards" -> (11 + n.id % 3) to 11
+        "talker" -> (8 + n.id % 5 * 3) to 41
+        "loner" -> (54 - n.id % 3) to 46
+        "sleeper", "pacer" -> n.home
+        else -> null
+    }
+    /** What an inmate is doing where he stands (the scene draws it): push-ups, weights, reading, cards, sleeping... */
+    fun activityOf(n: Npc): String = if (!n.guard && n.stay && n.path.isEmpty() && period == Period.FREE) n.persona?.activity ?: "" else if (!n.guard && n.persona?.activity == "sleeper" && night) "sleeper" else ""
+
     private fun updateNpc(n: Npc, dt: Float) {
+        n.sayT = max(0f, n.sayT - dt); n.heard = max(0f, n.heard - dt)
+        if (n.guard) guardMind(n, dt)
+        if (n.heard > 0f) { n.moving = false; n.face = kotlin.math.atan2(py - n.y, px - n.x); return }     // turned to you, talking
+        if (n.guard && n.hold) { n.moving = false; return }
+        if (n.path.isEmpty() && !n.guard && n.persona?.activity == "pacer" && period == Period.FREE && n.stay) {   // pacing in front of his cell
+            val goal = if (floor(n.x).toInt() == n.home.first) (n.home.first + 1) to n.home.second else n.home
+            if (walkable(goal.first, goal.second)) n.path = arrayListOf(goal)
+        }
+        if (n.path.isEmpty() && !n.guard && n.persona?.activity == "sweeper" && period == Period.FREE) n.stay = false
         if (n.path.isEmpty()) {
             n.moving = false
-            if (n.stay) return
+            if (n.stay || n.post != null) return
             n.wait -= dt
             if (n.wait > 0f) return
             val pool = if (n.guard) rounds else hangouts
@@ -596,9 +776,40 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         val (tc, tr) = n.path[0]
         val tx = tc + 0.5f; val ty = tr + 0.5f
         val dx = tx - n.x; val dy = ty - n.y; val d = hypot(dx, dy)
-        val sp = (if (n.guard) 1.3f else 1.9f) * dt
+        val sp = (if (n.escorting) 2.2f else if (n.guard) 1.3f else if (n.persona?.activity == "sweeper" && period == Period.FREE) 0.8f else if (n.persona?.activity == "pacer") 0.9f else 1.9f) * dt
         n.moving = true
         if (d <= sp) { n.x = tx; n.y = ty; n.path.removeAt(0) } else { n.x += dx / d * sp; n.y += dy / d * sp; n.face = atan2(dy, dx) }
+    }
+
+    /** A guard keeping watch: he looks at you for a while, then gets distracted (radio, another inmate), and now and then steps out. */
+    private fun guardMind(n: Npc, dt: Float) {
+        val post = n.post
+        if (post == null) {   // on his rounds: he looks where he walks, and looks about when he stops
+            n.attn = WATCH
+            if (n.path.isEmpty() && !n.escorting) n.face += dt * 0.9f
+            return
+        }
+        n.attnT -= dt
+        when (n.attn) {
+            WATCH -> {
+                n.face = kotlin.math.atan2(py - n.y, px - n.x)
+                if (n.attnT <= 0f) {
+                    if (rnd.nextFloat() < 0.3f) {
+                        val far = rounds.filter { val dd = abs(it.first - post.first) + abs(it.second - post.second); dd in 7..11 && PrisonLevel.zoneName(spec, it.first, it.second) != PrisonLevel.zoneName(spec, post.first, post.second) }
+                        if (far.isNotEmpty()) { n.attn = AWAY; n.awayStage = 0; n.path = route(floor(n.x).toInt() to floor(n.y).toInt(), far[rnd.nextInt(far.size)]); speak(n, "BACK IN A MINUTE. DON'T TRY ANYTHING."); return }
+                    }
+                    n.attn = DISTRACT; n.attnT = 3.5f + rnd.nextFloat() * 2f
+                    n.face += Math.PI.toFloat()
+                    speak(n, listOf("...", "COPY THAT. SAY AGAIN?", "*YAWNS*", "WHAT DID YOU SAY ABOUT MY MOTHER?", "TOWER, THIS IS LAUNDRY. ALL QUIET.").random(rnd))
+                }
+            }
+            DISTRACT -> if (n.attnT <= 0f) { n.attn = WATCH; n.attnT = 7f + rnd.nextFloat() * 4f }
+            AWAY -> when (n.awayStage) {
+                0 -> if (n.path.isEmpty()) { n.awayStage = 1; n.attnT = 3f + rnd.nextFloat() * 2f }
+                1 -> if (n.attnT <= 0f) { n.awayStage = 2; n.path = route(floor(n.x).toInt() to floor(n.y).toInt(), post) }
+                else -> if (n.path.isEmpty()) { n.awayStage = -1; n.attn = WATCH; n.attnT = 8f + rnd.nextFloat() * 4f }
+            }
+        }
     }
 
     /** The shortest way between two tiles for the people (they never use your door or the locked ones). */

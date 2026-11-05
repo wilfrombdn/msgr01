@@ -338,13 +338,8 @@ internal class DeadDropView(
                     mgText(c, "HEAT ${pw.heat.toInt()}%", w / 2f + 90f * d, hy - 28f * d, 11f, hc)
                     // what you should be doing
                     val due = pw.dueAt
-                    val now = when {
-                        pw.solitary -> "SOLITARY"
-                        pw.period.work -> if (pw.shiftDone) "LAUNDRY SHIFT: DONE" else "LAUNDRY SHIFT  ${pw.delivered}/${PrisonWorld.BAGS} BAGS"
-                        due != null -> "${pw.period.label}: GO TO ${if (due == "YOUR CELL") "YOUR CELL" else "THE $due"}"
-                        pw.period.place != null && pw.period != PrisonWorld.Period.LIGHTS_OUT -> "${pw.period.label}: DONE"
-                        else -> pw.period.label
-                    }
+                    val step = pw.nextStep().first
+                    val now = if (pw.period.work && !pw.shiftDone) "LAUNDRY ${pw.delivered}/${PrisonWorld.BAGS}  ·  $step" else if (step.isEmpty()) pw.period.label else "${pw.period.label}  ·  $step"
                     mgText(c, now, w / 2f, hy - 10f * d, 11f, if (due != null && !pw.period.work) 0xFFFFD84D.toInt() else a(Color.WHITE, 0xCC))
                     if (pw.msgT > 0f) {
                         val al = (min(1f, pw.msgT * 2f) * 0xEE).toInt()
