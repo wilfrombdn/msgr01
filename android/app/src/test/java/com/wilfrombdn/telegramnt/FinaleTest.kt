@@ -75,10 +75,14 @@ class FinaleTest {
         var t = 0f
         fun step(sec: Float, ix: Float = 0f, iy: Float = 0f, mag: Float = 0f) { val end = t + sec; while (t < end) { w.update(0.02f, ix, iy, mag); t += 0.02f; s.render(t) } }
         step(1.5f); save(s.render(t), "l6-beach-boat")
-        step(3.5f); save(s.render(t), "l6-beach-points")
-        step(2.0f); save(s.render(t), "l6-beach-spotted")
-        step(3.0f); save(s.render(t), "l6-beach-go")
-        step(2.4f); save(s.render(t), "l6-beach-kick")
+        step(2.0f); save(s.render(t), "l6-beach-docking")
+        step(2.5f); save(s.render(t), "l6-beach-points")
+        step(2.2f); save(s.render(t), "l6-beach-walk")
+        step(1.5f); save(s.render(t), "l6-beach-spotted")
+        step(1.8f); save(s.render(t), "l6-beach-runs")
+        step(1.0f); save(s.render(t), "l6-beach-go")
+        step(1.8f); save(s.render(t), "l6-beach-sprint")
+        step(1.4f); save(s.render(t), "l6-beach-kick")
         step(1.6f); save(s.render(t), "l6-intro-zoom")
         step(3.0f); save(s.render(t), "l6-intro-climbs")
         step(2.0f); save(s.render(t), "l6-intro-tilt")

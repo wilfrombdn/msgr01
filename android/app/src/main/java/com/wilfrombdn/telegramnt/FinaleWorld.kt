@@ -45,7 +45,8 @@ internal class FinaleWorld(seed: Int = 6) {
     companion object {
         const val W = 256
         const val H = 384
-        const val BEACH_S = 12.6f
+        const val BEACH_S = 17f
+        const val KICK_T = 15.6f
         const val INTRO_S = 9.2f
         const val EXECUTE_S = 5.2f
         const val DOOR_S = 5.0f
@@ -142,7 +143,7 @@ internal class FinaleWorld(seed: Int = 6) {
         tPrev = t
         t += dt
         when (stage) {
-            Stage.BEACH -> if (at(11.9f)) events += "kick"
+            Stage.BEACH -> if (at(KICK_T)) events += "kick"
             Stage.INTRO -> { if (t in 4.7f..6.0f && (t * 4f).toInt() != (tPrev * 4f).toInt()) events += "type"; if (at(6.0f) || at(6.8f) || at(7.5f)) events += "clank" }
             Stage.EXECUTE -> if (at(2.9f)) events += "shot"
             Stage.CONTROL -> if (at(6.5f)) events += "boom"
@@ -352,9 +353,9 @@ internal class FinaleWorld(seed: Int = 6) {
     /** Who says what in the cutscenes (drawn as speech bubbles), and the captions at the bottom. */
     fun bubble(): Pair<String, String>? = when (stage) {   // (who, what): who = "boat", "patrol", "you"
         Stage.BEACH -> when {
-            t in 4.0f..6.2f -> "boat" to "THE TOWER. PUT IT ON THE AIR."
-            t in 6.6f..7.9f -> "patrol" to "!"
-            t in 8.6f..10.6f -> "boat" to "GO! FAST!"
+            t in 5.0f..7.2f -> "boat" to "THE TOWER. PUT IT ON THE AIR."
+            t in 8.6f..9.6f -> "patrol" to "!"
+            t in 11.0f..12.6f -> "boat" to "GO! FAST!"
             else -> null
         }
         Stage.INTRO -> if (t in 4.7f..6.0f) "patrol" to "4 · 7 · 1 · 1" else if (t in 7.9f..9.2f) "patrol" to "COME ON UP." else null
@@ -363,7 +364,7 @@ internal class FinaleWorld(seed: Int = 6) {
         else -> null
     }
     fun caption(): String = when (stage) {
-        Stage.BEACH -> if (t > 11f) "" else if (t < 3.6f) "THE BOAT RUNS UP ONTO THE SAND BELOW THE TOWER." else ""
+        Stage.BEACH -> if (t < 3.8f) "THE BOAT COMES IN UNDER THE TOWER." else ""
         Stage.CLIMB -> if (t < 5f) "CLIMB. JUMP THE SPOOLS." else ""
         Stage.DOOR -> ""
         Stage.CONTROL -> when { t < 4.5f -> ""; t < 9.5f -> ""; else -> "" }
