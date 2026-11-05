@@ -1,0 +1,145 @@
+package com.wilfrombdn.telegramnt
+
+import android.graphics.Bitmap
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
+import java.io.FileOutputStream
+
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [34])
+class PrisonTest {
+    private fun save(b: Bitmap, name: String, scale: Int = 3) {
+        val big = Bitmap.createScaledBitmap(b, b.width * scale, b.height * scale, false)
+        val dir = File("build/shots").apply { mkdirs() }
+        FileOutputStream(File(dir, "$name.png")).use { big.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    @Test fun mapIsTheRightSize() {
+        val s = PrisonLevel.rock()
+        assertEquals(PrisonLevel.H, s.rows)
+        assertTrue(s.map.all { it.length == PrisonLevel.W })
+        assertEquals('O', s.tile(s.myDoor.first, s.myDoor.second))
+    }
+
+    @Test fun everyOpenRoomCanBeReachedFromYourCell() {
+        val w = PrisonWorld(PrisonLevel.rock())
+        val names = w.reachable().map { PrisonLevel.zoneName(w.spec, it.first, it.second) }.toSet()
+        for (z in listOf("RECREATION YARD", "DINING HALL", "KITCHEN", "SHOWERS", "INFIRMARY", "LIBRARY", "TIMES SQUARE", "BROADWAY",
+                "MICHIGAN AVENUE", "SEEDY STREET", "EAST CORRIDOR", "VISITING ROOM", "BARBER", "LAUNDRY", "A BLOCK", "B BLOCK", "C BLOCK", "D BLOCK"))
+            assertTrue("can't reach $z", z in names)
+        for (z in listOf("CONTROL CENTRE", "WARDEN'S OFFICE", "FRONT GATE", "PIPE CORRIDOR"))
+            assertFalse("$z should be locked", z in names)
+    }
+
+    @Test fun youWakeUpThenWalkOutOfYourCell() {
+        val w = PrisonWorld(PrisonLevel.rock())
+        val y0 = w.py
+        repeat(40) { w.update(0.05f, 0f, 1f, 1f) }          // pushing during the wake-up does nothing
+        assertEquals(PrisonWorld.Phase.WAKE, w.phase); assertEquals(y0, w.py, 0.001f)
+        repeat(60) { w.update(0.05f, 0f, 0f, 0f) }
+        assertEquals(PrisonWorld.Phase.PLAY, w.phase)
+        repeat(30) { w.update(0.05f, 0f, 1f, 1f) }           // walk down through the open door onto Broadway
+        assertEquals("BROADWAY", w.zone)
+    }
+
+    @Test fun peopleKeepMovingAndStayOnTheFloor() {
+        val w = PrisonWorld(PrisonLevel.rock())
+        val start = w.npcs.map { it.x to it.y }
+        repeat(1400) { w.update(0.05f, 0f, 0f, 0f) }          // past 7:00, when everyone heads to breakfast
+        val moved = w.npcs.indices.count { i -> val (x, y) = start[i]; kotlin.math.hypot(w.npcs[i].x - x, w.npcs[i].y - y) > 1f }
+        assertTrue("only $moved moved", moved > w.npcs.size / 2)
+        for (n in w.npcs) assertTrue("${n.id} is in a wall", w.walkable(n.x.toInt(), n.y.toInt()))
+    }
+
+    private fun awake(): PrisonWorld { val w = PrisonWorld(PrisonLevel.rock()); repeat(90) { w.update(0.05f, 0f, 0f, 0f) }; return w }
+    private fun run(w: PrisonWorld, sec: Float) { var t = sec; while (t > 0f) { w.update(0.05f, 0f, 0f, 0f); t -= 0.05f } }
+    private fun at(w: PrisonWorld, x: Float, y: Float) { w.px = x; w.py = y }
+
+    @Test fun theDayFollowsTheRoutine() {
+        val w = awake()
+        assertEquals(PrisonWorld.Period.ROLL_AM, w.period); assertEquals("06:00", w.clockText)
+        run(w, 31f); assertEquals(PrisonWorld.Period.BREAKFAST, w.period)
+        assertEquals(PrisonWorld.Period.WORK_AM, PrisonWorld.periodAt(8 * 60f))
+        assertEquals(PrisonWorld.Period.FREE, PrisonWorld.periodAt(16 * 60f + 30))
+        assertEquals(PrisonWorld.Period.LIGHTS_OUT, PrisonWorld.periodAt(3 * 60f))
+    }
+
+    @Test fun standingByYourCellCountsYou() {
+        val w = awake()
+        run(w, 10f)
+        assertTrue(w.attended); assertEquals(0f, w.heat, 0.01f)
+    }
+
+    @Test fun missingRollCallMakesTheGuardsSuspicious() {
+        val w = awake()
+        at(w, 20.5f, 42.5f)                      // off to the yard
+        run(w, 31f)
+        assertTrue("heat ${w.heat}", w.heat >= 15f)
+    }
+
+    @Test fun aLaundryLoadIsThreeBagsWashedDriedFoldedAndDelivered() {
+        val w = awake()
+        w.clock = 479.9f; run(w, 0.2f)
+        assertEquals(PrisonWorld.Period.WORK_AM, w.period); assertEquals(3, w.dirtyBags)
+        repeat(3) {
+            at(w, 61.5f, 44.5f); assertEquals("TAKE A BAG", w.prompt()); assertTrue(w.act()); assertEquals(PrisonWorld.Carry.DIRTY, w.carry)
+            at(w, 61.5f, 39.5f); assertEquals("WASH IT", w.prompt()); assertTrue(w.act()); assertEquals(PrisonWorld.Carry.NONE, w.carry)
+            run(w, PrisonWorld.WASH_S + 0.2f); assertTrue(w.act()); assertEquals(PrisonWorld.Carry.WET, w.carry)
+            at(w, 67.5f, 39.5f); assertEquals("DRY IT", w.prompt()); assertTrue(w.act())
+            run(w, PrisonWorld.DRY_S + 0.2f); assertTrue(w.act()); assertEquals(PrisonWorld.Carry.DRY, w.carry)
+            at(w, 64.5f, 43.5f); assertTrue(w.act()); run(w, PrisonWorld.FOLD_S + 0.2f); assertEquals(PrisonWorld.Carry.FOLDED, w.carry)
+            at(w, 69.5f, 44.5f); assertTrue(w.act())
+        }
+        assertTrue(w.shiftDone); assertEquals(1, w.loadsToday)
+        assertEquals(null, w.dueAt)                // free until lunch
+    }
+
+    @Test fun theLaundryIsClosedOutsideYourShifts() {
+        val w = awake()
+        at(w, 61.5f, 44.5f)
+        assertFalse(w.act()); assertEquals(PrisonWorld.Carry.NONE, w.carry)
+    }
+
+    @Test fun lightsOutDragsYouToYourCellThenMorningComes() {
+        val w = awake()
+        w.clock = 1259.9f; at(w, 20.5f, 42.5f)
+        run(w, 6f)
+        assertTrue("dragged in", w.inMyCell)
+        assertTrue(w.night)
+        run(w, 25f)                               // the night flies by in your cell
+        assertEquals(2, w.day); assertEquals(PrisonWorld.Period.ROLL_AM, w.period)
+        run(w, 1.5f); assertTrue(w.doorOpen > 0.9f)
+    }
+
+    @Test fun shots() {
+        val w = PrisonWorld(PrisonLevel.rock()); val s = PrisonScene(w)
+        var t = 0f
+        fun step(until: Float, ix: Float = 0f, iy: Float = 0f, mag: Float = 0f) { while (t < until) { w.update(0.02f, ix, iy, mag); t += 0.02f; s.render(t) } }
+        save(s.renderWholeMap(), "l5-prison-map", 1)
+        save(s.renderWholeMap(true), "l5-prison-map-night", 1)
+        step(0.5f); save(s.render(t), "l5-wake-dark")
+        step(1.9f); save(s.render(t), "l5-wake-lights")
+        step(4.5f); save(s.render(t), "l5-door-open")
+        step(5.3f, 0f, 1f, 1f); step(9f, -1f, 0f, 1f); save(s.render(t), "l5-broadway-west")
+        w.px = 15.5f; w.py = 19.5f; step(t + 1f); save(s.render(t), "l5-dining")
+        w.px = 20.5f; w.py = 41.5f; step(t + 1f); save(s.render(t), "l5-yard")
+        w.px = 60.5f; w.py = 14.5f; step(t + 1f); save(s.render(t), "l5-east")
+        w.clock = 479.9f; step(t + 0.2f)
+        at(w, 61.5f, 44.5f); w.act(); at(w, 61.5f, 39.5f); w.act(); at(w, 61.5f, 44.5f); w.act(); at(w, 63.5f, 39.5f); w.act()
+        at(w, 61.5f, 44.5f); w.act(); at(w, 64.5f, 40.5f); step(t + 1f); save(s.render(t), "l5-laundry")
+        w.clock = 1150f; at(w, 11.5f, 4.5f); step(t + 1f); save(s.render(t), "l5-showers")
+        w.clock = 1000f; at(w, 4.5f, 16.5f); step(t + 1f); save(s.render(t), "l5-kitchen")
+        at(w, 32.5f, 32.5f); step(t + 1f); save(s.render(t), "l5-library")
+        at(w, 35.5f, 19.5f); step(t + 1f); save(s.render(t), "l5-broadway-day")
+        w.clock = 1300f; at(w, w.spec.startX, w.spec.startY); step(t + 0.5f); save(s.render(t), "l5-night")
+        w.clock = 1262f; at(w, 40.5f, 43.5f); step(t + 0.5f); save(s.render(t), "l5-yard-night")
+    }
+}

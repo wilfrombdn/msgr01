@@ -95,6 +95,7 @@ internal class DeadDropView(
             "cine0" -> return ""
             "cine1" -> return "synth"
             "shoot" -> return "synth"
+            "prison" -> return "synth"
         }
         if (levelIdx == 0) return "synth"
         if (levelIdx == 1) {
@@ -129,6 +130,7 @@ internal class DeadDropView(
     private var fly: FlyWorld? = null; private var flyScene: FlyScene? = null
     private var shoot: ShootWorld? = null; private var shootScene: ShootScene? = null
     private var cine: CineScene? = null
+    private var prison: PrisonWorld? = null; private var prisonScene: PrisonScene? = null
     private var mgPending = -9                    // where the fade goes: a stage number, -2 next level, -3 redo this part
     private var aimId = -1; private var joyId = -1; private var thrustId = -1
     private var aimDx = 0f; private var aimDy = 0f; private var aimMag = 0f; private var aimKX = 0f; private var aimKY = 0f
@@ -146,6 +148,7 @@ internal class DeadDropView(
     private fun stagesOf(s: LevelSpec): List<String>? = when (s.building) {
         "The Industrial District" -> listOf("belt", "fly", "cine0")
         "The Administration" -> listOf("cine1", "shoot")
+        "The Rock" -> listOf("prison")
         else -> null
     }
     private val mgName get() = if (mgIdx < 0) null else stagesOf(spec)?.getOrNull(mgIdx)
@@ -156,7 +159,7 @@ internal class DeadDropView(
     private val grR get() = 32f * d; private val grCx get() = gunCx - gunR - grR - 8f * d; private val grCy get() = joyCy + 14f * d
 
     private fun startMg(i: Int) {
-        mgIdx = i; belt = null; beltScene = null; fly = null; flyScene = null; shoot = null; shootScene = null; cine = null
+        mgIdx = i; belt = null; beltScene = null; fly = null; flyScene = null; shoot = null; shootScene = null; cine = null; prison = null; prisonScene = null
         bPid = -1; joyId = -1; aimId = -1; thrustId = -1; gunId = -1; rollId = -1; grMsgT = 0f; joyActive = false; mag = 0f; aimMag = 0f; knobX = 0f; knobY = 0f; aimKX = 0f; aimKY = 0f; deadT = 0f; mgPending = -9
         when (mgName) {
             "belt" -> { belt = BeltWorld(BeltLevel.warehouse); beltScene = BeltScene(belt!!); music.setHeat(3) }
@@ -164,6 +167,7 @@ internal class DeadDropView(
             "cine0" -> { cine = CineScene(0); music.setHeat(1) }
             "cine1" -> { cine = CineScene(1); music.setHeat(2) }
             "shoot" -> { shoot = ShootWorld(ShootLevel.townHall()); shootScene = ShootScene(shoot!!); music.setHeat(5) }
+            "prison" -> { prison = PrisonWorld(PrisonLevel.rock()); prisonScene = PrisonScene(prison!!); music.setHeat(1) }
         }
     }
 
@@ -188,6 +192,7 @@ internal class DeadDropView(
         }
         fly?.let { f -> f.thrust = thrustId >= 0; f.update(dt); if (f.finished) mgGo(mgIdx + 1) }
         cine?.let { cn -> cn.t += dt; if (cn.t >= cn.fadeStart) mgGo(mgIdx + 1) }
+        prison?.update(dt, ix, iy, mag)
         shoot?.let { sw ->
             sw.update(dt, ix, iy, mag, gunId >= 0)
             grMsgT = max(0f, grMsgT - dt)
@@ -214,7 +219,8 @@ internal class DeadDropView(
                 if (sw != null && sw.phase == ShootWorld.Phase.DEAD) { if (deadT > 0.5f) startMg(mgIdx); return true }
                 val m = mgName
                 if (m == "belt") { bPid = id; bDX = x; bDY = y; bJumped = false }
-                else if (m == "shoot" && hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) }
+                else if ((m == "shoot" || m == "prison") && hypot(x - joyCx, y - joyCy) < joyR * 1.7f) { joyId = id; joyActive = true; readJoystick(x, y) }
+                else if (m == "prison" && hypot(x - gunCx, y - joyCy) < gunR * 1.25f) prison?.act()
                 else if (m == "shoot" && hypot(x - gunCx, y - joyCy) < gunR * 1.25f) gunId = id
                 else if (m == "shoot" && hypot(x - grCx, y - grCy) < grR * 1.4f) { val why = shoot?.throwGrenade(); if (why != null) { grMsg = why; grMsgT = 1.3f } }
                 else if (m == "shoot" && joyId >= 0) { rollId = id; rollX = x; rollY = y; rolled = false }
@@ -257,7 +263,7 @@ internal class DeadDropView(
         val w = width.toFloat(); val h = height.toFloat()
         c.drawColor(0xFF03050A.toInt())
         val top = barH; val bottom = 14f * d + botInset
-        val bmp = beltScene?.render(clock) ?: flyScene?.render(clock) ?: cine?.render(clock) ?: shootScene?.render(clock)
+        val bmp = beltScene?.render(clock) ?: flyScene?.render(clock) ?: cine?.render(clock) ?: shootScene?.render(clock) ?: prisonScene?.render(clock)
         if (bmp != null) {
             val sc = max(1, min(w / bmp.width, (h - top - bottom) / bmp.height).toInt())
             val ox = ((w - bmp.width * sc) / 2f).toInt().toFloat(); val oy = (top + (h - top - bottom - bmp.height * sc) / 2f).toInt().toFloat()
@@ -274,6 +280,31 @@ internal class DeadDropView(
                 mgText(c, "COINS  ${f.coins} / ${f.spec.coinGoal}", w / 2f, oy - 10f * d, 14f, 0xFFFFD84D.toInt())
                 if (f.t < 6f) mgText(c, "HOLD ANYWHERE TO FLY UP. LET GO TO FALL. AVOID THE ZAPPERS.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
             }
+            prison?.let { pw ->
+                if (pw.phase == PrisonWorld.Phase.WAKE) { if (pw.t > 1.2f) mgText(c, "6:00 AM.  MORNING COUNT.", w / 2f, oy + bmp.height * sc / 2f - 40f * d, 15f, a(Color.WHITE, 0xEE)) }
+                else {
+                    // the clock and the guards' suspicion
+                    mgText(c, "DAY ${pw.day}  ${pw.clockText}", w / 2f - 90f * d, oy - 28f * d, 11f, a(Color.WHITE, 0xDD))
+                    val hc = when { pw.heat >= 70f -> 0xFFFF6A6A.toInt(); pw.heat >= 35f -> 0xFFFFB347.toInt(); else -> 0xFF8AD0A0.toInt() }
+                    mgText(c, "HEAT ${pw.heat.toInt()}%", w / 2f + 90f * d, oy - 28f * d, 11f, hc)
+                    // what you should be doing
+                    val due = pw.dueAt
+                    val now = when {
+                        pw.solitary -> "SOLITARY"
+                        pw.period.work -> if (pw.shiftDone) "LAUNDRY SHIFT: DONE" else "LAUNDRY SHIFT  ${pw.delivered}/${PrisonWorld.BAGS} BAGS"
+                        due != null -> "${pw.period.label}: GO TO ${if (due == "YOUR CELL") "YOUR CELL" else "THE $due"}"
+                        pw.period.place != null && pw.period != PrisonWorld.Period.LIGHTS_OUT -> "${pw.period.label}: DONE"
+                        else -> pw.period.label
+                    }
+                    mgText(c, now, w / 2f, oy - 10f * d, 11f, if (due != null && !pw.period.work) 0xFFFFD84D.toInt() else a(Color.WHITE, 0xCC))
+                    if (pw.msgT > 0f) {
+                        val al = (min(1f, pw.msgT * 2f) * 0xEE).toInt()
+                        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, al * 2 / 3); c.drawRect(0f, oy + 18f * d, w, oy + 44f * d, p)
+                        mgText(c, pw.msg, w / 2f, oy + 36f * d, 10.5f, a(if (pw.msgBad) 0xFFFF6A6A.toInt() else 0xFF3BFF9A.toInt(), al))
+                    }
+                    mgText(c, pw.zone, w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
+                }
+            }
             cine?.caption()?.let { mgText(c, it, w / 2f, bt - 16f * d, 13f, a(Color.WHITE, 0xEE)) }
             shoot?.let { sw ->
                 if (sw.msgT > 0f) mgText(c, sw.msg, w / 2f, oy - 10f * d, 11f, if (sw.msgGood) 0xFF3BFF9A.toInt() else 0xFFFF6A6A.toInt())
@@ -286,7 +317,7 @@ internal class DeadDropView(
                 }
             }
         }
-        if (mgName == "shoot") drawJoystick(c)
+        if (mgName == "shoot" || (mgName == "prison" && prison?.phase == PrisonWorld.Phase.PLAY)) drawJoystick(c)
         if (mgName == "shoot" && shoot?.phase == ShootWorld.Phase.PLAY) {
             val sw = shoot!!
             val cy = joyCy
@@ -311,6 +342,17 @@ internal class DeadDropView(
             p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; c.drawLine(grCx + 2f * d, grCy - 10f * d, grCx + 9f * d, grCy - 14f * d, p)
             mgText(c, "x${sw.grenades}", grCx, grCy + grR + 14f * d, 11f, a(Color.WHITE, 0xCC))
             if (grMsgT > 0f) mgText(c, grMsg, grCx, grCy - grR - 8f * d, 11f, a(0xFFFF6A6A.toInt(), min(1f, grMsgT * 3f * 255f / 255f).let { (it * 255).toInt() }))
+        }
+        if (mgName == "prison" && prison?.phase == PrisonWorld.Phase.PLAY) {
+            val pw = prison!!
+            val pr = pw.prompt()
+            val can = pr.isNotEmpty() && !pr.endsWith("…") && pr != "CLOSED" && pr != "HANDS FULL" && pr != "CART EMPTY" && pr != "WASHER" && pr != "DRYER" && pr != "FOLDING TABLE" && pr != "CLEAN CART"
+            val gold = 0xFFFFD84D.toInt()
+            p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(gunCx, joyCy, gunR + 4f * d, p)
+            p.color = a(gold, if (can) 0x66 else 0x1E); c.drawCircle(gunCx, joyCy, gunR - 4f * d, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; p.color = a(gold, if (can) 0xCC else 0x50); c.drawCircle(gunCx, joyCy, gunR, p)
+            p.style = Paint.Style.FILL
+            mgText(c, if (pr.isEmpty()) "USE" else pr, gunCx, joyCy + 4f * d, if (pr.length > 9) 9f else 11f, a(Color.WHITE, if (can) 0xEE else 0x77))
         }
         drawFade(c, w, h)
     }

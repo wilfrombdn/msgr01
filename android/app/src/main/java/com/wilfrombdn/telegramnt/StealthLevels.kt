@@ -220,8 +220,9 @@ internal object StealthLevels {
         ),
         // ------------------------------------------------------------------ 5
         LevelSpec(
-            "The Old Quarter", "Deliver letter V to the priest.", "Martial law has been declared. Your face is on every channel in the city.",
-            "The priest will not fight for you. Do not get caught: guards hear running, and a chase here ends badly.",
+            // the prison (PrisonLevel/PrisonWorld/PrisonScene): the map below is the old walk, kept for the stealth tests only
+            "The Rock", "Escape the prison.", "The mayor had you locked away on the island. Nobody outside knows you are alive.",
+            "Walk with the stick. Look around: the yard, the dining hall, the blocks. There is always a way out.",
             "Priest", "I know what happened to your father.", "Your family was part of the original operation. Your discovery was expected.", 4,
             pal(0xFF17120C, 0xFF241B12, 0xFF0B0805, 0xFF4F3A24, 0xFFFFC25A, 0xFFFFC27A, 0xFFFF5A4F),
             listOf(
