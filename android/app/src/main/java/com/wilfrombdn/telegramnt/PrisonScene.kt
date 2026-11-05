@@ -28,12 +28,20 @@ import kotlin.math.sin
  */
 internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
     private val S = 16
-    val VW = 16
-    val VH = 24
-    val W = VW * S
-    val H = VH * S
-    private val frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
-    private val fc = Canvas(frame)
+    var VW = 16; private set
+    var VH = 24; private set
+    var W = VW * S; private set
+    var H = VH * S; private set
+    private var frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+    private var fc = Canvas(frame)
+    /** Where the small map sits from the top (art pixels), below the title bar. */
+    var hudTop = 5
+    /** Size the view to the screen (in art pixels), before the first picture. */
+    fun resize(wpx: Int, hpx: Int) {
+        val vw = maxOf(12, (wpx + S - 1) / S); val vh = maxOf(18, (hpx + S - 1) / S)
+        if (vw == VW && vh == VH) return
+        VW = vw; VH = vh; W = VW * S; H = VH * S; frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888); fc = Canvas(frame)
+    }
     private var camX = world.px
     private var camY = world.py
 
@@ -885,7 +893,7 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
 
         // the small map in the corner, with you as a blinking dot (and the place you're due at in green)
         if (world.phase == PrisonWorld.Phase.PLAY) {
-            val mx = W - world.cols - 5; val my = 5
+            val mx = W - world.cols - 5; val my = hudTop
             rect(c, mx - 3, my - 3, world.cols + 6, world.rows + 6, a(K(0xFF050812), 0xC8))
             p.style = Paint.Style.STROKE; p.strokeWidth = 1f; p.color = a(K(0xFF4A5C86), 0xE0)
             c.drawRect(mx - 2.5f, my - 2.5f, mx + world.cols + 2.5f, my + world.rows + 2.5f, p); p.style = Paint.Style.FILL

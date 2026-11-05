@@ -16,9 +16,11 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
     private val S = 16
     val W = 14 * S
     val ROWS = 24
-    val H = ROWS * S
-    private val frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
-    private val fc = Canvas(frame)
+    var H = ROWS * S; private set
+    private var frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+    private var fc = Canvas(frame)
+    /** Show more of the belts ahead so the view fills a tall screen (height in art pixels). */
+    fun resize(hpx: Int) { val h = maxOf(ROWS * S, hpx); if (h == H) return; H = h; frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888); fc = Canvas(frame) }
 
     private val steel = 0xFF6A7890.toInt(); private val steelD = 0xFF3A4458.toInt(); private val steelL = 0xFFA9B4C8.toInt()
     private val steelDD = 0xFF222936.toInt()
@@ -74,7 +76,7 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
         val endS = world.endS
 
         // 1. the warehouse floor far below: concrete, painted aisle lines, tyre marks, stains, pools of lamp light
-        val fr0 = floor((camWy * DEPTH) / S).toInt() - 2; val fr1 = fr0 + ROWS + 4
+        val fr0 = floor((camWy * DEPTH) / S).toInt() - 2; val fr1 = fr0 + H / S + 4
         rect(c, 0, 0, W, H, 0xFF080C10.toInt())
         for (r in fr0..fr1) {
             val y = fy(r.toFloat() + 1f)

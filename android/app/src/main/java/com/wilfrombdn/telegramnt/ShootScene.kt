@@ -18,11 +18,13 @@ import kotlin.math.sin
 internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
     private val S = 16
     val VW = 16
-    val VH = 24
+    var VH = 24; private set
     val W = VW * S
-    val H = VH * S
-    private val frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
-    private val fc = Canvas(frame)
+    var H = VH * S; private set
+    private var frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+    private var fc = Canvas(frame)
+    /** Show more rows so the view fills a tall screen (called with the height in art pixels before drawing). */
+    fun resize(hpx: Int) { val vh = maxOf(24, (hpx + S - 1) / S); if (vh == VH) return; VH = vh; H = VH * S; frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888); fc = Canvas(frame) }
     private var camY = world.py
 
     private val Z_LOBBY = 0; private val Z_CUBE = 1; private val Z_HALL = 2; private val Z_MEET = 3; private val Z_OFFICE = 4

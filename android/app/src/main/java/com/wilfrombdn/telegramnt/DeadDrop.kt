@@ -22,6 +22,7 @@ import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 // DEAD LETTER, the hidden game (tap the version text at the bottom of Settings 7 times).
@@ -103,7 +104,7 @@ internal class DeadDropView(
         if (levelIdx == 1) {
             if (stage == 0) return "synth"
             val pw = pac ?: return ""
-            return when (pw.phase) { PacWorld.Phase.PLAY -> if (pw.phaseT >= 1f) "l2" else if (cue == "l2") "l2" else ""; PacWorld.Phase.CAUGHT -> null; else -> "" }
+            return when (pw.phase) { PacWorld.Phase.CAUGHT -> null; else -> "l2" }      // the song kicks in the moment the maze starts
         }
         if (levelIdx == 5) return "l6"
         return ""
@@ -252,7 +253,8 @@ internal class DeadDropView(
                     if (pid == bPid) {
                         // swipes: up = jump, left/right = leap to the next belt; several in one drag, each from where the last one ended
                         val dx = e.getX(i) - bDX; val dy = e.getY(i) - bDY
-                        if (-dy > 34f * d && -dy > abs(dx)) { belt?.jump(); bDX = e.getX(i); bDY = e.getY(i) }
+                        if (-dy > 34f * d && -dy > abs(dx)) { if (!bJumped) { belt?.jump(); bJumped = true }; bDX = e.getX(i); bDY = e.getY(i) }
+                        else if (dy > 12f * d) { bJumped = false; bDX = e.getX(i); bDY = e.getY(i) }
                         else if (abs(dx) > 30f * d && abs(dx) > abs(dy)) { belt?.leap(if (dx > 0) 1 else -1); bDX = e.getX(i); bDY = e.getY(i) }
                     }
                 }
@@ -284,32 +286,43 @@ internal class DeadDropView(
     private fun drawMg(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
         c.drawColor(0xFF03050A.toInt())
-        val top = barH; val bottom = 14f * d + botInset
+        // EDGE TO EDGE: a whole-number scale that fills the screen's width (every art pixel stays the same size). The scrolling scenes
+        // then draw a taller view so they fill the height too; the fixed scenes keep their framing and their edges are carried out to
+        // the screen's edges, fading.
+        val fillW = { bw: Int -> max(1, ceil(w / bw).toInt()) }
+        beltScene?.let { it.resize(ceil(h / fillW(it.W)).toInt()) }
+        flyScene?.let { it.resize(ceil(h / fillW(it.W)).toInt()) }
+        shootScene?.let { it.resize(ceil(h / fillW(it.W)).toInt()) }
+        prisonScene?.let { val k = max(1, (w / 256f).roundToInt()); it.resize(ceil(w / k).toInt(), ceil(h / k).toInt()); it.hudTop = ((barH + 64f * d - (h - it.H * k) / 2f) / k).toInt() }
         val bmp = beltScene?.render(clock) ?: flyScene?.render(clock) ?: cine?.render(clock) ?: shootScene?.render(clock) ?: prisonScene?.render(clock) ?: finaleScene?.render(clock)
         if (bmp != null) {
-            val sc = max(1, min(w / bmp.width, (h - top - bottom) / bmp.height).toInt())
-            val ox = ((w - bmp.width * sc) / 2f).toInt().toFloat(); val oy = (top + (h - top - bottom - bmp.height * sc) / 2f).toInt().toFloat()
+            val grows = beltScene != null || flyScene != null || shootScene != null || prisonScene != null
+            val sc = if (prisonScene != null) max(1, (w / 256f).roundToInt()) else if (grows) fillW(bmp.width) else max(1, min(w / bmp.width, h / bmp.height).toInt())
+            val ox = ((w - bmp.width * sc) / 2f).toInt().toFloat(); val oy = ((h - bmp.height * sc) / 2f).toInt().toFloat()
             rect.set(ox, oy, ox + bmp.width * sc, oy + bmp.height * sc)
             c.drawBitmap(bmp, null, rect, nearest)
+            if (!grows) extendEdges(c, bmp, ox, oy, sc, w, h)
             mgOx = ox; mgOy = oy; mgSc = sc.toFloat()
             val bt = oy + bmp.height * sc
+            // where the words go: just under the title bar and just above the bottom edge, whatever the picture does
+            val hy = max(oy, barH + 30f * d); val hb = min(bt, h - botInset - 46f * d)
             belt?.let { b ->
-                mgText(c, "COINS  ${b.coins} / ${b.spec.coinGoal}", w / 2f + 70f * d, oy - 10f * d, 13f, if (b.coinFlash > 0f) Color.WHITE else 0xFFFFD84D.toInt()); mgText(c, "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f - 90f * d, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
-                if (b.phase == BeltWorld.Phase.FALL) mgText(c, if (b.fellInHole) "YOU FELL" else "YOU DIED", w / 2f, oy + bmp.height * sc / 2f, 22f, danger)
-                if (b.phase == BeltWorld.Phase.LAUNCH || b.phase == BeltWorld.Phase.PICKUP) mgText(c, "THE JETPACK!", w / 2f, oy - 10f * d - 18f * d, 12f, 0xFFFFD84D.toInt())
-                if (b.t < 9f) mgText(c, "SWIPE LEFT / RIGHT TO SWITCH BELTS. SWIPE UP TO JUMP.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false) else if (b.coins < b.spec.coinGoal) mgText(c, "COLLECT 100 COINS TO REACH THE END.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0x80), false)
+                mgText(c, "COINS  ${b.coins} / ${b.spec.coinGoal}", w / 2f + 70f * d, hy - 10f * d, 13f, if (b.coinFlash > 0f) Color.WHITE else 0xFFFFD84D.toInt()); mgText(c, "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f - 90f * d, hy - 10f * d, 13f, 0xFFFF6A7A.toInt())
+                if (b.phase == BeltWorld.Phase.FALL) mgText(c, if (b.fellInHole) "YOU FELL" else "YOU DIED", w / 2f, h / 2f, 22f, danger)
+                if (b.phase == BeltWorld.Phase.LAUNCH || b.phase == BeltWorld.Phase.PICKUP) mgText(c, "THE JETPACK!", w / 2f, hy - 10f * d - 18f * d, 12f, 0xFFFFD84D.toInt())
+                if (b.t < 9f) mgText(c, "SWIPE LEFT / RIGHT TO SWITCH BELTS. SWIPE UP TO JUMP.", w / 2f, hb + 14f * d, 10f, a(Color.WHITE, 0xAA), false) else if (b.coins < b.spec.coinGoal) mgText(c, "COLLECT 100 COINS TO REACH THE END.", w / 2f, hb + 14f * d, 10f, a(Color.WHITE, 0x80), false)
             }
             fly?.let { f ->
-                mgText(c, "COINS  ${f.coins} / ${f.spec.coinGoal}", w / 2f, oy - 10f * d, 14f, 0xFFFFD84D.toInt())
-                if (f.t < 6f) mgText(c, "HOLD ANYWHERE TO FLY UP. LET GO TO FALL. AVOID THE ZAPPERS.", w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
+                mgText(c, "COINS  ${f.coins} / ${f.spec.coinGoal}", w / 2f, hy - 10f * d, 14f, 0xFFFFD84D.toInt())
+                if (f.t < 6f) mgText(c, "HOLD ANYWHERE TO FLY UP. LET GO TO FALL. AVOID THE ZAPPERS.", w / 2f, hb + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
             }
             prison?.let { pw ->
-                if (pw.phase == PrisonWorld.Phase.WAKE) { if (pw.t > 1.2f) mgText(c, "6:00 AM.  MORNING COUNT.", w / 2f, oy + bmp.height * sc / 2f - 40f * d, 15f, a(Color.WHITE, 0xEE)) }
+                if (pw.phase == PrisonWorld.Phase.WAKE) { if (pw.t > 1.2f) mgText(c, "6:00 AM.  MORNING COUNT.", w / 2f, h / 2f - 40f * d, 15f, a(Color.WHITE, 0xEE)) }
                 else if (pw.phase == PrisonWorld.Phase.SIGNAL || pw.phase == PrisonWorld.Phase.ESCAPE) {
                     val cap = pw.caption()
                     if (cap.isNotEmpty()) {
-                        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0xA0); c.drawRect(0f, bt - 44f * d, w, bt - 14f * d, p)
-                        mgText(c, cap, w / 2f, bt - 24f * d, 10f, a(Color.WHITE, 0xEE))
+                        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0xA0); c.drawRect(0f, hb - 44f * d, w, hb - 14f * d, p)
+                        mgText(c, cap, w / 2f, hb - 24f * d, 10f, a(Color.WHITE, 0xEE))
                     }
                     if (pw.drowned && pw.sceneT > 4.2f) {
                         val k = min(1f, (pw.sceneT - 4.2f) * 1.5f)
@@ -320,9 +333,9 @@ internal class DeadDropView(
                 }
                 else {
                     // the clock and the guards' suspicion
-                    mgText(c, "DAY ${pw.day}  ${pw.clockText}", w / 2f - 90f * d, oy - 28f * d, 11f, a(Color.WHITE, 0xDD))
+                    mgText(c, "DAY ${pw.day}  ${pw.clockText}", w / 2f - 90f * d, hy - 28f * d, 11f, a(Color.WHITE, 0xDD))
                     val hc = when { pw.heat >= 70f -> 0xFFFF6A6A.toInt(); pw.heat >= 35f -> 0xFFFFB347.toInt(); else -> 0xFF8AD0A0.toInt() }
-                    mgText(c, "HEAT ${pw.heat.toInt()}%", w / 2f + 90f * d, oy - 28f * d, 11f, hc)
+                    mgText(c, "HEAT ${pw.heat.toInt()}%", w / 2f + 90f * d, hy - 28f * d, 11f, hc)
                     // what you should be doing
                     val due = pw.dueAt
                     val now = when {
@@ -332,13 +345,13 @@ internal class DeadDropView(
                         pw.period.place != null && pw.period != PrisonWorld.Period.LIGHTS_OUT -> "${pw.period.label}: DONE"
                         else -> pw.period.label
                     }
-                    mgText(c, now, w / 2f, oy - 10f * d, 11f, if (due != null && !pw.period.work) 0xFFFFD84D.toInt() else a(Color.WHITE, 0xCC))
+                    mgText(c, now, w / 2f, hy - 10f * d, 11f, if (due != null && !pw.period.work) 0xFFFFD84D.toInt() else a(Color.WHITE, 0xCC))
                     if (pw.msgT > 0f) {
                         val al = (min(1f, pw.msgT * 2f) * 0xEE).toInt()
-                        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, al * 2 / 3); c.drawRect(0f, oy + 18f * d, w, oy + 44f * d, p)
-                        mgText(c, pw.msg, w / 2f, oy + 36f * d, 10.5f, a(if (pw.msgBad) 0xFFFF6A6A.toInt() else 0xFF3BFF9A.toInt(), al))
+                        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, al * 2 / 3); c.drawRect(0f, hy + 18f * d, w, hy + 44f * d, p)
+                        mgText(c, pw.msg, w / 2f, hy + 36f * d, 10.5f, a(if (pw.msgBad) 0xFFFF6A6A.toInt() else 0xFF3BFF9A.toInt(), al))
                     }
-                    mgText(c, pw.zone, w / 2f, bt + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
+                    mgText(c, pw.zone, w / 2f, hb + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
                     // what you're carrying, and how your plans are coming along
                     val bits = ArrayList<String>()
                     for ((it, n) in pw.items) bits += if (n > 1 || it == PrisonWorld.Item.SHEET) "${it.label} ${n}${if (it == PrisonWorld.Item.SHEET) "/3" else ""}" else it.label
@@ -347,14 +360,14 @@ internal class DeadDropView(
                     if (pw.digNights > 0) bits += "TUNNEL ${minOf(pw.digNights, PrisonWorld.DIG_NIGHTS)}/${PrisonWorld.DIG_NIGHTS}"
                     if (pw.chipNights > 0) bits += "VENT ${minOf(pw.chipNights, PrisonWorld.CHIP_NIGHTS)}/${PrisonWorld.CHIP_NIGHTS}"
                     if (pw.signalSent) bits += "BOAT WAITING"
-                    if (bits.isNotEmpty()) mgText(c, bits.joinToString("  ·  "), w / 2f, bt + 30f * d, 9f, 0xFFFFD84D.toInt(), false)
+                    if (bits.isNotEmpty()) mgText(c, bits.joinToString("  ·  "), w / 2f, hb + 30f * d, 9f, 0xFFFFD84D.toInt(), false)
                 }
             }
             finale?.let { fw ->
-                if (fw.stage == FinaleWorld.Stage.CLIMB) mgText(c, "♥".repeat(fw.lives.coerceAtLeast(0)), w / 2f, oy - 10f * d, 13f, 0xFFFF6A7A.toInt())
+                if (fw.stage == FinaleWorld.Stage.CLIMB) mgText(c, "♥".repeat(fw.lives.coerceAtLeast(0)), w / 2f, hy - 10f * d, 13f, 0xFFFF6A7A.toInt())
                 val cap = fw.caption()
                 if (cap.isNotEmpty()) {
-                    val sy = if (fw.stage == FinaleWorld.Stage.SIMON) oy + bmp.height * sc * (350f / FinaleWorld.H) + 14f * d else bt - 18f * d
+                    val sy = if (fw.stage == FinaleWorld.Stage.SIMON) oy + bmp.height * sc * (350f / FinaleWorld.H) + 14f * d else hb - 18f * d
                     if (fw.stage != FinaleWorld.Stage.SIMON) { p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x99); c.drawRect(0f, sy - 18f * d, w, sy + 8f * d, p) }
                     mgText(c, cap, w / 2f, sy, 10.5f, a(Color.WHITE, 0xEE))
                 }
@@ -370,11 +383,11 @@ internal class DeadDropView(
                     p.letterSpacing = 0f
                 }
             }
-            cine?.caption()?.let { mgText(c, it, w / 2f, bt - 16f * d, 13f, a(Color.WHITE, 0xEE)) }
+            cine?.caption()?.let { mgText(c, it, w / 2f, hb - 16f * d, 13f, a(Color.WHITE, 0xEE)) }
             shoot?.let { sw ->
-                if (sw.msgT > 0f) mgText(c, sw.msg, w / 2f, oy - 10f * d, 11f, if (sw.msgGood) 0xFF3BFF9A.toInt() else 0xFFFF6A6A.toInt())
-                if (sw.phase == ShootWorld.Phase.PLAY) { mgText(c, "AREAS ${sw.roomsClear()}/7", w / 2f - 96f * d, oy - 28f * d, 10f, a(Color.WHITE, 0xCC)); if (sw.innocents > 0) mgText(c, "CLERKS LOST ${sw.innocents}", w / 2f + 96f * d, oy - 28f * d, 10f, a(0xFFFF6A6A.toInt(), 0xDD)) }
-                if (sw.phase == ShootWorld.Phase.PLAY && sw.phaseT < 8f) mgText(c, "HOLD GUN TO SHOOT THE CLOSEST. GRENADE HITS THE BIGGEST GROUP. SWIPE WITH A 2ND FINGER TO ROLL.", w / 2f, bt + 14f * d, 8.5f, a(Color.WHITE, 0xAA), false)
+                if (sw.msgT > 0f) mgText(c, sw.msg, w / 2f, hy - 10f * d, 11f, if (sw.msgGood) 0xFF3BFF9A.toInt() else 0xFFFF6A6A.toInt())
+                if (sw.phase == ShootWorld.Phase.PLAY) { mgText(c, "AREAS ${sw.roomsClear()}/7", w / 2f - 96f * d, hy - 28f * d, 10f, a(Color.WHITE, 0xCC)); if (sw.innocents > 0) mgText(c, "CLERKS LOST ${sw.innocents}", w / 2f + 96f * d, hy - 28f * d, 10f, a(0xFFFF6A6A.toInt(), 0xDD)) }
+                if (sw.phase == ShootWorld.Phase.PLAY && sw.phaseT < 8f) mgText(c, "HOLD GUN TO SHOOT THE CLOSEST. GRENADE HITS THE BIGGEST GROUP. SWIPE WITH A 2ND FINGER TO ROLL.", w / 2f, hb + 14f * d, 8.5f, a(Color.WHITE, 0xAA), false)
                 if (sw.phase == ShootWorld.Phase.FINALE && sw.fade > 0f) { p.style = Paint.Style.FILL; p.color = a(Color.BLACK, (sw.fade * 255).toInt()); c.drawRect(0f, 0f, w, h, p) }
                 if (sw.phase == ShootWorld.Phase.DEAD) {
                     p.style = Paint.Style.FILL; p.color = a(0xFFB01020.toInt(), (min(1f, deadT * 2f) * 0x88).toInt()); c.drawRect(0f, 0f, w, h, p)
@@ -440,6 +453,26 @@ internal class DeadDropView(
         drawFade(c, w, h)
     }
 
+
+    /** Carries a fixed scene's outer rows and columns out to the screen's edges and fades them to black, instead of hard black bars. */
+    private val edgeFade = Paint()
+    private fun extendEdges(c: Canvas, bmp: android.graphics.Bitmap, ox: Float, oy: Float, sc: Int, w: Float, h: Float) {
+        val bw = bmp.width * sc.toFloat(); val bh = bmp.height * sc.toFloat()
+        val sr = android.graphics.Rect(); val dr = RectF()
+        if (oy > 0f) {
+            sr.set(0, 0, bmp.width, 1); dr.set(ox, 0f, ox + bw, oy); c.drawBitmap(bmp, sr, dr, nearest)
+            sr.set(0, bmp.height - 1, bmp.width, bmp.height); dr.set(ox, oy + bh, ox + bw, h); c.drawBitmap(bmp, sr, dr, nearest)
+            edgeFade.shader = LinearGradient(0f, 0f, 0f, oy, 0xFF000000.toInt(), 0x90000000.toInt(), Shader.TileMode.CLAMP); c.drawRect(0f, 0f, w, oy, edgeFade)
+            edgeFade.shader = LinearGradient(0f, oy + bh, 0f, h, 0x90000000.toInt(), 0xFF000000.toInt(), Shader.TileMode.CLAMP); c.drawRect(0f, oy + bh, w, h, edgeFade)
+        }
+        if (ox > 0f) {
+            sr.set(0, 0, 1, bmp.height); dr.set(0f, oy, ox, oy + bh); c.drawBitmap(bmp, sr, dr, nearest)
+            sr.set(bmp.width - 1, 0, bmp.width, bmp.height); dr.set(ox + bw, oy, w, oy + bh); c.drawBitmap(bmp, sr, dr, nearest)
+            edgeFade.shader = LinearGradient(0f, 0f, ox, 0f, 0xFF000000.toInt(), 0x90000000.toInt(), Shader.TileMode.CLAMP); c.drawRect(0f, 0f, ox, h, edgeFade)
+            edgeFade.shader = LinearGradient(ox + bw, 0f, w, 0f, 0x90000000.toInt(), 0xFF000000.toInt(), Shader.TileMode.CLAMP); c.drawRect(ox + bw, 0f, w, h, edgeFade)
+        }
+        edgeFade.shader = null
+    }
 
     internal fun debugMg(i: Int) { startMg(i) }
     internal fun debugMgAdvance(sec: Float) { var t = sec; while (t > 0f) { val s = min(t, 0.025f); clock += s; mgUpdate(s); t -= s } }

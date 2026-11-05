@@ -20,6 +20,36 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
     val H = 20 * S
     private val frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
     private val fc = Canvas(frame)
+    // the picture handed to the screen: the hall in the middle, more roof above it and more floor below on tall screens
+    private var outH = H; private var topPad = 0
+    private var out = frame; private var oc = fc
+    /** Make the picture this tall (art pixels) so it fills the screen. */
+    fun resize(hpx: Int) { val h = maxOf(H, hpx); if (h == outH) return; outH = h; topPad = (h - H) * 3 / 5; out = Bitmap.createBitmap(W, h, Bitmap.Config.ARGB_8888); oc = Canvas(out) }
+
+    fun render(clock: Float): Bitmap {
+        val inner = renderHall(clock)
+        if (outH == H) return inner
+        val c = oc
+        c.drawColor(0, PorterDuff.Mode.CLEAR)
+        val sc = world.scroll
+        // the roof: dark trusses, skylights onto the night, cable trays, all sliding with the hall
+        rect(c, 0, 0, W, topPad, 0xFF04070C.toInt())
+        val roofOff = (sc * S * 0.35f).toInt()
+        for (i in -1..(W / 80 + 2)) { val x = i * 80 - mod(roofOff, 80)
+            for (k in 0 until topPad step 2) { val tx = x + k / 2; px(c, tx, topPad - 1 - k, 0xFF1A2230.toInt()); px(c, x + 80 - k / 2, topPad - 1 - k, 0xFF1A2230.toInt()) }
+            rect(c, x + 28, topPad / 3, 24, 10, 0xFF0B2250.toInt()); rect(c, x + 28, topPad / 3, 24, 3, 0xFF1B4A8C.toInt()); px(c, x + 31 + hash(i + roofOff / 80, 1, 2) % 18, topPad / 3 + 5, PX.W) }
+        for (y in topPad - 12 until topPad step 6) rect(c, 0, y, W, 1, 0xFF141A24.toInt())
+        rect(c, 0, topPad - 3, W, 3, 0xFF222936.toInt())
+        // the hall itself
+        c.drawBitmap(inner, 0f, topPad.toFloat(), plain)
+        // under the floor: the slab, pipes and grates
+        val yb = topPad + H
+        rect(c, 0, yb, W, outH - yb, 0xFF0B0F14.toInt())
+        val nearOff = (sc * S).toInt()
+        for (i in -1..(W / 48 + 2)) { val x = i * 48 - mod(nearOff, 48); rect(c, x, yb + 6, 40, 3, 0xFF1A2230.toInt()); for (g in 0 until 40 step 4) rect(c, x + g, yb + 12, 2, 6, 0xFF10161C.toInt()) }
+        for (y in yb + 24 until outH step 18) { rect(c, 0, y, W, 4, 0xFF161C24.toInt()); rect(c, 0, y, W, 1, 0xFF2A3544.toInt()) }
+        return out
+    }
 
     private val steel = 0xFF6A7890.toInt(); private val steelD = 0xFF3A4458.toInt(); private val steelL = 0xFFA9B4C8.toInt(); private val steelDD = 0xFF222936.toInt()
     private val brick = 0xFF0C1C26.toInt(); private val hazardY = 0xFFFFC82E.toInt(); private val hazardK = 0xFF1B1D22.toInt()
@@ -47,7 +77,7 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
 
     private fun mod(a: Int, b: Int) = ((a % b) + b) % b
 
-    fun render(clock: Float): Bitmap {
+    private fun renderHall(clock: Float): Bitmap {
         animT = clock
         val c = fc
         c.drawColor(0, PorterDuff.Mode.CLEAR)
