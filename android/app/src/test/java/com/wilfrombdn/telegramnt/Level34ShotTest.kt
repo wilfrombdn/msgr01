@@ -68,7 +68,8 @@ class Level34ShotTest {
         fun run(secs: Float) { var t = 0f; while (t < secs) { w.update(0.016f, 0f, 0f, 0f, false); t += 0.016f } }
         run(0.2f); for (i in 0..20) s.render(i * 0.016f); save(s.render(0.5f), "l4-lobby-0-walkin")
         run(2.0f); save(s.render(2.5f), "l4-lobby-1-frozen")
-        run(0.9f); save(s.render(3.5f), "l4-lobby-2-dive")
+        run(1.9f); save(s.render(4.1f), "l4-lobby-2-shot")
+        run(0.7f); save(s.render(4.8f), "l4-lobby-2b-kick")
         w.diving = true; run(2.0f); w.diving = false; for (i in 0..30) s.render(5f + i * 0.016f); save(s.render(6f), "l4-lobby-3-fight")
         for (n in w.npcs) if (!n.civ && n.room == ShootLevel.LOBBY) n.dead = true
         run(0.1f); w.px = 7.5f; w.py = 34.5f; for (i in 0..30) s.render(7f + i * 0.016f); save(s.render(8f), "l4-hall-door")
@@ -81,9 +82,9 @@ class Level34ShotTest {
     @Test fun mayorShots() {
         val w = ShootWorld(ShootLevel.townHall()); val s = ShootScene(w)
         fun run(secs: Float) { var t = 0f; while (t < secs) { w.update(0.016f, 0f, 0f, 0f, false); t += 0.016f } }
-        run(4f); for (n in w.npcs) if (!n.civ && !n.hostage) n.dead = true
+        run(6f); for (n in w.npcs) if (!n.civ && !n.hostage) n.dead = true          // past the opening scene, into the fight
         run(0.1f); w.px = 7.5f; w.py = 12.6f; run(0.05f)
-        for ((k, tt) in listOf(0.4f, 2.0f, 4.0f, 6.0f, 9.0f, 10.4f, 12.8f, 13.6f).withIndex()) { while (w.ft < tt) run(0.016f); for (i in 0..40) s.render(20f + i * 0.016f); save(s.render(21f), "l4-mayor-$k") }
+        for ((k, tt) in listOf(0.4f, 2.0f, 4.0f, 6.0f, 9.0f, 10.4f, 12.8f, 13.6f, 14.8f, 15.45f).withIndex()) { var g = 0; while (w.ft < tt && g++ < 3000) run(0.016f); for (i in 0..40) s.render(20f + i * 0.016f); save(s.render(21f), "l4-mayor-$k") }
     }
 
     @Test fun cineHall() {

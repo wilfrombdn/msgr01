@@ -19,16 +19,21 @@ internal class CineScene(val kind: Int) : PixelSprites() {
     private val fc = Canvas(frame)
     var t = 0f
 
-    val duration get() = if (kind == 0) 10.5f else 18.4f
-    val fadeStart get() = if (kind == 0) 8.6f else 17.0f
+    val duration get() = if (kind == 0) 22.4f else 18.4f
+    val fadeStart get() = if (kind == 0) 20.8f else 17.0f
+    /** Kind 0 cuts from the hall to inside the cruiser at this moment. */
+    private val INSIDE = 7.2f
     val done get() = t >= duration
 
     /** The line shown under the picture right now (or null). */
-    fun caption(): String? = if (kind == 0) when {
-        t in 2.2f..3.8f -> "I know what the mayor has done."
-        t in 3.8f..5.2f -> "I know what you plan to do,"
-        t in 5.2f..6.4f -> "and I can get you there."
-        t in 6.4f..7.8f -> "Let's end this shit, brother."
+    fun caption(): String? = if (kind == 0) when {   // all said in the car, on the way
+        t in 7.9f..9.5f -> "I know what the mayor has done."
+        t in 9.6f..11.1f -> "I know what you plan to do,"
+        t in 11.2f..12.6f -> "and I can get you there."
+        t in 12.8f..14.3f -> "Let's end this shit, brother."
+        t in 14.6f..16.2f -> "Here. Take my gun."
+        t in 16.4f..18.4f -> "Use me as a hostage. It's the only way they let you in close."
+        t in 18.6f..20.4f -> "Nobody else gets through those doors."
         else -> null }
         else null
 
@@ -78,6 +83,7 @@ internal class CineScene(val kind: Int) : PixelSprites() {
     }
 
     private fun exit(c: Canvas) {
+        if (t >= INSIDE) { insideCar(c); return }
         val floorTop = 305
         rect(c, 0, 0, W, H, 0xFF07101A.toInt())
         for (y in 0 until H step 8) rect(c, 0, y + 7, W, 1, 0xFF0C1C26.toInt())
@@ -93,11 +99,17 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         // a big loading door at the right, open to the night, where the cruiser waits
         rect(c, W - 70, floorTop - 96, 70, 96, PX.K); rect(c, W - 66, floorTop - 92, 66, 92, 0xFF0A1226.toInt()); rect(c, W - 66, floorTop - 92, 66, 8, steelCD)
         for (s in 0..3) px(c, W - 60 + s * 14, floorTop - 70 + s * 3, PX.W)
+        // moonlight slanting in through the windows, lamp light pooling under the hanging lamps
+        for (i in 0..3) { val wx = 6 + i * 58; c.drawBitmap(moonBeam, wx.toFloat() - 4f, 98f, plain) }
+        for (i in 0..1) c.drawBitmap(lampCone, 40f + i * 128 - lampCone.width / 2f, 32f, plain)
+        // rain falling past the open loading door
+        for (k in 0 until 26) { val rx = W - 64 + (k * 37) % 62; val ry = floorTop - 92 + ((animT * 260f + k * 53f) % 92f).toInt(); rect(c, rx, ry, 1, 4, a(0xFF8AA0C8.toInt(), 0x80)) }
         val carStop = W - 82
-        val drive = ((t - 7.0f) / 2.4f).coerceIn(0f, 1f)
-        val carX = carStop + (drive * drive * 300f).toInt()
+        val carX = carStop
         val inCar = t > 6.0f
-        sideCar(c, carX, floorTop + 4, doorOpen = t in 5.4f..7.0f, lights = t > 5.0f, moving = drive > 0f)
+        sideCar(c, carX, floorTop + 4, doorOpen = t in 5.4f..7.0f, lights = t > 5.0f, moving = false)
+        // the red and blue spilling across the walls and the floor
+        if (t > 5.0f) { val flip = (animT * 5f).toInt() % 2 == 0; c.drawBitmap(if (flip) redWash else blueWash, carX - 60f, floorTop - 120f, plain) }
         // you, flung down in front of the cop: the dead jetpack beside you
         val k1 = ((t - 0.3f) / 1.7f).coerceIn(0f, 1f)
         val k2 = ((t - 3.4f) / 2.6f).coerceIn(0f, 1f)
@@ -115,7 +127,85 @@ internal class CineScene(val kind: Int) : PixelSprites() {
             folk(c, copX, fy, 3, moveFrame, police, false, letterTaken && t < 5.8f, kneel)
             if (t in 2.1f..3.4f) { val lk = ((t - 2.1f) / 1.3f).coerceIn(0f, 1f); rect(c, playerX + 4 - (lk * 10).toInt(), floorTop - 18 - (lk * 10).toInt(), 7, 5, PX.W); px(c, playerX + 6 - (lk * 10).toInt(), floorTop - 16 - (lk * 10).toInt(), PX.RED) }
         }
+        c.drawBitmap(vig, 0f, 0f, plain)
+        if (t > INSIDE - 0.5f) { p.color = a(PX.K, (((t - (INSIDE - 0.5f)) / 0.5f).coerceIn(0f, 1f) * 255).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }   // cut to black...
     }
+
+    private val moonBeam: Bitmap by lazy {
+        val w = 70; val h = 200; val bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888); val pxs = IntArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) { val cx = 6 + y * 0.25f; val half = 15f + y * 0.04f; val ac = kotlin.math.abs(x - cx); if (ac > half) continue
+            val v = (1f - y / h.toFloat()) * (1f - ac / half); if (bayer[(y and 3) * 4 + (x and 3)] / 16f < v * 0.55f) pxs[y * w + x] = a(0xFFA8C0F0.toInt(), 0x30) }
+        bm.setPixels(pxs, 0, w, 0, 0, w, h); bm
+    }
+    private val lampCone: Bitmap by lazy {
+        val w = 120; val h = 280; val bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888); val pxs = IntArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) { val half = 4f + y * 0.2f; val ac = kotlin.math.abs(x - w / 2f); if (ac > half) continue
+            val v = (1f - y / h.toFloat() * 0.7f) * (1f - ac / half); if (bayer[(y and 3) * 4 + (x and 3)] / 16f < v * 0.45f) pxs[y * w + x] = a(0xFFFFE0A0.toInt(), 0x30) }
+        bm.setPixels(pxs, 0, w, 0, 0, w, h); bm
+    }
+    private val redWash by lazy { glowBitmap(90, PX.RED, 0x40) }
+    private val blueWash by lazy { glowBitmap(90, PX.BLUE, 0x40) }
+    private val vig: Bitmap by lazy {
+        val bm = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888); val pxs = IntArray(W * H)
+        for (y in 0 until H) for (x in 0 until W) { val d = (kotlin.math.hypot((x - W / 2f) / (W / 2f), (y - H / 2f) / (H / 2f)) - 0.75f) / 0.55f; if (d <= 0f) continue
+            val q = kotlin.math.floor(d.coerceAtMost(1f) * 4f + bayer[(y and 3) * 4 + (x and 3)] / 16f) / 4f; if (q > 0f) pxs[y * W + x] = a(PX.K, (q * 0xB0).toInt()) }
+        bm.setPixels(pxs, 0, W, 0, 0, W, H); bm
+    }
+
+    /**
+     * Inside the cruiser at night, seen from the back seat: the windscreen with rain and the wipers, the city sliding past (street
+     * lights sweeping through the car), the dash and the radio glowing; the cop driving on the left, you on the right. He talks
+     * (turning his head to you), and hands you his gun.
+     */
+    private fun insideCar(c: Canvas) {
+        val lt = t - INSIDE
+        // the night outside the windscreen: a street, buildings and lights sliding by
+        rect(c, 0, 0, W, H, 0xFF05070F.toInt())
+        val wsTop = 40; val wsBot = 170
+        for (y in wsTop until wsBot) { val k = (y - wsTop) / (wsBot - wsTop).toFloat(); rect(c, 14, y, W - 28, 1, mixC(0xFF0A1028.toInt(), 0xFF2A1A3A.toInt(), k)) }
+        val scroll = (lt * 60f).toInt()
+        for (i in -1..6) { val bx = 14 + i * 44 - scroll % 44; val bh = 30 + (kotlin.math.abs(i * 7 + scroll / 44) % 5) * 12
+            rect(c, bx, wsBot - 20 - bh, 36, bh, 0xFF0C0E1E.toInt())
+            for (wy in wsBot - 18 - bh until wsBot - 24 step 5) for (wx in bx + 3 until bx + 33 step 6) if (((wx + wy + scroll / 44) * 7) % 5 == 0) rect(c, wx, wy, 2, 2, if ((wx + wy) % 3 == 0) PX.CYAN else PX.WARM) }
+        rect(c, 14, wsBot - 20, W - 28, 20, 0xFF14141E.toInt())                                                          // the road ahead
+        for (k in 0..4) { val ry = wsBot - 18 + k * 4; rect(c, W / 2 - 1 - k, ry, 2 + k * 2, 2, a(0xFFE8E0B0.toInt(), 0x60)) }   // the centre line
+        // rain on the glass, and the wipers sweeping
+        for (k in 0 until 40) { val rx = 16 + (k * 53) % (W - 32); val ry = wsTop + ((k * 31 + (lt * 40f).toInt()) % (wsBot - wsTop)); rect(c, rx, ry, 1, 2, a(0xFFB8C8E8.toInt(), 0x70)) }
+        val wa = sin(lt * 3.2f) * 0.9f
+        for (wx in intArrayOf(W / 2 - 40, W / 2 + 30)) { c.save(); c.rotate((wa * 57.3f) - 90f, wx.toFloat(), wsBot.toFloat()); rect(c, wx, wsBot - 1, 70, 2, PX.K); c.restore() }
+        // the frame of the windscreen and the roof
+        rect(c, 0, 0, W, wsTop, 0xFF0A0C14.toInt()); rect(c, 0, 0, 14, H, 0xFF0A0C14.toInt()); rect(c, W - 14, 0, 14, H, 0xFF0A0C14.toInt())
+        rect(c, 14, wsTop - 2, W - 28, 2, 0xFF2A3040.toInt()); rect(c, W / 2 - 10, wsTop, 20, 8, 0xFF14161E.toInt())   // the mirror
+        // the dash: dials, the radio, the police laptop glowing
+        rect(c, 0, wsBot, W, 60, 0xFF0E1018.toInt()); rect(c, 0, wsBot, W, 2, 0xFF2A3040.toInt())
+        rect(c, 30, wsBot + 10, 40, 14, 0xFF05060A.toInt()); for (k in 0..1) { rect(c, 34 + k * 18, wsBot + 13, 12, 8, 0xFF0A1A2A.toInt()); px(c, 40 + k * 18, wsBot + 16, PX.CYAN) }
+        rect(c, W / 2 - 18, wsBot + 14, 36, 10, 0xFF05060A.toInt()); rect(c, W / 2 - 15, wsBot + 16, 22, 4, 0xFF3BFF9A.toInt()); px(c, W / 2 + 10, wsBot + 18, PX.RED)
+        rect(c, W - 78, wsBot - 6, 44, 30, 0xFF14161E.toInt()); rect(c, W - 75, wsBot - 3, 38, 22, 0xFF0A2A3A.toInt()); for (k in 0..3) rect(c, W - 72, wsBot + k * 5, 20 + (k * 7) % 12, 1, PX.CYAN)
+        c.drawBitmap(dashGlow, W - 56f - 40f, wsBot + 8f - 40f, plain)
+        // the two of you, from behind: the cop driving on the left, you on the right
+        val seatY = H - 40
+        rect(c, 18, seatY - 60, 80, 100, 0xFF101218.toInt()); rect(c, W - 98, seatY - 60, 80, 100, 0xFF101218.toInt())           // the seat backs
+        val talking = caption() != null && lt < 13.2f
+        val turn = if (talking && (lt * 2f).toInt() % 3 != 0) 1 else 0
+        big3(58, seatY - 44) { folk(c, 58, seatY - 44, if (turn == 1) 1 else 0, 0, police, false, false) }
+        big3(W - 58, seatY - 44) { folk(c, W - 58, seatY - 44, if (lt > 7.0f && lt < 9.2f) 3 else 0, 0, clerk, false, false) }
+        // his hand on the wheel; then the gun, held out to you
+        rect(c, 70, wsBot + 30, 30, 4, 0xFF14161E.toInt())
+        if (lt in 7.4f..9.0f) { val k = ((lt - 7.4f) / 0.8f).coerceIn(0f, 1f); val gx = (80 + k * 60).toInt(); rect(c, gx, seatY - 70, 14, 6, PX.K); rect(c, gx + 2, seatY - 69, 10, 2, 0xFF9AA4B5.toInt()); rect(c, gx - 6, seatY - 68, 8, 5, police.skin) }
+        // street lights sweeping through the car
+        val sweep = ((lt * 0.7f) % 1f)
+        p.color = a(0xFFFFB060.toInt(), ((1f - kotlin.math.abs(sweep - 0.5f) * 2f) * 0x30).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p)
+        c.drawBitmap(vig, 0f, 0f, plain)
+        if (lt < 0.6f) { p.color = a(PX.K, ((1f - lt / 0.6f) * 255).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }   // ...and up inside the car
+    }
+    private val dashGlow by lazy { glowBitmap(40, PX.CYAN, 0x30) }
+    private inline fun big3(x: Int, y: Int, what: () -> Unit) { fc.save(); fc.scale(3f, 3f, x.toFloat(), y.toFloat()); what(); fc.restore() }
+    private fun mixC(c1: Int, c2: Int, t: Float): Int {
+        val r = (((c1 shr 16) and 0xFF) * (1 - t) + ((c2 shr 16) and 0xFF) * t).toInt(); val g = (((c1 shr 8) and 0xFF) * (1 - t) + ((c2 shr 8) and 0xFF) * t).toInt()
+        val b = ((c1 and 0xFF) * (1 - t) + (c2 and 0xFF) * t).toInt()
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
 
     // ---------- the town hall front: drawn once into a picture, then only the flags and chimney smoke move ----------
     private var hallBg: Bitmap? = null
@@ -430,22 +520,18 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         if (t >= 3.0f) {
             val cdir = if (t < 11.6f) 2 else 0
             rect(c, cx0 - 5, cy0 - 1, 11, 3, a(PX.K, 0x70))
-            folk(c, cx0, cy0, cdir, stepF, police, false, false)
-            val gunOut = seg(4.6f, 5.2f)
-            if (t in 4.6f..5.4f) { rect(c, cx0 + 4, cy0 - 8 + (4 * (1f - gunOut)).toInt(), 6, 3, PX.K); rect(c, cx0 + 4, cy0 - 7, 5, 1, 0xFF9AA4B5.toInt()) }
-            if (t >= 9.8f) { rect(c, cx0 - 8, cy0 - 20, 2, 5, police.skin); rect(c, cx0 + 7, cy0 - 20, 2, 5, police.skin) }      // hands up
+            folk(c, cx0, cy0, cdir, stepF, police, false, false, handsUp = true)                                                   // hands up from the moment he's out
             if (t >= 3.4f) {
                 rect(c, plX - 5, plY - 1, 11, 3, a(PX.K, 0x70))
-                folk(c, plX, plY, 0, stepF, clerk, false, t < 5.4f)
-                if (t >= 5.4f) { rect(c, plX - 2, plY - 16, 4, 3, PX.K); rect(c, plX - 1, plY - 19, 2, 4, 0xFF9AA4B5.toInt()) }          // the gun, on the cop's back
+                folk(c, plX, plY, 0, stepF, clerk, false, false)
+                rect(c, plX - 2, plY - 16, 4, 3, PX.K); rect(c, plX - 1, plY - 19, 2, 4, 0xFF9AA4B5.toInt())                          // the gun, on the cop's back
             }
             val line = when {
-                t in 4.4f..6.0f -> "Here, take this gun." to (t - 4.4f)
-                t in 6.2f..9.6f -> "You're going to have to use me as a hostage so you can get in close." to (t - 6.2f)
-                t in 9.8f..11.6f -> "They won't let anyone in." to (t - 9.8f)
+                t in 4.0f..6.4f -> "HOLD YOUR FIRE! HE'S GOT AN OFFICER!" to (t - 4.0f)
+                t in 9.8f..11.4f -> "Easy... nobody move." to (t - 9.8f)
                 else -> null
             }
-            if (line != null) bubble(c, line.first, cx0, cy0 - 24, (line.second * 24f).toInt(), W)
+            if (line != null) { val (bx, by) = if (t < 9f) 92 to 84 else cx0 to cy0 - 24; bubble(c, line.first, bx, by, (line.second * 24f).toInt(), W) }
         }
     }
 

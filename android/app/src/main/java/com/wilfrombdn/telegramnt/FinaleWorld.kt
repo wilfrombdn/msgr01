@@ -117,7 +117,13 @@ internal class FinaleWorld(seed: Int = 6) {
     private var nextThrow = 1.2f
 
     // ---------------------------------------------------------------------------------------------------------------- simon
-    val seq = IntArray(SIMON_GOAL) { rnd.nextInt(4) }
+    val seq = ArrayList<Int>().apply { repeat(SIMON_GOAL) { add(rnd.nextInt(4)) } }
+    // ---- arcade mode (after the game is beaten): the climb repeats faster and faster; the uplink never ends
+    var arcade = false
+    var arcadeRound = 0; private set
+    var jumpsCleared = 0; private set
+    /** The arcade game is over (out of lives on the climb, or a miss on the uplink). */
+    var gameOver = false; private set
     var round = 1; private set              // how many of the sequence to repeat this round
     var simonFails = 0; private set
     var showing = true; private set
@@ -156,7 +162,7 @@ internal class FinaleWorld(seed: Int = 6) {
         when (stage) {
             Stage.BEACH -> if (t >= BEACH_S) go(Stage.INTRO)
             Stage.INTRO -> introTick(dt)
-            Stage.CLIMB -> climbTick(dt, ix, iy, mag)
+            Stage.CLIMB -> if (!gameOver) climbTick(dt, ix, iy, mag)
             Stage.EXECUTE -> { executeTick(); if (t >= EXECUTE_S) go(Stage.DOOR) }
             Stage.DOOR -> if (t >= DOOR_S) go(Stage.CONTROL)
             Stage.CONTROL -> if (t >= CONTROL_S) go(Stage.SIMON)
@@ -228,14 +234,14 @@ internal class FinaleWorld(seed: Int = 6) {
         events += "jump"
     }
 
-    private fun spoolSpeed() = max(30f, 54f * (1f - 0.12f * fails))
-    private fun throwGap() = 2.3f * (1f + 0.18f * min(fails, 5))
+    private fun spoolSpeed() = if (arcade) 54f * (1f + 0.14f * arcadeRound) else max(30f, 54f * (1f - 0.12f * fails))
+    private fun throwGap() = if (arcade) 2.3f / (1f + 0.15f * arcadeRound) else 2.3f * (1f + 0.18f * min(fails, 5))
 
     private fun climbTick(dt: Float, ix: Float, iy: Float, mag: Float) {
         throwT += dt; clearT += dt
         if (hitT >= 0f) {
             hitT += dt
-            if (hitT > 1.6f) { lives--; if (lives <= 0) { lives = 3; fails++ }; resetClimb() }
+            if (hitT > 1.6f) { lives--; if (lives <= 0) { if (arcade) { gameOver = true; hitT = -1f; return }; lives = 3; fails++ }; resetClimb() }
             return
         }
         // the patrol throws
@@ -249,9 +255,9 @@ internal class FinaleWorld(seed: Int = 6) {
             val sy = s.y; val feet = py - jumpH
             val dx = abs(s.x - px); val dy = abs((sy + SPOOL_R) - feet)
             if (dx < 7f && dy < 9f) { hitT = 0f; events += "hit"; return }
-            if (dx < 5f && jumpH > 8f && s.floor == floor && s.fallTo < 0 && s !in cleared) { cleared += s; clearX = px; clearY = py - 24f; clearT = 0f; events += "over" }
+            if (dx < 5f && jumpH > 8f && s.floor == floor && s.fallTo < 0 && s !in cleared) { cleared += s; clearX = px; clearY = py - 24f; clearT = 0f; events += "over"; jumpsCleared++ }
         }
-        if (floor == TOP) go(Stage.EXECUTE)
+        if (floor == TOP) { if (arcade) { arcadeRound++; events += "ok"; resetClimb() } else go(Stage.EXECUTE) }
     }
 
     private fun movePlayer(dt: Float, ix: Float, iy: Float, mag: Float) {
@@ -344,10 +350,11 @@ internal class FinaleWorld(seed: Int = 6) {
 
     /** You press one of the four buttons (0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right). */
     fun simonTap(b: Int) {
-        if (stage != Stage.SIMON || showing || next != null) return
+        if (stage != Stage.SIMON || showing || next != null || gameOver) return
         lit = b; litT = 0f
         if (seq[inputAt] != b) {
             events += "wrong"
+            if (arcade) { gameOver = true; simonMsg = "SIGNAL LOST."; simonMsgT = 99f; return }
             simonFails++
             round = max(1, round - 1)
             simonMsg = "SIGNAL LOST. AGAIN, SLOWER."; simonMsgT = 1.6f
@@ -357,8 +364,9 @@ internal class FinaleWorld(seed: Int = 6) {
         events += "simon$b"
         inputAt++
         if (inputAt >= round) {
-            if (round >= SIMON_GOAL) { simonMsg = "UPLINK ESTABLISHED."; simonMsgT = 2f; events += "ok"; go(Stage.BROADCAST); return }
+            if (!arcade && round >= SIMON_GOAL) { simonMsg = "UPLINK ESTABLISHED."; simonMsgT = 2f; events += "ok"; go(Stage.BROADCAST); return }
             round++
+            while (seq.size < round) seq += rnd.nextInt(4)
             showing = true; showT = -0.7f; inputAt = 0
         }
     }
@@ -382,7 +390,7 @@ internal class FinaleWorld(seed: Int = 6) {
         Stage.CLIMB -> if (t < 5f) "CLIMB. JUMP THE SPOOLS." else ""
         Stage.DOOR -> ""
         Stage.CONTROL -> when { t < 4.5f -> ""; t < 9.5f -> ""; else -> "" }
-        Stage.SIMON -> if (simonMsgT > 0f) simonMsg else if (showing) "WATCH..." else "REPEAT IT.  ${round.coerceAtMost(SIMON_GOAL)} / $SIMON_GOAL"
+        Stage.SIMON -> if (simonMsgT > 0f) simonMsg else if (showing) "WATCH..." else if (arcade) "REPEAT IT.  ROUND $round" else "REPEAT IT.  ${round.coerceAtMost(SIMON_GOAL)} / $SIMON_GOAL"
         Stage.BROADCAST -> when ((t / VIGNETTE_S).toInt()) {
             0 -> "IN EVERY HOME."
             1 -> "ON EVERY RADIO."

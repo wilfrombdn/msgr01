@@ -72,11 +72,11 @@ class SkipTest {
         assertTrue(v.isChoosing())
         val bmp = Bitmap.createBitmap(1080, 2400, Bitmap.Config.ARGB_8888); v.draw(Canvas(bmp))
         FileOutputStream(File("build/shots/deadletter-chooser.png")).use { Bitmap.createScaledBitmap(bmp, 540, 1200, true).compress(Bitmap.CompressFormat.PNG, 100, it) }
-        // tap the third row (letter III)
-        val y = 2400f * 0.5f
+        // the first row starts an arcade game (the sewer maze); the menu comes back with the restart button
         fun tap(x: Float, yy: Float) { v.onTouchEvent(android.view.MotionEvent.obtain(0, 0, android.view.MotionEvent.ACTION_DOWN, x, yy, 0)); v.onTouchEvent(android.view.MotionEvent.obtain(0, 0, android.view.MotionEvent.ACTION_UP, x, yy, 0)) }
-        var picked = -1
-        for (yy in 300 until 2300 step 20) { tap(540f, yy.toFloat()); if (!v.isChoosing()) { picked = v.debugLevelIdx(); break } }
-        assertFalse(v.isChoosing()); assertEquals(picked, saved); assertTrue(picked in 0..5)
+        for (yy in 300 until 2300 step 20) { tap(540f, yy.toFloat()); if (!v.isChoosing()) break }
+        assertFalse(v.isChoosing()); assertEquals(1, v.debugLevelIdx()); assertEquals(1, v.debugStage())       // the maze
+        assertEquals("the arcade never moves your story place", -1, saved)
+        v.openChooser(); assertTrue(v.isChoosing())
     }
 }

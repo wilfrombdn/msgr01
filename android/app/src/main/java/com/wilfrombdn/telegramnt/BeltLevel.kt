@@ -127,6 +127,13 @@ internal object BeltLevel {
         }
     }
 
+    /** The arcade version: the belts never end; how far you get and the coins you grab are your score. */
+    val warehouseArcade: BeltSpec get() {
+        val obs = ArrayList<BeltObs>(); val coins = ArrayList<BeltCoin>()
+        val g = Gen(21 + (System.nanoTime() % 1000).toInt(), obs, coins)
+        return BeltSpec(obs, coins, END, laneX, 1_000_000) { upTo -> g.fill(upTo) }
+    }
+
     /** A fresh run every attempt: things are made ahead of you as the belts go on. */
     val warehouse: BeltSpec get() {
         val obs = ArrayList<BeltObs>(); val coins = ArrayList<BeltCoin>()

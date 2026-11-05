@@ -70,8 +70,86 @@ internal class DeadDropView(
     /** The "choose a letter" screen is up (it opens first once the game is beaten). */
     private var choosing = beaten
     private val chooserRows = ArrayList<RectF>()
-    internal fun openChooser() { choosing = true; invalidate() }
+    internal fun openChooser() { choosing = true; arcadeId = null; tracks.stop(); invalidate() }
+
+    // ---------- the arcade (after the game is beaten): each mini-game as an endless game with a score ----------
+    private val ARCADE = listOf("maze" to "SEWER MAZE", "belt" to "CONVEYOR RUN", "fly" to "JETPACK", "hall" to "TOWN HALL", "tower" to "THE TOWER", "uplink" to "UPLINK")
+    private val ARCADE_HOW = mapOf("maze" to "ENDLESS MAZES. 3 LIVES.", "belt" to "HOW FAR CAN YOU GET?", "fly" to "COLLECT COINS. 3 HITS.", "hall" to "CLEAR THE WHOLE HALL.", "tower" to "EVERY CLIMB GETS FASTER.", "uplink" to "HOW LONG CAN YOU REMEMBER?")
+    private var arcadeId: String? = null
+    private var arcLives = 3; private var arcScore = 0; private var arcOver = false; private var arcOverT = 0f; private var arcWon = false
+    private var pacBank = 0; private var arcRound = 1; private var flyHit = false; private var pacCaughtT = -1f
+    private val prefsDD get() = context.getSharedPreferences("dead_drop", Context.MODE_PRIVATE)
+    private fun best(id: String) = prefsDD.getInt("best_$id", 0)
+    private fun startArcade(id: String) {
+        choosing = false; arcadeId = id; arcLives = 3; arcScore = 0; arcOver = false; arcOverT = 0f; arcWon = false; pacBank = 0; arcRound = 1; flyHit = false; pacCaughtT = -1f
+        when (id) {
+            "maze" -> { levelIdx = 1; load(false); attempt = 2; toStage(1) }
+            "belt" -> { levelIdx = 2; load(false); belt = BeltWorld(BeltLevel.warehouseArcade); beltScene = BeltScene(belt!!) }
+            "fly" -> { levelIdx = 2; load(false); startMg(1); fly = FlyWorld(FlySpec((System.nanoTime() % 1000).toInt(), 1_000_000)); flyScene = FlyScene(fly!!) }
+            "hall" -> { levelIdx = 3; load(false); startMg(1) }
+            "tower" -> { levelIdx = 5; load(false); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.CLIMB) }
+            "uplink" -> { levelIdx = 5; load(false); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.SIMON) }
+        }
+        fade = 0f; fadeDir = 0; cue = ""; applyCue()
+    }
+    private fun arcadeOver(won: Boolean = false) {
+        if (arcOver) return
+        arcOver = true; arcOverT = 0f; arcWon = won
+        val id = arcadeId ?: return
+        if (arcScore > best(id)) prefsDD.edit().putInt("best_$id", arcScore).apply()
+    }
+    /** The arcade games run here instead of the story's stage-to-stage flow. */
+    private fun arcadeUpdate(dt: Float) {
+        if (arcOver) { arcOverT += dt; return }
+        belt?.let { b -> b.update(dt, ix, iy, mag); arcScore = b.coins * 10 + b.s.toInt(); if (b.phase == BeltWorld.Phase.FALL && b.phaseT > 1.2f) arcadeOver() }
+        fly?.let { f ->
+            f.thrust = thrustId >= 0; f.update(dt); arcScore = f.coins * 10
+            if (f.hitFlash > 0.4f && !flyHit) { flyHit = true; arcLives--; if (arcLives <= 0) arcadeOver() } else if (f.hitFlash < 0.3f) flyHit = false
+        }
+        shoot?.let { sw ->
+            sw.update(dt, ix, iy, mag, gunId >= 0); if (soundOn) for (e in sw.events) DeadLetterSfx.play(e); sw.events.clear()
+            arcScore = sw.npcs.count { !it.civ && !it.hostage && it.dead } * 100
+            if (sw.phase == ShootWorld.Phase.DEAD) { deadT += dt; if (deadT > 1f) arcadeOver() }
+            if (sw.phase == ShootWorld.Phase.FINALE) { arcScore += 2000; arcadeOver(won = true) }
+        }
+        finale?.let { fw ->
+            fw.update(dt, ix, iy, mag); if (soundOn) for (e in fw.events) DeadLetterSfx.play(e); fw.events.clear()
+            arcScore = if (arcadeId == "tower") fw.arcadeRound * 1000 + fw.jumpsCleared * 100 else (fw.round - 1) * 100
+            if (fw.gameOver) arcadeOver()
+        }
+    }
+    /** The sewer maze in the arcade: a new maze each time you clear one; 3 lives. */
+    private fun arcadePacTick(dt: Float) {
+        val pw = pac ?: return
+        if (arcOver) { arcOverT += dt; return }
+        arcScore = pacBank + pw.eaten * 10
+        if (pw.phase == PacWorld.Phase.WON && pw.phaseT > 0.9f) { pacBank += pw.eaten * 10 + 500; arcRound++; pac = PacWorld(spec.pac!!); pacScene = PacScene(pac!!); pacWant = -1 }
+        if (pw.phase == PacWorld.Phase.CAUGHT) {
+            if (pacCaughtT < 0f) { pacCaughtT = 0f; arcLives--; if (arcLives <= 0) arcadeOver() }
+            else { pacCaughtT += dt; if (pacCaughtT > 1.2f && !arcOver) { pacCaughtT = -1f; pacBank += pw.eaten * 10; pac = PacWorld(spec.pac!!).also { it.fails = 0 }; pacScene = PacScene(pac!!); pacWant = -1 } }
+        }
+    }
+    /** The arcade's score, lives and the game-over card, over whatever is on screen. */
+    private fun drawArcade(c: Canvas) {
+        val id = arcadeId ?: return
+        val w = width.toFloat(); val h = height.toFloat()
+        val y = barH + 26f * d
+        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x90); c.drawRect(0f, y - 18f * d, w, y + 8f * d, p)
+        mgText(c, "SCORE $arcScore", w / 2f - 70f * d, y, 12f, 0xFFFFD84D.toInt())
+        mgText(c, if (id == "belt" || id == "hall" || id == "uplink") "BEST ${best(id)}" else "♥".repeat(arcLives.coerceAtLeast(0)) + "  BEST ${best(id)}", w / 2f + 70f * d, y, 12f, if (id == "belt" || id == "hall" || id == "uplink") a(Color.WHITE, 0xCC) else 0xFFFF6A7A.toInt())
+        if (arcOver) {
+            val k = (arcOverT / 0.5f).coerceIn(0f, 1f)
+            p.color = a(Color.BLACK, (k * 0xC8).toInt()); c.drawRect(0f, 0f, w, h, p)
+            mgText(c, if (arcWon) "HALL CLEARED" else "GAME OVER", w / 2f, h / 2f - 30f * d, 26f, a(if (arcWon) 0xFF3BFF9A.toInt() else 0xFFFF4A5A.toInt(), (k * 255).toInt()))
+            mgText(c, "SCORE  $arcScore", w / 2f, h / 2f + 4f * d, 15f, a(0xFFFFD84D.toInt(), (k * 255).toInt()))
+            mgText(c, if (arcScore >= best(id) && arcScore > 0) "A NEW BEST!" else "BEST  ${best(id)}", w / 2f, h / 2f + 28f * d, 12f, a(Color.WHITE, (k * 0xCC).toInt()))
+            if (arcOverT > 0.8f) mgText(c, "TAP TO PLAY AGAIN  ·  HOLD ↻ FOR THE MENU", w / 2f, h / 2f + 64f * d, 10f, a(Color.WHITE, 0x99), false)
+        }
+    }
     internal fun isChoosing() = choosing
+    internal fun debugArcade(id: String) = startArcade(id)
+    internal fun debugArcadeOver() = arcOver
+    internal fun debugArcadeScore() = arcScore
     private val d = resources.displayMetrics.density
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
@@ -102,6 +180,7 @@ internal class DeadDropView(
 
     /** Which song should be on right now ("" = silence, null = leave it alone). */
     private fun wantedCue(): String? {
+        when (arcadeId) { "maze" -> return "l2"; "belt" -> return "l3"; "fly" -> return "l3b"; "hall" -> return "synth"; "tower", "uplink" -> return "l6" }
         when (mgName) {
             "belt" -> { val b = belt ?: return ""; return if (b.phase == BeltWorld.Phase.RIDE && b.phaseT >= 1f) "l3" else "" }
             "fly" -> { val f = fly ?: return ""; return if (f.phase != FlyWorld.Phase.DONE) "l3b" else "" }
@@ -202,6 +281,7 @@ internal class DeadDropView(
     }
 
     private fun mgUpdate(dt: Float) {
+        if (arcadeId != null) { arcadeUpdate(dt); return }
         if (fadeDir > 0) { fade += dt / 0.7f; if (fade >= 1f) { mgApply(); fade = 1f; fadeDir = -1 }; return }
         if (fadeDir < 0) { fade -= dt / 0.7f; if (fade <= 0f) { fade = 0f; fadeDir = 0 } }
         belt?.let { b ->
@@ -319,13 +399,13 @@ internal class DeadDropView(
             val bt = oy + bmp.height * sc
             // where the words go: just under the title bar and just above the bottom edge, whatever the picture does
             val hy = max(oy, barH + 30f * d); val hb = min(bt, h - botInset - 46f * d)
-            belt?.let { b ->
+            if (arcadeId == null) belt?.let { b ->
                 mgText(c, "COINS  ${b.coins} / ${b.spec.coinGoal}", w / 2f + 70f * d, hy - 10f * d, 13f, if (b.coinFlash > 0f) Color.WHITE else 0xFFFFD84D.toInt()); mgText(c, "♥".repeat(b.lives.coerceAtLeast(0)), w / 2f - 90f * d, hy - 10f * d, 13f, 0xFFFF6A7A.toInt())
                 if (b.phase == BeltWorld.Phase.FALL) mgText(c, if (b.fellInHole) "YOU FELL" else "YOU DIED", w / 2f, h / 2f, 22f, danger)
                 if (b.phase == BeltWorld.Phase.LAUNCH || b.phase == BeltWorld.Phase.PICKUP) mgText(c, "THE JETPACK!", w / 2f, hy - 10f * d - 18f * d, 12f, 0xFFFFD84D.toInt())
                 if (b.t < 9f) mgText(c, "SWIPE LEFT / RIGHT TO SWITCH BELTS. SWIPE UP TO JUMP.", w / 2f, hb + 14f * d, 10f, a(Color.WHITE, 0xAA), false) else if (b.coins < b.spec.coinGoal) mgText(c, "COLLECT 100 COINS TO REACH THE END.", w / 2f, hb + 14f * d, 10f, a(Color.WHITE, 0x80), false)
             }
-            fly?.let { f ->
+            if (arcadeId == null) fly?.let { f ->
                 mgText(c, "COINS  ${f.coins} / ${f.spec.coinGoal}", w / 2f, hy - 10f * d, 14f, 0xFFFFD84D.toInt())
                 if (f.t < 6f) mgText(c, "HOLD ANYWHERE TO FLY UP. LET GO TO FALL. AVOID THE ZAPPERS.", w / 2f, hb + 14f * d, 10f, a(Color.WHITE, 0xAA), false)
             }
@@ -391,7 +471,13 @@ internal class DeadDropView(
                     p.letterSpacing = 0f
                 }
             }
-            cine?.caption()?.let { mgText(c, it, w / 2f, hb - 16f * d, 13f, a(Color.WHITE, 0xEE)) }
+            // subtitles sit down in the dark space under the picture (wrapped if they're long)
+            cine?.caption()?.let { cap ->
+                val room = h - botInset - bt
+                val y0 = if (room > 70f * d) bt + room * 0.38f else hb - 16f * d
+                p.typeface = monoBold; p.textSize = 13f * d; p.textAlign = Paint.Align.CENTER; p.letterSpacing = 0.05f; p.color = a(Color.WHITE, 0xEE)
+                wrap(c, cap, w / 2f, y0, w - 48f * d, 19f * d); p.letterSpacing = 0f
+            }
             shoot?.let { sw ->
                 if (sw.msgT > 0f) mgText(c, sw.msg, w / 2f, hy - 10f * d, 11f, if (sw.msgGood) 0xFF3BFF9A.toInt() else 0xFFFF6A6A.toInt())
                 if (sw.phase == ShootWorld.Phase.PLAY) { mgText(c, "AREAS ${sw.roomsClear()}/7", w / 2f - 96f * d, hy - 28f * d, 10f, a(Color.WHITE, 0xCC)); if (sw.innocents > 0) mgText(c, "CLERKS LOST ${sw.innocents}", w / 2f + 96f * d, hy - 28f * d, 10f, a(0xFFFF6A6A.toInt(), 0xDD)) }
@@ -471,23 +557,30 @@ internal class DeadDropView(
         val top = barH + 40f * d
         c.drawText("DEAD LETTER", w / 2, top + 20f * d, p)
         p.typeface = mono; p.letterSpacing = 0.15f; p.textSize = 12f * d; p.color = a(Color.WHITE, 0x99)
-        c.drawText("CHOOSE A LETTER", w / 2, top + 46f * d, p)
+        c.drawText("THE ARCADE", w / 2, top + 46f * d, p)
         chooserRows.clear()
-        val rowH = min(84f * d, (h - top - 80f * d - botInset - 20f * d) / levels.size)
-        for ((i, lv) in levels.withIndex()) {
+        val rowH = min(84f * d, (h - top - 80f * d - botInset - 20f * d) / (ARCADE.size + 1))
+        for ((i, g) in ARCADE.withIndex()) {
             val y0 = top + 70f * d + i * rowH
             val r = RectF(20f * d, y0, w - 20f * d, y0 + rowH - 8f * d); chooserRows += r
-            p.style = Paint.Style.FILL; p.color = if (i == levelIdx) 0xFF101828.toInt() else 0xFF0A0E16.toInt(); c.drawRoundRect(r, 6f * d, 6f * d, p)
-            p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = if (i == levelIdx) lv.pal.accent else a(lv.pal.accent, 0x55); c.drawRoundRect(r, 6f * d, 6f * d, p)
-            c.save(); c.translate(r.left + 44f * d, r.centerY()); c.scale(0.6f, 0.6f); drawBigLetter(c, 0f, 0f, i, 1f); c.restore()
+            val accent = levels[when (g.first) { "maze" -> 1; "belt", "fly" -> 2; "hall" -> 3; else -> 5 }].pal.accent
+            p.style = Paint.Style.FILL; p.color = 0xFF0A0E16.toInt(); c.drawRoundRect(r, 6f * d, 6f * d, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(accent, 0x88); c.drawRoundRect(r, 6f * d, 6f * d, p)
             p.style = Paint.Style.FILL; p.textAlign = Paint.Align.LEFT
-            p.typeface = monoBold; p.letterSpacing = 0.2f; p.textSize = 10f * d; p.color = lv.pal.accent
-            c.drawText("LETTER ${roman[i]}", r.left + 86f * d, r.centerY() - 6f * d, p)
-            p.letterSpacing = 0.04f; p.textSize = 16f * d; p.color = Color.WHITE
-            val room = r.right - 14f * d - (r.left + 86f * d); val tw = p.measureText(lv.building.uppercase())
-            if (tw > room) p.textSize = 16f * d * room / tw                                        // long names shrink to fit
-            c.drawText(lv.building.uppercase(), r.left + 86f * d, r.centerY() + 14f * d, p)
+            p.typeface = monoBold; p.letterSpacing = 0.04f; p.textSize = 16f * d; p.color = Color.WHITE
+            c.drawText(g.second, r.left + 18f * d, r.centerY() - 2f * d, p)
+            p.typeface = mono; p.letterSpacing = 0.1f; p.textSize = 10f * d; p.color = a(accent, 0xDD)
+            c.drawText(ARCADE_HOW[g.first] ?: "", r.left + 18f * d, r.centerY() + 16f * d, p)
+            p.textAlign = Paint.Align.RIGHT; p.typeface = monoBold; p.textSize = 11f * d; p.color = 0xFFFFD84D.toInt()
+            c.drawText("BEST ${best(g.first)}", r.right - 16f * d, r.centerY() + 4f * d, p)
             p.textAlign = Paint.Align.CENTER
+        }
+        run {
+            val y0 = top + 70f * d + ARCADE.size * rowH
+            val r = RectF(20f * d, y0, w - 20f * d, y0 + rowH - 8f * d); chooserRows += r
+            p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(Color.WHITE, 0x44); c.drawRoundRect(r, 6f * d, 6f * d, p)
+            p.style = Paint.Style.FILL; p.typeface = mono; p.letterSpacing = 0.15f; p.textSize = 12f * d; p.color = a(Color.WHITE, 0xAA)
+            c.drawText("THE STORY, FROM THE START", w / 2, r.centerY() + 4f * d, p)
         }
         p.letterSpacing = 0f
     }
@@ -531,7 +624,7 @@ internal class DeadDropView(
     init { load(false) }
 
     /** Start the level you are on again from the beginning. */
-    internal fun restart() { load(false) }
+    internal fun restart() { val a0 = arcadeId; if (a0 != null) startArcade(a0) else load(false) }
 
     /** Is a Spotted / Delivered style screen showing (so that any tap should dismiss it)? */
     private fun overlayUp(): Boolean = world.state != StealthWorld.State.PLAY || pac?.phase == PacWorld.Phase.CAUGHT || pac?.phase == PacWorld.Phase.WON
@@ -548,6 +641,7 @@ internal class DeadDropView(
      * level 6: beach > tower > climb > (skips the shot and the door) control room > uplink > broadcast > the end.
      */
     internal fun skip() {
+        if (arcadeId != null) return
         finale?.let { fw -> fw.skip(); return }
         shoot?.let { sw -> if (sw.phase != ShootWorld.Phase.FINALE && sw.phase != ShootWorld.Phase.DONE) { sw.skipToMayor(); return } }   // the shoot-out: to the mayor first
         val stages = stagesOf(spec)
@@ -664,6 +758,7 @@ internal class DeadDropView(
 
     private fun stageTick(dt: Float) {
         if (descentT >= 0f) { descentTick(dt); if (descentT >= 0f && stage == 0) return }
+        if (arcadeId == "maze") { arcadePacTick(dt); return }
         if (fadeDir > 0) { fade += dt / 0.8f; if (fade >= 1f) { fade = 1f; switchStage(); fadeDir = -1 } }
         else if (fadeDir < 0) { fade -= dt / 0.8f; if (fade <= 0f) { fade = 0f; fadeDir = 0 } }
         else if (stage == 0 && world.enteredManhole && spec.pac != null) { world.sayText = null; descent = DescentScene(); descentT = 0f }
@@ -713,8 +808,13 @@ internal class DeadDropView(
 
     // ---------- thumb ----------
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (arcadeId != null && arcOver) { if (e.actionMasked == MotionEvent.ACTION_UP && arcOverT > 0.8f) startArcade(arcadeId!!); return true }
         if (choosing) {
-            if (e.actionMasked == MotionEvent.ACTION_UP) for ((i, r) in chooserRows.withIndex()) if (r.contains(e.x, e.y)) { choosing = false; levelIdx = i; saveLevel(i); load(false); break }
+            if (e.actionMasked == MotionEvent.ACTION_UP) for ((i, r) in chooserRows.withIndex()) if (r.contains(e.x, e.y)) {
+                if (i < ARCADE.size) startArcade(ARCADE[i].first)
+                else { choosing = false; arcadeId = null; levelIdx = 0; saveLevel(0); load(false) }   // the story, from the start
+                break
+            }
             return true
         }
         if (mgIdx >= 0) return mgTouch(e)
@@ -784,7 +884,7 @@ internal class DeadDropView(
 
     private fun drawAll(c: Canvas) {
         if (choosing) { drawChooser(c); return }
-        if (mgIdx >= 0) { drawMg(c); return }
+        if (mgIdx >= 0) { drawMg(c); drawArcade(c); return }
         val w = width.toFloat(); val h = height.toFloat()
         val s = world.spec
         val pal = s.pal
@@ -837,13 +937,14 @@ internal class DeadDropView(
 
         drawMarks(c)
         drawLight(c, w, h, pal)
-        c.save(); c.translate(0f, barH - 8f * d); drawHud(c, w, h, pal); c.restore()
+        if (arcadeId == null) { c.save(); c.translate(0f, barH - 8f * d); drawHud(c, w, h, pal); c.restore() }
         drawJoystick(c)
         drawClue(c, w, h, pal)
         drawSay(c, w, h, pal)
         drawOverlays(c, w, h, pal)
         if (descentT >= 0f) drawDescent(c, w, h)
         drawFade(c, w, h)
+        drawArcade(c)
     }
 
     private fun drawFloor(c: Canvas, pal: Palette) {
