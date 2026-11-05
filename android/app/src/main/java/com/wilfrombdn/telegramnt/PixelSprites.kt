@@ -77,7 +77,7 @@ internal open class PixelSprites {
     protected val vendor = Outfit(PX.SKIN, 0xFF59647A.toInt(), 0xFF59647A.toInt(), 0xFF3A4458.toInt(), 0xFFE8E0C8.toInt(), null, 0xFF3A4458.toInt(), PX.K, null, apron = 0xFF2E8F66.toInt())
 
     /** Draws one person standing with their feet at (fx, fy). [dir]: 0 away from you, 1 right, 2 toward you, 3 left. */
-    protected fun folk(c: Canvas, fx: Int, fy: Int, dir: Int, frame: Int, o: Outfit, torch: Boolean, letter: Boolean, hd: Int = 0, cross: Int = -1, pose: Int = 0, pdir: Int = 0, sorrow: Boolean = false) {
+    protected fun folk(c: Canvas, fx: Int, fy: Int, dir: Int, frame: Int, o: Outfit, torch: Boolean, letter: Boolean, hd: Int = 0, cross: Int = -1, pose: Int = 0, pdir: Int = 0, sorrow: Boolean = false, handsUp: Boolean = false) {
         rect(c, fx - 5, fy - 1, 11, 3, a(PX.K, 0x70))     // shadow
         c.save()
         if (dir == 3) c.scale(-1f, 1f, fx.toFloat() + 0.5f, 0f)
@@ -106,12 +106,15 @@ internal open class PixelSprites {
             // arms
             val sleeve = o.coat ?: o.shirt
             val swing = if (frame == 1) 1 else 0
-            if (sorrow) {   // shoulders down, hands clasped in front of him
+            if (handsUp) {   // both arms straight up, hands open: no arms left by his sides
+                rect(c, fx - 6, fy - 19, 2, 8, sleeve); rect(c, fx + 5, fy - 19, 2, 8, sleeve)
+                rect(c, fx - 6, fy - 21, 2, 2, o.skin); rect(c, fx + 5, fy - 21, 2, 2, o.skin)
+            } else if (sorrow) {   // shoulders down, hands clasped in front of him
                 rect(c, fx - 6, fy - 11, 2, 4, sleeve); rect(c, fx - 5, fy - 8, 3, 2, sleeve); rect(c, fx + 5, fy - 11, 2, 4, sleeve); rect(c, fx + 3, fy - 8, 3, 2, sleeve)
                 rect(c, fx - 2, fy - 8, 5, 2, o.skin)
             } else rect(c, fx - 6, fy - 12 + swing, 2, 6, sleeve)
-            if (!sorrow) rect(c, fx - 6, fy - 6 + swing, 2, 1, o.skin)
-            if (sorrow) Unit                                               // both hands are already drawn, clasped
+            if (!sorrow && !handsUp) rect(c, fx - 6, fy - 6 + swing, 2, 1, o.skin)
+            if (sorrow || handsUp) Unit                                               // both hands are already drawn, clasped
             else if (pose != 0) poseArm(c, fx, fy, pose, pdir, sleeve, o)
             else if (cross < 0 || dir != 2) { rect(c, fx + 5, fy - 12 - swing, 2, 6, sleeve); rect(c, fx + 5, fy - 6 - swing, 2, 1, o.skin) }
             else {   // crossing himself: forehead, chest, left shoulder, right shoulder

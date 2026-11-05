@@ -27,8 +27,9 @@ class ShootWorldTest {
         assertEquals(ShootWorld.Phase.INTRO, w.phase)
         assertTrue("officers aim at you", w.npcs.filter { !it.civ && !it.hostage }.all { it.state == ShootWorld.AIMED })
         assertFalse(w.hostage!!.dead)
-        step(w, 1.5f)                                   // 1.5 s of everyone aiming, then the shot
-        assertTrue(w.hostage!!.dead)
+        assertTrue("he's screaming for help", w.hostageLine() != null)
+        step(w, ShootWorld.SHOT_T - 1.4f + 0.05f)       // everyone aiming while he screams, then the shot cuts him off
+        assertTrue(w.hostage!!.dead); assertEquals(null, w.hostageLine())
         intoPlay(w)
         assertEquals(ShootWorld.Phase.PLAY, w.phase)
         assertEquals(1, w.tipped.size)

@@ -511,9 +511,12 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
         rect(c, fx - 5, fy - 1, 11, 3, a(PX.K, 0x70))
         val fr = if (moving) 1 + ((clock * 8f).toInt() % 2) else 0
         if (n.hostage) {
-            folk(c, fx, fy, 0, fr, police, false, false); rect(c, fx - 7, fy - 18, 2, 4, police.skin); rect(c, fx + 6, fy - 18, 2, 4, police.skin); return
+            folk(c, fx, fy, 0, fr, police, false, false, handsUp = true)
+            world.hostageLine()?.let { (line, shown) -> val jit = if ((clock * 24f).toInt() % 3 == 0) 1 else 0; bubble(c, line, fx + jit, fy - 30, shown, W) }
+            return
         }
         if (n.civ) {
+            world.civLine(n)?.let { bubble(c, it, fx, fy - 26, 99, W) }
             if (n.state == ShootWorld.COWER) { folk(c, fx, fy, if (dir == 0) 2 else dir, 0, outfitOf(n), false, false, 6); rect(c, fx - 6, fy - 17, 2, 4, outfitOf(n).skin); rect(c, fx + 5, fy - 17, 2, 4, outfitOf(n).skin) }
             else folk(c, fx, fy, dir, fr, outfitOf(n), false, false)
             return
@@ -539,7 +542,8 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
         val draw: () -> Unit = {
             rect(c, fx - 5, fy - 1, 11, 3, a(PX.K, 0x70))
             if (w.phase == ShootWorld.Phase.DEAD) lying(c, fx, fy, clerk, true, false)
-            else if (w.diving) { val k = ((w.t - 2.95f) / 0.5f); if (k in 0.1f..0.9f) lying(c, fx, fy, clerk, w.face > -1.5f, false) else folk(c, fx, fy, 0, 0, clerk, false, false, 4) }
+            else if (w.diving) folk(c, fx, fy + 2, dirOf(w.face), 0, clerk, false, false, 4)                                    // crouched behind the table
+            else if (w.kickingTable) { folk(c, fx, fy, dirOf(w.face), 0, clerk, false, false); val kx = fx + (cos(w.face) * 7f).roundToInt(); val ky = fy - 4 + (sin(w.face) * 5f).roundToInt(); rect(c, kx - 2, ky - 1, 5, 3, clerk.pants); rect(c, kx - 1, ky, 3, 2, clerk.shoes) }   // the kick
             else if (w.rollT > 0.04f) {
                 c.save(); c.rotate((clock * 1100f) % 360f, fx.toFloat(), (fy - 6).toFloat()); folk(c, fx, fy, 2, 1, clerk, false, false, 5); c.restore()
             } else {

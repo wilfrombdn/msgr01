@@ -38,6 +38,7 @@ internal class ShootSpec(
 internal class ShootWorld(val spec: ShootSpec) {
     enum class Phase { INTRO, PLAY, FINALE, DEAD, DONE }
 
+
     class Npc(val id: Int, var x: Float, var y: Float, var face: Float, val civ: Boolean, val room: Int, val swat: Boolean) {
         var state = IDLE
         var dead = false
@@ -218,35 +219,48 @@ internal class ShootWorld(val spec: ShootSpec) {
             for (n in npcs) if (!n.dead && !n.hostage) { if (n.civ) n.state = COWER else { n.state = AIMED; n.lastX = px; n.lastY = py } }
         }
         if (t >= 1.3f) for (n in npcs) if (!n.civ && !n.dead && !n.hostage) n.face = turnToward(n.face, atan2(py - n.y, px - n.x), 6f * dt)
-        if (t >= 2.8f && !shotTheHostage) {
+        if (t >= SHOT_T && !shotTheHostage) {
             shotTheHostage = true
             // the officer nearest to him with a clear shot takes it
             val sh = npcs.filter { !it.civ && !it.dead && !it.hostage }.minByOrNull { hypot(it.x - h.x, it.y - h.y) }
             if (sh != null) { sh.flash = 0.14f; shooterId = sh.id; sh.face = atan2(h.y - sh.y, h.x - sh.x) }
-            h.dead = true; h.deadT = 0f; decals += h.x to h.y
-            flash = 0.14f; shake = 0.35f
+            h.dead = true; h.deadT = 0f; decals += h.x to h.y; decals += (h.x - 0.4f) to (h.y - 0.3f); decals += (h.x + 0.3f) to (h.y - 0.5f)
+            flash = 0.18f; shake = 0.45f; events += "shot"
             if (sh != null) bullets += Bullet(sh.x, sh.y, cos(sh.face) * 20f, sin(sh.face) * 20f, false, true)
             // you throw up the nearest table and dive behind it
             diveFromX = px; diveFromY = py
             val tb = nearestTable()
             if (tb != null) {
-                tipped += tb; tableHit = tb
+                tableHit = tb                                              // you'll kick it over when you get there
                 val spot = listOf(0 to 1, 0 to -1, 1 to 0, -1 to 0).map { (tb.first + it.first) to (tb.second + it.second) }
                     .filter { !solid(it.first, it.second) }.minByOrNull { hypot(it.first + 0.5f - px, it.second + 0.5f - py) }
                 if (spot != null) { diveToX = spot.first + 0.5f; diveToY = spot.second + 0.5f } else { diveToX = px; diveToY = py }
             } else { diveToX = px; diveToY = py }
-            diving = true
         }
         if (shotTheHostage) {
-            val k = ((t - 2.95f) / 0.5f).coerceIn(0f, 1f)
+            // you run to the table in front of you, kick it over, and get down behind it
+            val k = ((t - SHOT_T - 0.2f) / 0.55f).coerceIn(0f, 1f)
             px = diveFromX + (diveToX - diveFromX) * k; py = diveFromY + (diveToY - diveFromY) * k
-            if (diveToY != diveFromY || diveToX != diveFromX) face = atan2(diveFromY - diveToY, diveFromX - diveToX).let { if (abs(it) < 0.01f && diveToX == diveFromX) -PI.toFloat() / 2 else it }
-            if (t >= 3.5f) {
-                diving = false; phase = Phase.PLAY; phaseT = 0f; moving = false
+            moving = k in 0.01f..0.99f
+            val tb = tableHit
+            if (tb != null) face = atan2(tb.second + 0.5f - py, tb.first + 0.5f - px)
+            if (t >= SHOT_T + 0.8f && tb != null && tb !in tipped) { tipped += tb; shake = 0.3f; events += "kick" }
+            kickingTable = t in SHOT_T + 0.75f..SHOT_T + 1.05f
+            diving = t >= SHOT_T + 1.05f
+            if (t >= SHOT_T + 1.6f) {
+                diving = false; kickingTable = false; phase = Phase.PLAY; phaseT = 0f; moving = false
                 for (n in npcs) if (!n.civ && !n.dead && !n.hostage) { n.state = ENGAGE; n.react = 0f; n.cd = 0.25f + rnd.nextFloat() * 0.7f; n.lastX = px; n.lastY = py; n.spotT = 0f }
             }
         }
     }
+
+    /** What the hostage screams as you walk him in (cut off by the shot). */
+    fun hostageLine(): Pair<String, Int>? = if (phase == Phase.INTRO && t in 1.3f..SHOT_T) HOSTAGE_LINE to ((t - 1.3f) * 17f).toInt().coerceIn(1, HOSTAGE_LINE.length) else null
+    /** The clerks, as you walk in. */
+    fun civLine(n: Npc): String? = if (phase == Phase.INTRO && n.civ && t in 0.3f + (n.id % 4) * 0.25f..2.9f) CIV_LINES[n.id % CIV_LINES.size] else null
+    var kickingTable = false; private set
+    /** Sounds for the view to play. */
+    val events = ArrayList<String>()
 
     private fun nearestTable(): Pair<Int, Int>? {
         var best: Pair<Int, Int>? = null; var bd = 99f
@@ -321,6 +335,12 @@ internal class ShootWorld(val spec: ShootSpec) {
 
     // ----- grenades -----
     companion object {
+        const val SHOT_T = 3.9f
+        const val HOSTAGE_LINE = "PLEASE HELP ME, HE'S CRAZY! PLEASE HELP ME-"
+        val CIV_LINES = listOf("OH MY GOD!", "IT'S HIM!", "HE'S GOT A GUN!", "OH GOD...", "GET DOWN!", "NO, NO, NO!", "SOMEBODY HELP!")
+        // the mayor's end: the song plays from the door until he's looked at you; a second of silence; the kick
+        const val MUSIC_CUT = 14.4f
+        const val KICK = 15.4f
         const val IDLE = 0; const val ALERT = 1; const val ENGAGE = 2; const val SEARCH = 3; const val FLEE = 4; const val COWER = 5; const val AIMED = 6; const val EVAC = 7
         val D4 = listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)
         const val THROW_MAX = 10.5f; const val THROW_MIN = 3.0f; const val BLAST = 2.5f
@@ -607,20 +627,23 @@ internal class ShootWorld(val spec: ShootSpec) {
         if (dist < l1) { val k = dist / l1; x = s.first + (gate.first - s.first) * k; y = s.second + (gate.second - s.second) * k }
         else { val k = ((dist - l1) / l2).coerceIn(0f, 1f); x = gate.first + (e.first - gate.first) * k; y = gate.second + (e.second - gate.second) * k }
         if (ft > 10.5f) { val b = runnerSlot(i, 2.7f); val m = ((ft - 10.5f) / 0.7f).coerceIn(0f, 1f); x += (b.first - e.first) * m; y += (b.second - e.second) * m }
+        // the mayor shoves through: anyone in his way is pushed aside
+        if (ft > 10.6f) { val dx = x - mayorX; val dy = y - mayorY; val d = kotlin.math.hypot(dx, dy); if (d < 1.5f && d > 0.01f) { x += dx / d * (1.5f - d); y += dy / d * (1.5f - d) } }
         return x to y
     }
     val kicking get() = ft in 0.2f..0.6f
     val playerDown get() = ft >= 9.8f
-    val mayorKicking get() = ft in 12.6f..13.3f
-    val mayorLaughing get() = ft in 13.2f..14.9f
-    val finaleDone get() = ft >= 16.2f
-    val fade get() = ((ft - 14.6f) / 1.4f).coerceIn(0f, 1f)
+    val mayorKicking get() = ft in KICK - 0.25f..KICK + 0.15f
+    val mayorLaughing get() = false
+    val finaleDone get() = ft >= KICK + 1.6f
+    val fade get() = if (ft >= KICK + 0.12f) 1f else 0f            // straight to black
+    /** The song from the moment the door goes in until he's had his look at you. */
+    val mayorMusic get() = phase == Phase.FINALE && ft in 0.5f..MUSIC_CUT
     /** What the mayor is shouting right now. */
     fun mayorLine(): String? = when {
         ft in 1.0f..3.0f -> "NO! NO! NO!"
         ft in 5.2f..7.2f -> "WHO LET YOU IN?!"
         ft in 7.3f..8.9f -> "GET HIM! GET HIM NOW!"
-        ft in 13.2f..14.9f -> "HA HA HA HA HA!"
         else -> null
     }
 
@@ -643,9 +666,11 @@ internal class ShootWorld(val spec: ShootSpec) {
                 mayorGun = (sin(ft * 9f) * 1.4f + sin(ft * 5.3f) * 0.9f)
             }
             ft < 10.6f -> { mayorX += (7.5f - mayorX) * min(1f, 6f * dt); mayorY += (6.4f - mayorY) * min(1f, 6f * dt); mayorGun = atan2(py - mayorY, px - mayorX) + 0.12f * sin(ft * 21f) }
-            ft < 12.5f -> { val k = ((ft - 10.6f) / 1.9f).coerceIn(0f, 1f); mayorX += (finaleX - mayorX) * 0.05f * k; mayorY += ((finaleY - 1.0f) - mayorY) * min(1f, 3.2f * dt) }
+            ft < 13.4f -> { val tx = finaleX - 0.2f; val ty = finaleY - 1.0f; val dx = tx - mayorX; val dy = ty - mayorY; val d = kotlin.math.hypot(dx, dy); val mv = min(1.15f * dt, d); if (d > 0.01f) { mayorX += dx / d * mv; mayorY += dy / d * mv }; mayorGun = atan2(py - mayorY, px - mayorX) }
+            else -> mayorGun = atan2(py - mayorY, px - mayorX)
         }
-        if (before < 12.7f && ft >= 12.7f) { flash = 0.25f; shake = 0.55f }
+        if (before < 0.5f && ft >= 0.5f) events += "kick"
+        if (before < KICK && ft >= KICK) { flash = 0.3f; shake = 0.7f; events += "dome" }
         if (finaleDone) phase = Phase.DONE
     }
 }

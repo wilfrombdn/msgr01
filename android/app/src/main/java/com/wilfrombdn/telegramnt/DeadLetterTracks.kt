@@ -16,10 +16,11 @@ internal class DeadLetterTracks(private val ctx: Context) {
     }
 
     private fun start(n: String) {
-        val id = res[n] ?: return
+        // "tremolo" (the mayor's song) is dropped in as res/raw/dl_tremolo.mp3; until it's there, it's silence
+        val id = res[n] ?: ctx.resources.getIdentifier("dl_$n", "raw", ctx.packageName).takeIf { it != 0 } ?: return
         try {
             val m = MediaPlayer.create(ctx, id) ?: return
-            m.isLooping = n != "l2"
+            m.isLooping = n != "l2" && n != "tremolo"
             m.setVolume(0.85f, 0.85f)
             if (n == "l2") m.setOnCompletionListener { try { it.release() } catch (_: Exception) {}; mp = null; start("l2b") }
             m.start(); mp = m; name = n

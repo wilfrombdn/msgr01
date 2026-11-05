@@ -107,7 +107,7 @@ internal class DeadDropView(
             "fly" -> { val f = fly ?: return ""; return if (f.phase != FlyWorld.Phase.DONE) "l3b" else "" }
             "cine0" -> return ""
             "cine1" -> return "synth"
-            "shoot" -> return if (shoot?.phase == ShootWorld.Phase.FINALE || shoot?.phase == ShootWorld.Phase.DONE) "" else "synth"   // silence for the mayor
+            "shoot" -> return if (shoot?.phase == ShootWorld.Phase.FINALE || shoot?.phase == ShootWorld.Phase.DONE) (if (shoot?.mayorMusic == true) "tremolo" else "") else "synth"   // the mayor's song, cut hard before the kick
             "prison" -> return "synth"
             "finale" -> return if (finale?.silent == true) "" else "l6"
         }
@@ -214,6 +214,7 @@ internal class DeadDropView(
         finale?.let { fw -> fw.update(dt, ix, iy, mag); if (soundOn) for (e in fw.events) DeadLetterSfx.play(e); fw.events.clear() }
         shoot?.let { sw ->
             sw.update(dt, ix, iy, mag, gunId >= 0)
+            if (soundOn) for (e in sw.events) DeadLetterSfx.play(e); sw.events.clear()
             grMsgT = max(0f, grMsgT - dt)
             if (sw.phase == ShootWorld.Phase.DEAD) deadT += dt
             if (sw.phase == ShootWorld.Phase.DONE) mgGo(mgIdx + 1)
