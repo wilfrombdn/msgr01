@@ -13,50 +13,61 @@ internal object StealthLevels {
     private fun pal(floor: Long, line: Long, wall: Long, top: Long, accent: Long, lamp: Long, cone: Long) =
         Palette(floor.toInt(), line.toInt(), wall.toInt(), top.toInt(), accent.toInt(), lamp.toInt(), cone.toInt())
 
+    /** The back alleys: three east-west alleys joined by short passages, ending on a street with a newsstand. 16 wide, 48 tall. */
+    private fun backstreetsMap(): List<String> {
+        val g = Array(48) { CharArray(16) { '#' } }
+        fun fill(c0: Int, r0: Int, c1: Int, r1: Int) { for (r in r0..r1) for (c in c0..c1) g[r][c] = '.' }
+        fun put(c: Int, r: Int, ch: Char) { g[r][c] = ch }
+        fill(1, 5, 14, 10)      // the street
+        fill(1, 11, 4, 22)      // the passage up to it
+        fill(1, 23, 14, 25)     // alley 3
+        fill(12, 26, 14, 33)    // passage
+        fill(1, 34, 14, 36)     // alley 2
+        fill(1, 37, 3, 43)      // passage
+        fill(1, 44, 14, 46)     // alley 1 (you start at its east end)
+        put(13, 45, 'S'); put(10, 7, 'C')
+        for ((c, r) in listOf(12 to 6, 13 to 6, 1 to 5, 2 to 5, 9 to 8, 10 to 8, 11 to 8)) put(c, r, 'd')            // police cars, the newsstand counter
+        for ((c, r) in listOf(5 to 44, 10 to 44, 3 to 34, 8 to 34, 11 to 34, 6 to 23, 11 to 23, 1 to 39, 14 to 30, 1 to 16)) put(c, r, 'c')   // bins
+        for ((c, r) in listOf(14 to 44, 2 to 36, 14 to 25)) put(c, r, 'd')                                             // crates
+        for ((c, r) in listOf(8 to 45, 6 to 35, 9 to 24, 2 to 40, 13 to 29, 3 to 17, 4 to 7, 7 to 9, 12 to 9)) put(c, r, 'L')   // street lamps
+        return g.map { String(it) }
+    }
+
     val all: List<LevelSpec> = listOf(
         // ------------------------------------------------------------------ 1
+        // A walking story, not a puzzle: you walk a long, zig-zag alley behind a police cordon. Radios blare from open windows,
+        // red and blue light flashes off the walls, torch beams sweep. At the corner the fog clears and a cop stands at the fork.
         LevelSpec(
             "The Backstreets", "Deliver letter I to the newspaper vendor.",
-            "You are newly wanted: \"Mr. Tellem\", terrorist. Officers are working the alleys, and every window has a radio.",
-            "Touch the screen and he walks toward your finger. Keep it close to him to sneak quietly; pull it far away and he sprints, loudly.",
+            "You are newly wanted: \"Mr. Tellem\", terrorist. The police have the streets, and every window has a radio.",
+            "Touch the screen and he walks toward your finger. Keep it close to him to walk slowly. Listen as you pass the windows.",
             "Newspaper vendor", "I thought you were dead.", "Someone inside the government helped you escape.", 0,
             pal(0xFF0B1230, 0xFF121D47, 0xFF03050A, 0xFF1B2B66, 0xFF29F0FF, 0xFFDCEBFF, 0xFFFF3B55),
-            listOf(
-                "#########",
-                "#...C...#",
-                "#.#####.#",
-                "#.#...#.#",
-                "#.#.c.#.#",
-                "#.#...#.#",
-                "#.##.##.#",
-                "#...L...#",
-                "#..c.c..#",
-                "##.###.##",
-                "#...L...#",
-                "#.c...c.#",
-                "#...d...#",
-                "#...S...#",
-                "#########",
+            backstreetsMap(),
+            cover = "bin", pixel = true, walk = true,
+            scene = SceneSpec(3.5f, 9.5f, 22.5f, intArrayOf(0, 0, 15, 21), listOf(14.5f to 9.5f, 16.5f to 9.5f)),
+            flashers = listOf(15.5f to 45.5f, 0.2f to 35.5f, 15.8f to 24.5f, 0.2f to 8.0f, 15.8f to 7.0f),
+            beams = listOf(
+                CamSpec(0.9f, 35.5f, 0f, 22f, 7.0f, 0f, range = 9f, half = 0.16f),
+                CamSpec(15.1f, 24.5f, 180f, 22f, 8.0f, 2f, range = 9f, half = 0.16f),
+                CamSpec(1.2f, 8.5f, 0f, 20f, 6.0f, 1f, range = 10f, half = 0.16f),
+                CamSpec(14.8f, 6.5f, 180f, 20f, 7.0f, 3f, range = 10f, half = 0.16f),
             ),
-            guards = listOf(
-                // the street officer: walks the bottom plaza
-                GuardSpec(listOf(1 to 10, 7 to 10), speed = 1.3f, pause = 1.4f),
-                // the bin inspector: checks behind each bin in the middle alley
-                GuardSpec(listOf(2 to 8, 6 to 8), speed = 1.2f, faces = listOf(0f, 180f), pauses = listOf(2.6f, 2.6f)),
-                // a patrol officer who circles the whole block: up the right alley, across the top, down the left alley, back across
-                GuardSpec(listOf(7 to 6, 7 to 1, 1 to 1, 1 to 7), speed = 1.25f, pause = 1.2f),
-            ),
-            cover = "bin", pixel = true,
             props = listOf(
-                Prop("window", 0.5f, 4.5f, text = "[CHANNEL 9 NEWS] ...authorities are hunting a man identified only as Mr. Tellem, wanted on terrorism charges after last night's bombing. Citizens are urged not to approach."),
-                Prop("window", 8.5f, 3.5f, text = "[TALK RADIO 880] ...Mr. Tellem. Remember the name, folks. The man who bit the hand that fed him. Fifty thousand reward. Lines are open."),
-                Prop("window", 0.5f, 11.5f, text = "[POLICE DISPATCH] All units, suspect Tellem is on foot in the alleys behind Fourth Street. Detain on sight. Repeat, on sight."),
-                Prop("window", 8.5f, 11.5f, text = "[MORNING SHOW] ...and the weather is cold, with a chance of Mr. Tellem! Ha! Kidding, folks. Seriously, lock your doors."),
-                Prop("window", 4.5f, 2.5f, text = "[OLD KITCHEN RADIO] I never met this Mr. Tellem. Seems an awful lot of fuss for one clerk."),
-                Prop("poster", 8.5f, 7.5f, text = "WANTED: Mr. Tellem. Terrorism. That is your face, pasted up fresh."),
-                Prop("poster", 0.5f, 7.5f),
-                Prop("news", 6.5f, 13.5f, text = "HEADLINE: CLERK BEHIND CITY BOMBING. There was no bombing."),
-                Prop("stuff", 1.5f, 13.5f, text = "Your old apartment is two streets over. Everything you owned, on the floor."),
+                // the radios, one per open window, each a different voice
+                Prop("window", 6.5f, 43.5f, text = "[CHANNEL 9 NEWS] ...authorities are hunting a man identified only as Mr. Tellem, wanted on terrorism charges after last night's bombing. Citizens are urged not to approach."),
+                Prop("window", 11.5f, 43.5f, text = "[TALK RADIO 880] ...Mr. Tellem. Remember the name, folks. The man who bit the hand that fed him. Fifty thousand reward. Lines are open."),
+                Prop("window", 4.5f, 33.5f, text = "[POLICE DISPATCH] All units, suspect Tellem is on foot in the back alleys behind Fourth Street. Detain on sight. Repeat, on sight."),
+                Prop("window", 9.5f, 33.5f, text = "[MORNING SHOW] ...and the weather is cold, with a chance of Mr. Tellem! Ha! Kidding, folks. Seriously, lock your doors."),
+                Prop("window", 7.5f, 22.5f, text = "[OLD KITCHEN RADIO] I never met this Mr. Tellem. Seems an awful lot of fuss for one clerk."),
+                Prop("window", 12.5f, 22.5f, text = "[PASTOR'S HOUR] ...and we pray for the city, and for the man they say did this. Lord, let the truth come out."),
+                Prop("window", 6.5f, 4.5f, text = "[EMERGENCY BROADCAST] ...all citizens must remain indoors. The suspect Tellem is believed to be armed and dangerous."),
+                Prop("poster", 9.5f, 43.5f, text = "WANTED: Mr. Tellem. Terrorism. That is your face, pasted up fresh."),
+                Prop("poster", 2.5f, 33.5f), Prop("poster", 10.5f, 22.5f), Prop("poster", 9.5f, 4.5f),
+                Prop("news", 11.5f, 45.5f, text = "HEADLINE: CLERK BEHIND CITY BOMBING. There was no bombing."),
+                Prop("stuff", 5.5f, 45.5f, text = "Your old apartment is two streets over. Everything you owned, on the floor."),
+                Prop("car", 13.0f, 6.5f, w = 2), Prop("car", 2.0f, 5.5f, w = 2),
+                Prop("stand", 10.5f, 8.5f, w = 3),
             ),
         ),
         // ------------------------------------------------------------------ 2

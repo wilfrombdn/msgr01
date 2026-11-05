@@ -69,6 +69,13 @@ class StealthLevelsTest {
     @Test fun everyBuildingCanBeBeatenUnseen() {
         val bad = ArrayList<String>()
         for ((i, spec) in StealthLevels.all.withIndex()) {
+            if (spec.walk) {   // a walking story has nobody to hide from; it just has to be walkable
+                val w = StealthWorld(spec)
+                val ok = w.route(w.startX.toInt() to w.startY.toInt(), w.contactX.toInt() to w.contactY.toInt()).isNotEmpty()
+                println("LEVEL ${i + 1} ${spec.building}: walking story, " + if (ok) "walkable" else "NOT WALKABLE")
+                if (!ok) bad += "${i + 1} ${spec.building}"
+                continue
+            }
             val secs = plan(spec)
             println("LEVEL ${i + 1} ${spec.building}: " + if (secs < 0) "NO SAFE ROUTE" else "safe route in ${"%.1f".format(secs)}s")
             if (secs < 0) bad += "${i + 1} ${spec.building}"
@@ -78,7 +85,7 @@ class StealthLevelsTest {
 
     @Test fun laterRoundsStayFair() {
         val bad = ArrayList<String>()
-        for ((i, spec) in StealthLevels.all.withIndex()) if (plan(spec, 1.25f) < 0) bad += "${i + 1} ${spec.building}"
+        for ((i, spec) in StealthLevels.all.withIndex()) if (!spec.walk && plan(spec, 1.25f) < 0) bad += "${i + 1} ${spec.building}"
         assertTrue("No unseen route when guards are faster in: $bad", bad.isEmpty())
     }
 }
@@ -132,8 +139,8 @@ class StealthChaseTest {
 
     @Test fun anArmedContactShootsTheGuardsChasingYou() {
         // level 1: stand near the newspaper vendor with every guard locked on from far away
-        val w = StealthWorld(StealthLevels.all[0]); w.px = 2.5f; w.py = 1.5f
-        for (g in w.guards) { g.lockOn(); g.x = 7.5f; g.y = 1.5f }   // all of them far along the top corridor
+        val w = StealthWorld(StealthLevels.all[1]); w.px = 2.5f; w.py = 1.5f
+        for ((i, g) in w.guards.withIndex()) { g.lockOn(); g.x = 5.5f + i; g.y = 1.5f + i }   // behind the wall (they cannot reach me), still locked on
         repeat(60) { w.update(0.05f, 0f, 0f, 0f) }
         assertTrue("every chaser should be shot", w.guards.all { it.dead })
     }

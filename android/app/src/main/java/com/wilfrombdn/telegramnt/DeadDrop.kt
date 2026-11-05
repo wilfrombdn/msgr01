@@ -14,6 +14,7 @@ import android.view.MotionEvent
 import android.view.View
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -66,6 +67,7 @@ internal class DeadDropView(
     private var tx = 0f; private var ty = 0f
     private var ix = 0f; private var iy = 0f; private var mag = 0f
     private var clueT = 0f
+    private var scrollY = 0f                       // pixel levels taller than the screen: the first tile row on screen
 
     // screen -> tiles
     private var T = 1f; private var offX = 0f; private var offY = 0f
@@ -118,7 +120,7 @@ internal class DeadDropView(
     /** The courier follows the finger: how far it is from him sets how fast (and how loudly) he moves. */
     private fun aimAtFinger() {
         if (!touching || world.state != StealthWorld.State.PLAY) { mag = 0f; return }
-        val sx = offX + world.px * T; val sy = offY + world.py * T
+        val sx = offX + world.px * T; val sy = offY + (world.py - scrollY) * T
         val dist = hypot(tx - sx, ty - sy) / T          // in tiles
         if (dist < 0.45f) { mag = 0f; return }
         ix = (tx - sx) / (dist * T); iy = (ty - sy) / (dist * T)
@@ -129,7 +131,7 @@ internal class DeadDropView(
         var best: Prop? = null; var bd = 99f; var bi = -1
         if (world.state == StealthWorld.State.PLAY) for ((i, pr) in spec.props.withIndex()) {
             if (pr.text == null) continue
-            val reach = if (pr.kind == "window") 2.1f else 1.15f      // you can hear a radio from further off
+            val reach = if (pr.kind == "window") (if (spec.walk) 2.8f else 2.1f) else 1.15f      // you can hear a radio from further off
             val dd = hypot(world.px - pr.x, world.py - pr.y)
             if (dd < reach && dd < bd) { bd = dd; best = pr; bi = i }
         }
@@ -192,13 +194,19 @@ internal class DeadDropView(
         val fade = 1f - bc
         val pix = pixelScene
         if (pix != null) {
-            // pixel-art level: the scene is drawn small and scaled up by a whole number so every pixel is the same size
-            val sc = max(1, (min(w / world.cols, (h - top - bottom) / world.rows) / 16f).toInt())
+            // pixel-art level: the scene is drawn small and scaled up by a whole number so every pixel is the same size.
+            // Tall maps scroll: the view follows the courier (kept to whole art pixels so nothing shimmers).
+            val sc = max(1, (w / (world.cols * 16f)).toInt())
             T = 16f * sc
-            offX = ((w - T * world.cols) / 2f).toInt().toFloat(); offY = (top + (h - top - bottom - T * world.rows) / 2f).toInt().toFloat()
+            offX = ((w - T * world.cols) / 2f).toInt().toFloat(); offY = top
+            val availH = h - top - bottom
+            val viewRows = min(world.rows.toFloat(), floor((availH / T)))
+            scrollY = (world.py - viewRows * 0.68f).coerceIn(0f, world.rows - viewRows)   // look ahead: you sit low on the screen
+            val srcTop = (scrollY * 16f).toInt()
             c.drawColor(0xFF03050A.toInt())
-            rect.set(offX, offY, offX + T * world.cols, offY + T * world.rows)
-            c.drawBitmap(pix.render(clock, read, bc), null, rect, nearest)
+            val src = android.graphics.Rect(0, srcTop, pix.W, srcTop + (viewRows * 16f).toInt())
+            rect.set(offX, offY, offX + T * world.cols, offY + viewRows * T)
+            c.drawBitmap(pix.render(clock, read, bc), src, rect, nearest)
         } else {
         c.save(); c.translate(offX, offY); c.scale(T, T)
         drawFloor(c, pal)
@@ -788,7 +796,7 @@ internal class DeadDropView(
     /** The finger: a line from the courier to where you are touching, and a ring showing the sneak zone. */
     private fun drawThumb(c: Canvas) {
         if (world.state != StealthWorld.State.PLAY) return
-        val sx = offX + world.px * T; val sy = offY + world.py * T
+        val sx = offX + world.px * T; val sy = offY + (world.py - scrollY) * T
         val run = mag > 0.5f
         val col = if (run) 0xFFFF8A4D.toInt() else Color.WHITE
         // inside this ring he sneaks quietly; beyond it he runs
