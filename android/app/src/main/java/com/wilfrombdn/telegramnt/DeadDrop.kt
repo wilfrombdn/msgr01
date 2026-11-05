@@ -31,8 +31,9 @@ internal fun MainActivity.showDeadDrop() {
     val prefs = getSharedPreferences("dead_drop", Context.MODE_PRIVATE)
     val game = DeadDropView(this, prefs.getInt("level", 0), prefs.getBoolean("sound", false),
         saveLevel = { prefs.edit().putInt("level", it).apply() }, saveSound = { prefs.edit().putBoolean("sound", it).apply() }, onExit = { showSettings() })
-    // restart (the level you are on) on the left, exit on the right, across from the title
-    setContentView(page(topBar("Dead Letter", "Six letters. One truth.", left = icon(R.drawable.ic_restart) { game.restart() }, icon(R.drawable.ic_close) { showSettings() }), game))
+    // on the right: restart (tap = this level, hold = back to level 1) next to exit
+    val again = icon(R.drawable.ic_restart) { game.restart() }.apply { setOnLongClickListener { game.restartAll(); toast("Back to level 1"); true } }
+    setContentView(page(topBar("Dead Letter", "Six letters. One truth.", null, again, icon(R.drawable.ic_close) { showSettings() }), game))
 }
 
 internal class DeadDropView(
@@ -63,10 +64,17 @@ internal class DeadDropView(
     private var pixelScene: PixelScene? = null
     private val nearest = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
 
-    // thumb: the courier walks toward your finger. Close to him = a quiet sneak; far from him = a loud sprint.
-    private var touching = false; private var soundTap = false
-    private var tx = 0f; private var ty = 0f
+    // the joystick at the bottom left: how far you push sets how fast (and how loudly) the courier moves; in the maze it picks a direction
+    private var joyActive = false; private var soundTap = false; private var touchWasJoy = false
+    private var knobX = 0f; private var knobY = 0f
     private var ix = 0f; private var iy = 0f; private var mag = 0f
+    private var pacWant = -1
+
+    // level 2 has three parts: the walk (0), the sewer maze (1) and the maintenance room (2); the screen fades between them
+    private var stage = 0
+    private var pac: PacWorld? = null
+    private var pacScene: PacScene? = null
+    private var fade = 0f; private var fadeDir = 0; private var pendingStage = -1
     private var clueT = 0f
     private var scrollY = 0f                       // pixel levels taller than the screen: the first tile row on screen
 
@@ -84,18 +92,29 @@ internal class DeadDropView(
     /** Start the level you are on again from the beginning. */
     internal fun restart() { load(false) }
 
+    /** Hold the restart button: back to level one. */
+    internal fun restartAll() { levelIdx = 0; saveLevel(0); load(false) }
+
     // for the picture-taking test
     internal fun debugLevel(i: Int) { levelIdx = i; load(false); sinceLoad = 9f; attempt = 2 }
     internal fun debugAdvance(sec: Float, ix: Float = 0f, iy: Float = 0f, mag: Float = 0f) { var t = sec; while (t > 0f) { val s = min(t, 0.025f); clock += s; sinceLoad += s; world.update(s, ix, iy, mag); updateClue(s); t -= s } }
     internal fun debugWorld() = world
     internal fun debugIntro() { attempt = 1; sinceLoad = 1.5f }
+    internal fun debugStage(s: Int) { pendingStage = s; switchStage(); fade = 0f; fadeDir = 0 }
+    internal fun debugPac() = pac
+    internal fun debugPacAdvance(sec: Float, want: Int = -1) { var t = sec; while (t > 0f) { val s = min(t, 0.02f); clock += s; pac?.update(s, want); t -= s } }
+    internal fun debugPacWant(w: Int) { pacWant = w }
+    internal fun debugStageTick(dt: Float) = stageTick(dt)
+    internal fun debugStage() = stage
+    internal fun debugFadeDone() = fadeDir == 0 && fade <= 0.001f
 
     private fun load(retry: Boolean) {
         world = StealthWorld(spec)
         pixelScene = if (spec.pixel) PixelScene(spec, world) else null
+        stage = 0; pac = null; pacScene = null; fade = 0f; fadeDir = 0; pendingStage = -1; pacWant = -1; joyActive = false
         sinceLoad = if (retry) 99f else 0f
         if (!retry) { attempt = 1; read.clear() }
-        touching = false; mag = 0f; clueText = null; clueAlpha = 0f
+        mag = 0f; clueText = null; clueAlpha = 0f
         music.setHeat(spec.heat); music.setCalm(false)
     }
 
@@ -110,8 +129,14 @@ internal class DeadDropView(
                 val raw = ((now - last) / 1e9f).coerceAtMost(0.05f)
                 var dt = raw
                 clock += dt; sinceLoad += dt
-                aimAtFinger()
-                while (dt > 0f) { val s = min(dt, 0.025f); world.update(s, ix, iy, if (sinceLoad < 0.4f) 0f else mag); dt -= s }
+                stageTick(raw)
+                var left = dt
+                while (left > 0f) {
+                    val s = min(left, 0.025f)
+                    val pw = pac
+                    if (pw != null) { if (fadeDir <= 0) pw.update(s, pacWant) } else world.update(s, ix, iy, if (sinceLoad < 0.4f) 0f else mag)
+                    left -= s
+                }
                 updateClue(raw)
                 if (lastLevel && world.state == StealthWorld.State.WON) music.setCalm(true)
             }
@@ -121,21 +146,60 @@ internal class DeadDropView(
         }
     }
 
-    /** The courier follows the finger: how far it is from him sets how fast (and how loudly) he moves. */
-    private fun aimAtFinger() {
-        if (!touching || world.state != StealthWorld.State.PLAY) { mag = 0f; return }
-        val sx = offX + world.px * T; val sy = offY + (world.py - scrollY) * T
-        val dist = hypot(tx - sx, ty - sy) / T          // in tiles
-        if (dist < 0.45f) { mag = 0f; return }
-        ix = (tx - sx) / (dist * T); iy = (ty - sy) / (dist * T)
-        mag = ((dist - 0.45f) / 3.2f).coerceIn(0f, 1f)
+    private val joyR get() = 56f * d
+    private val joyCx get() = 24f * d + joyR + 6f * d
+    private val joyCy get() = height - 30f * d - joyR
+
+    /** Read the joystick: the courier walks the way you push, faster the harder you push (a light push sneaks quietly). */
+    private fun readJoystick(x: Float, y: Float) {
+        val dx = x - joyCx; val dy = y - joyCy
+        val len = hypot(dx, dy)
+        val shown = min(len, joyR)
+        if (len > 0.001f) { knobX = dx / len * shown; knobY = dy / len * shown } else { knobX = 0f; knobY = 0f }
+        val dead = 7f * d
+        if (len < dead) { mag = 0f; return }
+        ix = dx / len; iy = dy / len
+        mag = ((shown - dead) / (joyR - dead)).coerceIn(0f, 1f)
+        if (mag > 0.35f) pacWant = if (kotlin.math.abs(ix) > kotlin.math.abs(iy)) (if (ix > 0) PacWorld.RIGHT else PacWorld.LEFT) else (if (iy > 0) PacWorld.DOWN else PacWorld.UP)
+    }
+
+    /** Moves level 2 from one part to the next, with a fade to black between. */
+    private fun stageTick(dt: Float) {
+        if (fadeDir > 0) { fade += dt / 0.8f; if (fade >= 1f) { fade = 1f; switchStage(); fadeDir = -1 } }
+        else if (fadeDir < 0) { fade -= dt / 0.8f; if (fade <= 0f) { fade = 0f; fadeDir = 0 } }
+        else if (stage == 0 && world.enteredManhole && spec.pac != null) { pendingStage = 1; fadeDir = 1 }
+        else if (stage == 1) {
+            val pw = pac
+            if (pw != null) {
+                if (pw.phase == PacWorld.Phase.WON && pw.phaseT > 0.9f && spec.room != null) { pendingStage = 2; fadeDir = 1 }
+                if (pw.phase == PacWorld.Phase.CAUGHT && world.state != StealthWorld.State.CAUGHT) { world.state = StealthWorld.State.CAUGHT; world.spotter = "A guard caught you."; world.stateT = 0f }
+            }
+        }
+    }
+
+    private fun switchStage() {
+        music.setCalm(false)
+        if (pendingStage == 1) {
+            stage = 1; pac = PacWorld(spec.pac!!); pacScene = PacScene(pac!!); pacWant = -1; sinceLoad = 99f; joyActive = false; mag = 0f; music.setHeat(4)
+        } else if (pendingStage == 2) {
+            stage = 2; pac = null; pacScene = null
+            val rs = spec.room!!
+            world = StealthWorld(rs); pixelScene = PixelScene(rs, world)
+            sinceLoad = 99f; read.clear(); clueText = null; clueAlpha = 0f; joyActive = false; mag = 0f; music.setHeat(1)
+        }
+        pendingStage = -1
+    }
+
+    private fun restartPac() {
+        pac = PacWorld(spec.pac!!); pacScene = PacScene(pac!!); pacWant = -1
+        world.state = StealthWorld.State.PLAY; world.stateT = 0f
     }
 
     private fun updateClue(dt: Float) {
         var best: Prop? = null; var bd = 99f; var bi = -1
-        if (world.state == StealthWorld.State.PLAY) for ((i, pr) in spec.props.withIndex()) {
+        if (world.state == StealthWorld.State.PLAY && pac == null) for ((i, pr) in world.spec.props.withIndex()) {
             if (pr.text == null) continue
-            val reach = if (pr.kind == "window") (if (spec.walk) 2.8f else 2.1f) else 1.15f      // you can hear a radio from further off
+            val reach = if (pr.kind == "window") (if (world.spec.walk) 2.8f else 2.1f) else 1.15f      // you can hear a radio from further off
             val dd = hypot(world.px - pr.x, world.py - pr.y)
             if (dd < reach && dd < bd) { bd = dd; best = pr; bi = i }
         }
@@ -151,11 +215,12 @@ internal class DeadDropView(
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (e.x > width - 52f * d && e.y < 46f * d) { soundTap = true; return true }
-                tx = e.x; ty = e.y; touching = true
+                touchWasJoy = hypot(e.x - joyCx, e.y - joyCy) < joyR * 1.7f
+                if (touchWasJoy) { joyActive = true; readJoystick(e.x, e.y) }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (soundTap) return true
-                tx = e.x; ty = e.y
+                if (joyActive) readJoystick(e.x, e.y)
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (soundTap) {
@@ -163,9 +228,9 @@ internal class DeadDropView(
                     if (e.actionMasked == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); if (soundOn) music.start() else music.stop() }
                     return true
                 }
-                touching = false; mag = 0f
-                if (e.actionMasked == MotionEvent.ACTION_UP) when (world.state) {
-                    StealthWorld.State.CAUGHT -> if (world.stateT > 0.5f) { attempt++; load(true) }
+                joyActive = false; mag = 0f; knobX = 0f; knobY = 0f
+                if (e.actionMasked == MotionEvent.ACTION_UP && !touchWasJoy) when (world.state) {
+                    StealthWorld.State.CAUGHT -> if (world.stateT > 0.5f) { attempt++; if (stage == 1) restartPac() else load(true) }
                     StealthWorld.State.WON -> if (lastLevel) {
                         if (wt > 12f) { saveLevel(0); music.stop(); onExit() }
                     } else if (wt > 0.8f) { levelIdx++; saveLevel(levelIdx); load(false) }
@@ -197,7 +262,10 @@ internal class DeadDropView(
 
         val fade = 1f - bc
         val pix = pixelScene
-        if (pix != null) {
+        val ps = pacScene; val pw = pac
+        if (ps != null && pw != null) {
+            drawPacStage(c, w, h, ps, pw)
+        } else if (pix != null) {
             // pixel-art level: the scene is drawn small and scaled up by a whole number so every pixel is the same size.
             // Tall maps scroll: the view follows the courier (kept to whole art pixels so nothing shimmers).
             val sc = max(1, (w / (world.cols * 16f)).toInt())
@@ -206,6 +274,7 @@ internal class DeadDropView(
             val availH = h - top - bottom
             val viewRows = min(world.rows.toFloat(), floor((availH / T)))
             scrollY = (world.py - viewRows * 0.68f).coerceIn(0f, world.rows - viewRows)   // look ahead: you sit low on the screen
+            offY = top + max(0f, ((availH - viewRows * T) / 2f).toInt().toFloat())          // a short map sits in the middle
             val srcTop = (scrollY * 16f).toInt()
             c.drawColor(0xFF03050A.toInt())
             val src = android.graphics.Rect(0, srcTop, pix.W, srcTop + (viewRows * 16f).toInt())
@@ -233,10 +302,11 @@ internal class DeadDropView(
         drawMarks(c)
         drawLight(c, w, h, pal)
         drawHud(c, w, h, pal)
-        if (touching) drawThumb(c)
+        drawJoystick(c)
         drawClue(c, w, h, pal)
         drawSay(c, w, h, pal)
         drawOverlays(c, w, h, pal)
+        drawFade(c, w, h)
     }
 
     private fun drawFloor(c: Canvas, pal: Palette) {
@@ -690,7 +760,7 @@ internal class DeadDropView(
     private fun drawLight(c: Canvas, w: Float, h: Float, pal: Palette) {
         val calm = 1f - bc
         p.style = Paint.Style.FILL
-        p.shader = RadialGradient(w / 2, h / 2, max(w, h) * 0.75f, intArrayOf(0x00000000, 0x00000000, (if (spec.pixel) 0x60000000 else 0xA0000000).toInt()), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        p.shader = RadialGradient(w / 2, h / 2, max(w, h) * 0.75f, intArrayOf(0x00000000, 0x00000000, (if (world.spec.pixel || pacScene != null) 0x60000000 else 0xA0000000).toInt()), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, p); p.shader = null
         // the city's mood: the hotter the manhunt, the redder the edges; the last levels flash like sirens
         val heat = spec.heat
@@ -787,7 +857,7 @@ internal class DeadDropView(
     private fun drawSay(c: Canvas, w: Float, h: Float, pal: Palette) {
         val t = world.sayText ?: return
         if (world.state != StealthWorld.State.PLAY) return
-        panel(c, w, h, pal, spec.contact.uppercase() + ": “" + t + "”", 1f, (world.sayT * 45f).toInt())
+        panel(c, w, h, pal, (world.spec.lead?.speaker ?: world.spec.worker?.speaker ?: spec.contact.uppercase()) + ": “" + t + "”", 1f, (world.sayT * 45f).toInt())
     }
 
     private fun panel(c: Canvas, w: Float, h: Float, pal: Palette, t: String, f: Float, typed: Int) {
@@ -795,7 +865,7 @@ internal class DeadDropView(
         p.style = Paint.Style.FILL; p.typeface = mono; p.textSize = 13f * d; p.textAlign = Paint.Align.LEFT; p.letterSpacing = 0f
         val lines = clueLines(t, w - 60f * d)
         val ph = lines.size * 18f * d + 18f * d
-        val y0 = h - 24f * d - ph
+        val y0 = min(h - 24f * d, joyCy - joyR - 14f * d) - ph   // above the joystick
         p.color = a(0xFF05070A.toInt(), (f * 0xD0).toInt()); rect.set(18f * d, y0, w - 18f * d, y0 + ph); c.drawRoundRect(rect, 4f * d, 4f * d, p)
         p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(pal.accent, (f * 0x90).toInt()); c.drawRoundRect(rect, 4f * d, 4f * d, p)
         p.style = Paint.Style.FILL; p.color = a(Color.WHITE, (f * 0xF0).toInt())
@@ -809,18 +879,55 @@ internal class DeadDropView(
         }
     }
 
-    /** The finger: a line from the courier to where you are touching, and a ring showing the sneak zone. */
-    private fun drawThumb(c: Canvas) {
-        if (world.state != StealthWorld.State.PLAY) return
-        val sx = offX + world.px * T; val sy = offY + (world.py - scrollY) * T
-        val run = mag > 0.5f
-        val col = if (run) 0xFFFF8A4D.toInt() else Color.WHITE
-        // inside this ring he sneaks quietly; beyond it he runs
-        p.style = Paint.Style.STROKE; p.strokeWidth = 1.2f * d; p.color = a(Color.WHITE, 0x22)
-        p.pathEffect = DashPathEffect(floatArrayOf(5f * d, 7f * d), 0f); c.drawCircle(sx, sy, 2.05f * T, p)
-        p.strokeWidth = 1.6f * d; p.color = a(col, if (run) 0x70 else 0x50); c.drawLine(sx, sy, tx, ty, p); p.pathEffect = null
-        p.style = Paint.Style.FILL; p.color = a(col, if (run) 0x66 else 0x40); c.drawCircle(tx, ty, 18f * d, p)
-        p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f * d; p.color = a(col, 0x90); c.drawCircle(tx, ty, 18f * d, p)
+    /** The joystick at the bottom left. Push it the way you want to go; a light push walks quietly, a hard push runs. */
+    private fun drawJoystick(c: Canvas) {
+        val playing = if (pac != null) pac?.phase == PacWorld.Phase.PLAY else world.state == StealthWorld.State.PLAY
+        if (!playing && !joyActive) return
+        val cx = joyCx; val cy = joyCy; val r = joyR
+        val run = mag > 0.5f && pac == null
+        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(cx, cy, r + 4f * d, p)
+        p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; p.color = a(Color.WHITE, 0x44); c.drawCircle(cx, cy, r, p)
+        p.strokeWidth = 1f * d; p.color = a(Color.WHITE, 0x22); c.drawCircle(cx, cy, r * 0.5f, p)
+        // little arrows to show the four ways
+        p.style = Paint.Style.FILL; p.color = a(Color.WHITE, 0x44)
+        for (k in 0..3) {
+            val ax = cx + kotlin.math.cos(k * Math.PI / 2).toFloat() * (r - 9f * d); val ay = cy + kotlin.math.sin(k * Math.PI / 2).toFloat() * (r - 9f * d)
+            c.drawCircle(ax, ay, 2f * d, p)
+        }
+        p.color = a(if (run) 0xFFFF8A4D.toInt() else Color.WHITE, if (joyActive) 0x99 else 0x66)
+        c.drawCircle(cx + knobX, cy + knobY, 22f * d, p)
+        p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f * d; p.color = a(Color.WHITE, 0xB0); c.drawCircle(cx + knobX, cy + knobY, 22f * d, p)
+    }
+
+    /** The screen goes to black between the parts of a level. */
+    private fun drawFade(c: Canvas, w: Float, h: Float) {
+        if (fade <= 0.01f) return
+        p.style = Paint.Style.FILL; p.color = a(0xFF000000.toInt(), (fade * 255).toInt()); c.drawRect(0f, 0f, w, h, p)
+    }
+
+    /** The sewer maze: drawn whole, scaled by a whole number, with the fragment count and "READY!" around it. */
+    private fun drawPacStage(c: Canvas, w: Float, h: Float, ps: PacScene, pw: PacWorld) {
+        val top = 44f * d; val bottom = 44f * d
+        val sc = max(1, min(w / ps.W, (h - top - bottom) / ps.H).toInt())
+        T = 16f * sc
+        offX = ((w - ps.W * sc) / 2f).toInt().toFloat(); offY = (top + (h - top - bottom - ps.H * sc) / 2f).toInt().toFloat()
+        scrollY = 0f
+        c.drawColor(0xFF03080C.toInt())
+        rect.set(offX, offY, offX + ps.W * sc, offY + ps.H * sc)
+        c.drawBitmap(ps.render(clock), null, rect, nearest)
+        p.style = Paint.Style.FILL; p.textAlign = Paint.Align.CENTER; p.typeface = monoBold
+        if (pw.phase == PacWorld.Phase.READY || (pw.phase == PacWorld.Phase.INTRO && pw.lidClose >= 1f)) {
+            p.textSize = 14f * d; p.letterSpacing = 0.15f; p.color = 0xFFFFE04D.toInt()
+            c.drawText("READY!", offX + pw.w * T / 2f, offY + (pw.hatchY + 3.1f) * T, p)
+        }
+        // how many fragments are left, and the door
+        p.letterSpacing = 0.05f; p.textSize = 12.5f * d
+        val have = pw.total - pw.left
+        p.color = if (pw.doorOpen) 0xFF3BFF9A.toInt() else 0xFFFFD84D.toInt()
+        c.drawText(if (pw.doorOpen) "THE DOOR IS OPEN. GO!" else "KEY FRAGMENTS  $have / ${pw.total}", w / 2f, offY + ps.H * sc + 22f * d, p)
+        p.typeface = mono; p.letterSpacing = 0f; p.textSize = 11.5f * d; p.color = a(Color.WHITE, 0x99)
+        if (pw.phase != PacWorld.Phase.PLAY || pw.eaten < 6) wrap(c, spec.pacTip, w / 2f, offY + ps.H * sc + 42f * d, w - 40f * d, 15f * d)
+        p.letterSpacing = 0f
     }
 
     private fun drawBigLetter(c: Canvas, cx: Float, cy: Float, n: Int, alpha: Float) {

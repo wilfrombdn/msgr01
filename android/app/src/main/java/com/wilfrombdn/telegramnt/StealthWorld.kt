@@ -44,11 +44,23 @@ internal class LevelSpec(
     val armed: Boolean = true,   // does the contact shoot the guards chasing you? (the priest won't)
     val cover: String = "cabinet",   // what the tall cover blocks look like: "cabinet" or "bin"
     val pixel: Boolean = false,      // draw this level as night-time pixel art (see DeadDropPixel.kt)
+    val lead: LeadSpec? = null,      // a walking level where the contact leads you to a manhole
+    val worker: WorkerSpec? = null,  // a walking level where a worker takes your letter and points you to a ladder
+    val pac: PacSpec? = null,        // a maze (played like Pac-Man) that follows the walk
+    val room: LevelSpec? = null,     // the walking scene that follows the maze
+    val theme: String = "street",    // "street" or "sewer"
+    val pacTip: String = "",         // how to play the maze
     val walk: Boolean = false,       // a walking story: nobody can catch you, things just happen as you pass
     val scene: SceneSpec? = null,    // the scripted moment for a walking level
     val flashers: List<Pair<Float, Float>> = emptyList(),   // flashing red and blue lights (police cars out of sight)
     val beams: List<CamSpec> = emptyList(),                 // torch beams sweeping about (for show; they do not see you)
 )
+
+/** The contact walks ahead of you to a manhole, flips the lid open, says farewell, and waits while you go down. */
+internal class LeadSpec(val path: List<Pair<Float, Float>>, val manholeX: Float, val manholeY: Float, val farewell: String, val speaker: String = "NEWSPAPER VENDOR")
+
+/** A worker wrenching on a pipe: he turns, lights a cigarette, takes your letter, says [line] and points to the ladder. */
+internal class WorkerSpec(val ladderX: Float, val ladderY: Float, val line: String, val speaker: String = "MAINTENANCE WORKER")
 
 /**
  * The scripted moment of a walking level: a cop stands at a fork, hidden in fog. When you get past [triggerY] the fog clears,
@@ -334,6 +346,78 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
     /** Which step of crossing himself the contact is on (0 forehead, 1 chest, 2 left shoulder, 3 right shoulder), or -1. */
     val crossFrame: Int get() { if (sayText == null) return -1; val u = sayT - 1.8f; return if (u < 0f || u > 2.8f) -1 else (u / 0.7f).toInt().coerceIn(0, 3) }
 
+    // ---------- the walk to the manhole (level 2, first part) ----------
+    var lidOpen = 0f                 // 0 shut .. 1 open
+    var enteredManhole = false
+    var leadStage = 0
+    private var leadIdx = 0
+    private var leadT = 0f
+    private val leadPath = ArrayDeque<Pair<Int, Int>>()
+    private var leadPathFor = -1
+
+    /** The contact leads you to a manhole, opens it, says farewell and crosses himself, then waits for you to go down. */
+    private fun leadUpdate(dt: Float, l: LeadSpec) {
+        leadT += dt
+        if (sayText != null) sayT += dt
+        when (leadStage) {
+            0 -> {
+                val tgt = l.path.getOrNull(leadIdx)
+                val near = hypot(px - contactX, py - contactY) < 5.5f
+                contactWalking = false
+                if (tgt == null) { leadStage = 1; leadT = 0f; return }
+                if (leadPathFor != leadIdx) {
+                    leadPathFor = leadIdx; leadPath.clear()
+                    leadPath.addAll(route(floor(contactX).toInt() to floor(contactY).toInt(), floor(tgt.first).toInt() to floor(tgt.second).toInt()))
+                }
+                if (!near) { turnContact(atan2(py - contactY, px - contactX), dt, 3f); return }   // he waits for me, watching
+                val step = leadPath.firstOrNull()
+                if (step == null) { leadIdx++; return }   // this waypoint is reached: on to the next
+                val dx = step.first + 0.5f - contactX; val dy = step.second + 0.5f - contactY; val d = hypot(dx, dy)
+                turnContact(atan2(dy, dx), dt, 6f)
+                val mv = min(1.4f * dt, d)
+                if (d > 0.001f) { contactX += dx / d * mv; contactY += dy / d * mv }
+                if (d - mv < 0.02f) leadPath.removeFirst()
+                contactWalking = true
+            }
+            1 -> {   // at the manhole: he flips the lid open
+                contactWalking = false
+                turnContact(atan2(l.manholeY - contactY, l.manholeX - contactX), dt, 4f)
+                lidOpen = (lidOpen + dt / 1.6f).coerceAtMost(1f)
+                if (lidOpen >= 1f) { leadStage = 2; leadT = 0f; sayText = l.farewell; sayT = 0f }
+            }
+            2 -> { turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (sayT > 5.4f) { leadStage = 3; leadT = 0f } }
+            3 -> { turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (hypot(px - l.manholeX, py - l.manholeY) < 0.75f) enteredManhole = true }
+        }
+    }
+
+    // ---------- the maintenance room (level 2, last part) ----------
+    var workerStage = 0
+    var workerPose = 0               // 0 none, 1 wrenching on the pipe, 2 smoking, 3 pointing
+    var workerPointDir = 3           // which way he points (UP/LEFT/DOWN/RIGHT)
+    var letterGiven = false
+    private var workerT = 0f
+
+    /** He wrenches on a pipe, turns, lights a cigarette, takes your letter, says his piece, and points to the ladder. */
+    private fun workerUpdate(dt: Float, wk: WorkerSpec) {
+        workerT += dt
+        if (sayText != null) sayT += dt
+        when (workerStage) {
+            0 -> { workerPose = 1; contactFace = -PI.toFloat() / 2; if (hypot(px - contactX, py - contactY) < 7f) { workerStage = 1; workerT = 0f } }
+            1 -> { workerPose = 0; turnContact(atan2(py - contactY, px - contactX), dt, 1.6f); if (workerT > 1.4f) { workerStage = 2; workerT = 0f } }
+            2 -> { workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (workerT > 2.6f) { workerStage = 3; workerT = 0f } }
+            3 -> {
+                workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f)
+                if (hypot(px - contactX, py - contactY) < 2.0f) { letterGiven = true; sayText = wk.line; sayT = 0f; workerStage = 4; workerT = 0f }
+            }
+            4 -> { workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (workerT > 2.4f) { workerStage = 5; workerT = 0f } }
+            5 -> {
+                workerPose = 3; workerPointDir = if (wk.ladderX >= contactX) PacWorld.RIGHT else PacWorld.LEFT
+                contactFace = PI.toFloat() / 2
+                if (hypot(px - wk.ladderX, py - wk.ladderY) < 0.9f) { state = State.WON; stateT = 0f; wonDelay = 0f }
+            }
+        }
+    }
+
     private fun turnTo(a: Actor, target: Float, dt: Float, rate: Float): Boolean {
         var diff = target - a.face
         while (diff > PI) diff -= 2 * PI.toFloat(); while (diff < -PI) diff += 2 * PI.toFloat()
@@ -355,6 +439,8 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
      * out to meet me, waits, and (when I get close) says something and crosses himself.
      */
     private fun sceneUpdate(dt: Float) {
+        spec.lead?.let { leadUpdate(dt, it); return }
+        spec.worker?.let { workerUpdate(dt, it); return }
         val s = spec.scene ?: return
         val a = cop ?: return
         sceneT += dt
@@ -538,7 +624,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
 
         if (spec.walk) {   // a walking story: nobody can catch you
             sceneUpdate(dt)
-            if (hypot(px - contactX, py - contactY) < 0.85f) { state = State.WON; stateT = 0f; wonDelay = 0f }
+            if (spec.lead == null && spec.worker == null && hypot(px - contactX, py - contactY) < 0.85f) { state = State.WON; stateT = 0f; wonDelay = 0f }
             return
         }
 

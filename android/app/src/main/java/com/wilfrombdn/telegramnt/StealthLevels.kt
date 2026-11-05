@@ -35,6 +35,45 @@ internal object StealthLevels {
         return g.map { String(it) }
     }
 
+    /** The new area for level 2: two alleys and a passage up to a yard with a manhole in the middle. 16 wide, 30 tall. */
+    private fun undergroundMap(): List<String> {
+        val g = Array(30) { CharArray(16) { '#' } }
+        fun fill(c0: Int, r0: Int, c1: Int, r1: Int) { for (r in r0..r1) for (c in c0..c1) g[r][c] = '.' }
+        fun put(c: Int, r: Int, ch: Char) { g[r][c] = ch }
+        fill(3, 4, 12, 13)      // the yard
+        fill(6, 14, 8, 17)      // the passage up to it
+        fill(2, 18, 13, 20)     // alley A
+        fill(2, 21, 4, 25)      // the passage between the alleys
+        fill(2, 26, 14, 28)     // alley B (you start at its east end)
+        put(12, 27, 'S'); put(13, 27, 'C')
+        for ((c, r) in listOf(4 to 12, 12 to 5, 4 to 18, 11 to 18, 6 to 26, 11 to 26, 2 to 22)) put(c, r, 'c')      // bins
+        for ((c, r) in listOf(12 to 12, 3 to 5, 13 to 20)) put(c, r, 'd')                                           // crates
+        for ((c, r) in listOf(4 to 6, 11 to 11, 9 to 19, 3 to 23, 8 to 27)) put(c, r, 'L')                          // lamps
+        return g.map { String(it) }
+    }
+
+    /** The maintenance room under the street: you come in at the bottom left, the worker is by the pipes on the back wall, the ladder is across the room. */
+    private fun maintenanceRoom(): LevelSpec {
+        val g = Array(14) { CharArray(16) { '#' } }
+        fun fill(c0: Int, r0: Int, c1: Int, r1: Int) { for (r in r0..r1) for (c in c0..c1) g[r][c] = '.' }
+        fun put(c: Int, r: Int, ch: Char) { g[r][c] = ch }
+        fill(2, 3, 13, 11)
+        put(3, 10, 'S'); put(5, 3, 'C')
+        for ((c, r) in listOf(13 to 10, 2 to 6, 9 to 10)) put(c, r, 'c')
+        for ((c, r) in listOf(8 to 5, 11 to 8)) put(c, r, 'L')
+        return LevelSpec(
+            "The Maintenance Room", "", "", "", "Maintenance worker", "", "", 1,
+            pal(0xFF0B1A16, 0xFF11302A, 0xFF030907, 0xFF1B5A4A, 0xFF5EE6A8, 0xFFFFC27A, 0xFFFF9F43),
+            g.map { String(it) },
+            cover = "bin", pixel = true, walk = true, theme = "sewer",
+            worker = WorkerSpec(12.5f, 3.5f, "You shouldn't have come here."),
+            props = listOf(
+                Prop("none", 12.5f, 4.5f, text = "A ladder, up to the street."),
+                Prop("ladder", 12.5f, 2.5f),
+            ),
+        )
+    }
+
     val all: List<LevelSpec> = listOf(
         // ------------------------------------------------------------------ 1
         // A walking story, not a puzzle: you walk a long, zig-zag alley behind a police cordon. Radios blare from open windows,
@@ -42,7 +81,7 @@ internal object StealthLevels {
         LevelSpec(
             "The Backstreets", "Deliver letter I to the newspaper vendor.",
             "You are newly wanted: \"Mr. Tellem\", terrorist. The police have the streets, and every window has a radio.",
-            "Touch the screen and he walks toward your finger. Keep it close to him to walk slowly. Listen as you pass the windows.",
+            "Use the joystick at the bottom left to walk. A light push walks slowly and quietly. Listen as you pass the windows.",
             "Newspaper vendor", "I thought you were dead.", "Someone inside the government helped you escape.", 0,
             pal(0xFF0B1230, 0xFF121D47, 0xFF03050A, 0xFF1B2B66, 0xFF29F0FF, 0xFFDCEBFF, 0xFFFF3B55),
             backstreetsMap(),
@@ -74,38 +113,39 @@ internal object StealthLevels {
             ),
         ),
         // ------------------------------------------------------------------ 2
+        // Three parts: a walk (your contact leads you to a manhole and sends you down), the sewer maze played like Pac-Man, and
+        // a maintenance room where a worker takes your letter and points you to a ladder.
         LevelSpec(
-            "The Underground", "Deliver letter II to the maintenance worker.", "Transit security has your description. The stations are being searched.",
-            "Grab the badge to open the locked door. Doors block sight, too.",
+            "The Underground", "Deliver letter II to the maintenance worker.",
+            "Transit security has your description and every station is being searched. Your contact knows another way down.",
+            "Use the joystick at the bottom left to walk. Follow your contact.",
             "Maintenance worker", "You shouldn't have come here.", "The government has been erasing people from its records.", 1,
-            pal(0xFF0C1714, 0xFF14251F, 0xFF060C0A, 0xFF2A4A3E, 0xFF5EE6A8, 0xFFD8FFE6, 0xFFFF9F43),
-            listOf(
-                "#########",
-                "#C.#...k#",
-                "#..#....#",
-                "##D##.c.#",
-                "#.......#",
-                "#.c...c.#",
-                "#.......#",
-                "#.c.L.c.#",
-                "#.......#",
-                "#.c...c.#",
-                "#.......#",
-                "#.c...c.#",
-                "#.......#",
-                "#S......#",
-                "#########",
+            pal(0xFF0B1B24, 0xFF12303A, 0xFF03080C, 0xFF1B4A5A, 0xFF5EE6A8, 0xFFD8FFE6, 0xFFFF9F43),
+            undergroundMap(),
+            cover = "bin", pixel = true, walk = true,
+            lead = LeadSpec(
+                listOf(4.5f to 27.5f, 3.5f to 23.5f, 3.5f to 19.5f, 7.5f to 19.5f, 7.5f to 15.5f, 7.5f to 11.5f, 7.5f to 9.5f),
+                8.5f, 9.5f, "God keep you down there. I will pray for you.",
             ),
-            guards = listOf(
-                GuardSpec(listOf(1 to 6, 7 to 6), speed = 1.4f, pause = 1.2f),
-                GuardSpec(listOf(7 to 10, 1 to 10), speed = 1.4f, pause = 1.2f),
+            pac = PacMaze.sewer,
+            pacTip = "Steer with the joystick. Collect every key fragment, then reach the door at the top. The police hunt the way the old arcade ghosts did.",
+            room = maintenanceRoom(),
+            flashers = listOf(15.8f to 27.5f, 0.2f to 19.5f),
+            beams = listOf(
+                CamSpec(15.1f, 19.5f, 180f, 22f, 8.0f, 2f, range = 9f, half = 0.16f),
+                CamSpec(0.9f, 27.5f, 0f, 20f, 7.0f, 0f, range = 9f, half = 0.16f),
             ),
             props = listOf(
-                Prop("screen", 0.5f, 7.5f, text = "Every turnstile shows your photograph."),
-                Prop("screen", 8.5f, 5.5f),
-                Prop("notice", 0.5f, 11.5f, text = "MISSING: Mara Voss. Your former colleague."),
-                Prop("sign", 1.5f, 3.5f, text = "MAINTENANCE. Authorized personnel only."),
-                Prop("none", 7.5f, 1.5f, text = "A discarded security badge. Someone left in a hurry."),
+                Prop("window", 5.5f, 3.5f, text = "[TRANSIT RADIO] ...all underground services are suspended. Transit police are searching every platform for the man called Tellem."),
+                Prop("window", 10.5f, 3.5f, text = "[CHANNEL 9 NEWS] ...sources say the suspect may be using the old maintenance tunnels under the waterworks."),
+                Prop("window", 4.5f, 17.5f, text = "[POLICE DISPATCH] Units four through seven to the waterworks. Seal every sewer access. Nobody goes down."),
+                Prop("window", 11.5f, 17.5f, text = "[OLD KITCHEN RADIO] ...and still no word about Mara Voss. Seven weeks now. Seven weeks."),
+                Prop("window", 7.5f, 25.5f, text = "[TALK RADIO 880] ...they will not find him, folks, because there is no him. A name on a poster. Think about that."),
+                Prop("notice", 13.5f, 25.5f, text = "MISSING: Mara Voss. Your former colleague."),
+                Prop("poster", 2.5f, 17.5f), Prop("poster", 9.5f, 3.5f), Prop("poster", 6.5f, 25.5f),
+                Prop("sign", 7.5f, 3.5f, text = "WATERWORKS. Maintenance access only. No entry."),
+                Prop("manhole", 8.5f, 9.5f, text = "A manhole in the middle of the yard. The lid is rusted shut, or so it looks."),
+                Prop("stuff", 11.5f, 27.5f, text = "A bag, a coat, a thermos. Somebody ran from here."),
             ),
         ),
         // ------------------------------------------------------------------ 3
