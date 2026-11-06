@@ -414,7 +414,7 @@ internal class DeadDropView(
         beltScene?.let { it.resize(ceil(h / fillW(it.W)).toInt()) }
         flyScene?.let { it.resize(ceil(h / fillW(it.W)).toInt()) }
         shootScene?.let { it.resize(ceil(h / fillW(it.W)).toInt()) }
-        prisonScene?.let { val k = max(1, (w / 256f).roundToInt()); it.resize(ceil(w / k).toInt(), ceil(h / k).toInt()); it.hudTop = ((max(barH + 30f * d, 0f) + 70f * d - (h - it.H * k) / 2f) / k).toInt() }
+        prisonScene?.let { val k = max(1, (w / 256f).roundToInt()); it.resize(ceil(w / k).toInt(), ceil(h / k).toInt()); it.hudTop = ((max(barH + 30f * d, 0f) + 70f * d - (h - it.H * k) / 2f) / k).toInt(); it.topPad = ((barH + 30f * d + 64f * d - (h - it.H * k) / 2f) / k).toInt().coerceAtLeast(0) }
         val bmp = beltScene?.render(clock) ?: flyScene?.render(clock) ?: cine?.render(clock) ?: shootScene?.render(clock) ?: prisonScene?.render(clock) ?: finaleScene?.render(clock)
         if (bmp != null) {
             val grows = beltScene != null || flyScene != null || shootScene != null || prisonScene != null
@@ -457,7 +457,8 @@ internal class DeadDropView(
                     mgText(c, "DAY ${pw.day}  ${pw.clockText}", w / 2f - 100f * d, hy + 8f * d, 11f, a(Color.WHITE, 0xDD))
                     mgText(c, "♥".repeat(pw.hearts.coerceAtLeast(0)) + "♡".repeat((PrisonWorld.HEARTS - pw.hearts).coerceAtLeast(0)), w / 2f, hy + 8f * d, 12f, 0xFFFF6A7A.toInt())
                     val hc = when { pw.heat >= 70f -> 0xFFFF6A6A.toInt(); pw.heat >= 35f -> 0xFFFFB347.toInt(); else -> 0xFF8AD0A0.toInt() }
-                    mgText(c, "HEAT ${pw.heat.toInt()}%" + (if (pw.trusted) " · TRUSTED" else ""), w / 2f + 100f * d, hy + 8f * d, 11f, hc)
+                    if (pw.alert) mgText(c, "HIGH ALERT", w / 2f + 100f * d, hy + 8f * d, 11f, if ((clock * 2f).toInt() % 2 == 0) 0xFFFF6A6A.toInt() else 0xFFFFB347.toInt())
+                    else mgText(c, "HEAT ${pw.heat.toInt()}%", w / 2f + 100f * d, hy + 8f * d, 11f, hc)
                     // what you should be doing
                     val due = pw.dueAt
                     val step = pw.nextStep().first
@@ -665,6 +666,7 @@ internal class DeadDropView(
     internal fun debugCardUp() = mgCardUp
     internal fun debugLevelIdx() = levelIdx
     internal fun debugFinale() = finale
+    internal fun debugPrison() = prison
     internal fun debugBannerUp() = bannerUp
 
     // screen -> tiles
