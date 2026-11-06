@@ -187,8 +187,8 @@ internal object DeadLetterSfx {
     /** The samples of a sound (22050 Hz mono), for tests. */
     internal fun pcm(name: String): ShortArray? = synchronized(cache) { cache.getOrPut(name) { make(name) ?: return null } }
     internal const val SAMPLE_RATE = RATE
-    /** The voice on the call is 20% quieter than it was. */
-    internal const val VOICE_GAIN = 0.8f
+    /** The voice on the call: 0.8, then 30% quieter again. */
+    internal const val VOICE_GAIN = 0.56f
 
     fun play(name: String) {
         val pcm = synchronized(cache) { cache.getOrPut(name) { make(name) ?: return } }

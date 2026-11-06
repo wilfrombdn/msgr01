@@ -659,8 +659,8 @@ internal class DeadDropView(
     }
 
     private companion object {
-        const val VOICE_VOL = 0.8f                // the voice on the call: 20% down from full
-        const val MUSIC_VOL = VOICE_VOL * 0.6f    // the song under it: 40% quieter than the voice
+        const val VOICE_VOL = 0.56f               // the voice on the call (DeadLetterSfx.VOICE_GAIN)
+        const val MUSIC_VOL = 0.624f              // the song under it: was 0.48, now 30% louder
         const val CELL_FADE = 40f                 // the call-for-help song creeps in over this long
         const val GUN_HANDED = 14.6f              // in the cruiser: "Here. Take my gun."
     }
@@ -856,11 +856,12 @@ internal class DeadDropView(
 
     /** Read the joystick: the courier walks the way you push, faster the harder you push (a light push sneaks quietly). */
     private fun readJoystick(x: Float, y: Float) {
+        // in the maze the stick follows your thumb, so turning back never needs a long drag
+        if (pac != null && joyFx >= 0f) { val ex = x - joyFx; val ey = y - joyFy; val el = hypot(ex, ey); if (el > joyR) { val k = (el - joyR) / el; joyFx += ex * k; joyFy += ey * k } }
         val dx = x - joyCx; val dy = y - joyCy
         val len = hypot(dx, dy)
         val shown = min(len, joyR)
         if (len > 0.001f) { knobX = dx / len * shown; knobY = dy / len * shown } else { knobX = 0f; knobY = 0f }
-        if (pac != null && joyFx >= 0f && len > joyR) { joyFx += dx / len * (len - joyR); joyFy += dy / len * (len - joyR); readJoystick(x, y); return }   // in the maze the stick follows your thumb, so turning back never needs a long drag
         val dead = if (pac != null) 4f * d else 7f * d
         if (len < dead) { mag = 0f; return }
         ix = dx / len; iy = dy / len

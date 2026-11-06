@@ -996,6 +996,7 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
     //  the end: back in the tower after the shots
     // =====================================================================================================================
     private val YX = 150
+    private val KS = 0.7f      // the shot-up man is drawn big (46 px) and shrunk to the size of the guards
     private val PS = 1.5f      // the end is a wider shot: people a little smaller than in the rest of the tower
     private fun bloodPool(c: Canvas, cx: Int, cy: Int, rx: Float, ry: Float) {
         for (y in (cy - ry).toInt()..(cy + ry).toInt()) for (x in (cx - rx).toInt()..(cx + rx).toInt()) {
@@ -1101,10 +1102,10 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         val headX = YX + 26; val headY = FLOOR - 5
         if (t < FinaleWorld.PUSH) {
             val heave = if (((t * 0.55f) % 1f) < 0.4f) 1 else 0
-            big(YX, FLOOR, PS) { kneelHurt(c, YX, FLOOR, heave, true) }
+            big(YX, FLOOR, KS) { kneelHurt(c, YX, FLOOR, heave, true) }
         } else if (t < FinaleWorld.DOWN) {
             val e = down * down * (3f - 2f * down)
-            c.save(); c.rotate(e * 86f, YX.toFloat(), FLOOR.toFloat()); big(YX, FLOOR, PS) { kneelHurt(c, YX, FLOOR, 0, false) }; c.restore()
+            c.save(); c.rotate(e * 86f, YX.toFloat(), FLOOR.toFloat()); big(YX, FLOOR, KS) { kneelHurt(c, YX, FLOOR, 0, false) }; c.restore()
         } else {
             big(YX + 14, FLOOR, PS) {
                 lying(c, YX + 14, FLOOR, you, false, false)

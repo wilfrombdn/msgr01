@@ -229,13 +229,13 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         val fsc = (dist * 0.12f).toInt()
         for (i in -1..12) { val bx = i * 22 - mod(fsc, 22); val seed = i + fsc / 22; val bh = 34 + mod(seed * 37, 50)
             rect(c, bx, 160 - bh, 21, bh, 0xFF0B0A18.toInt())
-            for (wy in 160 - bh + 3 until 156 step 4) for (wx in bx + 2 until bx + 19 step 4) if (mod((wx * 7 + wy * 13 + seed * 31), 9) == 0) px(c, wx, wy, if (mod(wx + wy, 5) == 0) PX.CYAN else PX.WARM) }
+            for (wy in 160 - bh + 3 until 156 step 4) for (wx in bx + 2 until bx + 19 step 4) { val wi = (wx - bx - 2) / 4; val wj = (wy - (160 - bh + 3)) / 4; if (mod((wi * 7 + wj * 13 + seed * 31), 9) == 0) px(c, wx, wy, if (mod(wi + wj, 5) == 0) PX.CYAN else PX.WARM) } }   // which windows are lit goes by the window's place in its building, not the screen, so they don't flicker as it scrolls
         val tx = 120 - mod((dist * 0.12f).toInt(), W + 140) + W; if (tx in -10..W + 10) { for (k in 0 until 60) px(c, tx + (k % 2), 160 - k, 0xFF2A2030.toInt()); if ((animT * 1.5f).toInt() % 2 == 0) { rect(c, tx - 1, 98, 3, 3, PX.RED); c.drawBitmap(redDot, tx - 8f, 92f, plain) } }
         // the near city: shopfronts, flats above, neon
         val msc = (dist * 0.5f).toInt()
         for (i in -1..6) { val seed = i + msc / 48; val bx = i * 48 - mod(msc, 48); val bh = 70 + mod(seed * 53, 80); val col = listOf(0xFF2A1E22, 0xFF1E2230, 0xFF262026, 0xFF1A2420)[mod(seed, 4)].toInt()
             rect(c, bx, 214 - bh, 47, bh, col); rect(c, bx, 214 - bh, 47, 2, mixC(col, 0xFF8A7A8A.toInt(), 0.3f))
-            for (wy in 214 - bh + 6 until 180 step 11) for (wx in bx + 4 until bx + 42 step 10) { val lit = mod(wx * 3 + wy * 5 + seed * 7, 7) < 3; rect(c, wx, wy, 6, 7, if (lit) 0xFFE8B860.toInt() else 0xFF0A0C12.toInt()); if (lit) rect(c, wx, wy, 6, 2, 0xFFFFE0A0.toInt()) }
+            for (wy in 214 - bh + 6 until 180 step 11) for (wx in bx + 4 until bx + 42 step 10) { val lit = mod(((wx - bx) / 10) * 3 + ((wy - (214 - bh + 6)) / 11) * 5 + seed * 7, 7) < 3; rect(c, wx, wy, 6, 7, if (lit) 0xFFE8B860.toInt() else 0xFF0A0C12.toInt()); if (lit) rect(c, wx, wy, 6, 2, 0xFFFFE0A0.toInt()) }
             rect(c, bx + 3, 190, 41, 24, 0xFF0A0C10.toInt()); rect(c, bx + 5, 194, 37, 18, if (mod(seed, 3) == 0) 0xFF3A2A18.toInt() else 0xFF14202A.toInt())   // a shop window
             val neon = listOf(PX.MAG, PX.CYAN, 0xFFFF5A3A.toInt(), 0xFF3BFF9A.toInt())[mod(seed * 7, 4)]
             if ((animT * 3f + seed).toInt() % 7 != 0) { rect(c, bx + 8, 183, 30, 5, neon); c.drawBitmap(neonGlowC, bx + 23f - 30f, 185f - 30f, plain) } }
