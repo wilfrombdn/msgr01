@@ -74,17 +74,16 @@ class PrisonTest {
 
     @Test fun theDayFollowsTheRoutine() {
         val w = awake()
-        assertEquals(PrisonWorld.Period.ROLL_AM, w.period); assertEquals("06:00", w.clockText)
-        run(w, 31f); assertEquals(PrisonWorld.Period.BREAKFAST, w.period)
+        run(w, 0.2f)
+        assertEquals("the count is over: breakfast is called", PrisonWorld.Period.BREAKFAST, w.period); assertEquals("07:00", w.clockText)
         assertEquals(PrisonWorld.Period.WORK_AM, PrisonWorld.periodAt(8 * 60f))
         assertEquals(PrisonWorld.Period.FREE, PrisonWorld.periodAt(16 * 60f + 30))
         assertEquals(PrisonWorld.Period.LIGHTS_OUT, PrisonWorld.periodAt(3 * 60f))
     }
 
-    @Test fun standingByYourCellCountsYou() {
+    @Test fun standingOnYourSquareGetsYouCounted() {
         val w = awake()
-        run(w, 10f)
-        assertTrue(w.attended); assertEquals(0f, w.heat, 0.01f)
+        assertEquals(0f, w.heat, 0.01f); assertEquals(PrisonWorld.HEARTS, w.hearts); assertTrue(w.cleanToday)
     }
 
     @Test fun theMorningCountBeatsYouIfYouAreNotOnYourSquare() {
@@ -95,6 +94,7 @@ class PrisonTest {
         while (!w.lockedInSpot && g < 40f) { w.update(0.05f, 0f, 0f, 0f); g += 0.05f }
         assertTrue("dragged onto your square", w.lockedInSpot && w.onSpot)
         assertTrue(w.heat >= 10f); assertFalse(w.cleanToday)
+        assertEquals("one smack, one heart", PrisonWorld.HEARTS - 1, w.hearts)
         while (w.countStage >= 0 && g < 90f) { w.update(0.05f, 0f, 0f, 0f); g += 0.05f }
         assertFalse(w.lockedInSpot)
     }
@@ -107,6 +107,7 @@ class PrisonTest {
         for (n in w.npcs) if (n.guard && n !== g) { n.x = 70.5f; n.y = 44.5f; n.path.clear() }
         at(w, 12.5f, 11.5f); g.x = 12.5f; g.y = 14.5f; g.path.clear(); g.post = 12 to 14; g.attn = PrisonWorld.WATCH; g.attnT = 99f
         val day = w.day
+        assertTrue(w.act()); assertTrue("sat down", w.seated)
         g.face = kotlin.math.atan2(w.py - g.y, w.px - g.x)
         assertFalse(w.act())
         assertTrue("busted", w.bustStage >= 0)
@@ -150,8 +151,8 @@ class PrisonTest {
     @Test fun lightsOutDragsYouToYourCellThenMorningComes() {
         val w = awake()
         w.clock = 1259.9f; at(w, 20.5f, 42.5f)
-        run(w, 6f)
-        assertTrue("dragged in", w.inMyCell)
+        var g = 0f; while (!w.inMyCell && g < 80f) { w.update(0.05f, 0f, 0f, 0f); g += 0.05f }
+        assertTrue("walked in by a guard", w.inMyCell)
         assertTrue(w.night)
         run(w, 25f)                               // the night flies by in your cell
         assertEquals(2, w.day); assertEquals(PrisonWorld.Period.ROLL_AM, w.period)
@@ -231,30 +232,103 @@ class PrisonTest {
         step2(1.2f); save(s2.render(t2), "l5-drown-splash")
     }
 
-    @Test fun aGuardFetchesYouForBreakfastAndKeepsWatch() {
+    @Test fun aGuardWalksOverToFetchYouForBreakfastThenWalksTheTables() {
         val w = awake()
-        run(w, 31f)
+        run(w, 0.2f)
         assertEquals(PrisonWorld.Period.BREAKFAST, w.period)
         val g = w.escort!!
-        assertTrue("he turns up next to you", kotlin.math.hypot(g.x - w.px, g.y - w.py) < 4.5f)
-        assertEquals("FOLLOW THE GUARD", w.nextStep().first)
+        var t = 0f; while (w.nextStep().first != "FOLLOW THE GUARD" && t < 30f) { w.update(0.05f, 0f, 0f, 0f); t += 0.05f }
+        assertTrue("he walked over to you", kotlin.math.hypot(g.x - w.px, g.y - w.py) < 3f)
         at(w, 15.5f, 18.5f)                                   // you get to the dining hall
-        var t = 0f; while (!w.escortArrived && t < 40f) { w.update(0.05f, 0f, 0f, 0f); t += 0.05f }
-        assertTrue("he got there and keeps watch", w.escortArrived && g.post != null)
+        t = 0f; while (!w.escortArrived && t < 40f) { w.update(0.05f, 0f, 0f, 0f); t += 0.05f }
+        assertTrue("he got there and walks the tables", w.escortArrived && g.patrol != null)
+    }
+
+    @Test fun atBreakfastYouSitDownAndEat() {
+        val w = awake(); run(w, 0.2f)
+        at(w, 12.5f, 11.5f)                                    // by a table
+        assertEquals("SIT DOWN AND EAT", w.prompt()); assertTrue(w.act()); assertTrue(w.seated)
+        run(w, PrisonWorld.EAT_MIN / PrisonWorld.DAY_RATE + 0.5f)
+        assertTrue("ate", w.attended)
+        w.update(0.05f, 1f, 0f, 1f); assertFalse("the stick gets you up", w.seated)
+        run(w, 20f)
+        assertTrue("the men are at the tables", w.npcs.count { w.activityOf(it) == "eating" } >= 8)
+    }
+
+    @Test fun breakfastShot() {
+        val w = awake(); val s = PrisonScene(w); run(w, 0.2f)
+        at(w, 12.5f, 11.5f); w.act()
+        var t = 0f; while (t < 22f) { w.update(0.05f, 0f, 0f, 0f); t += 0.05f; s.render(t) }
+        save(s.render(t), "l5-breakfast")
+    }
+
+    @Test fun theWrongRoomOnceIsAWarningTwiceAndYouAreWalkedThere() {
+        val w = awake(); run(w, 0.2f)                           // breakfast is called
+        w.debugNoEscort()
+        at(w, 24.5f, 3.5f); run(w, 0.1f); at(w, 20.5f, 3.5f); run(w, 0.1f)          // into the showers
+        assertTrue("a warning", w.msg.startsWith("WRONG ROOM.")); assertEquals(-1, w.grabStage)
+        at(w, 24.5f, 33.5f); run(w, 0.1f); at(w, 20.5f, 33.5f); run(w, 0.1f)        // into the infirmary
+        assertTrue("taken by the arm", w.grabStage >= 0)
+        var g = 0f; while (w.grabStage >= 0 && g < 40f) { w.update(0.05f, 0f, 0f, 0f); g += 0.05f }
+        assertEquals("walked to breakfast", "DINING HALL", w.zone)
+    }
+
+    @Test fun twoMissedLoadsGetYouBeatenAndThreeBeatingsKillYou() {
+        val w = awake()
+        w.debugGive(PrisonWorld.Item.SPOON)
+        w.clock = 479.9f; run(w, 0.2f); at(w, 64.5f, 41.5f)
+        w.clock = 719.9f; run(w, 0.2f)                          // the morning load isn't done: a warning
+        assertEquals(PrisonWorld.HEARTS, w.hearts)
+        w.clock = 779.9f; run(w, 0.2f); at(w, 64.5f, 41.5f)
+        w.clock = 959.9f; run(w, 0.2f)                          // nor the afternoon one: a guard comes
+        var g = 0f; while (w.hearts == PrisonWorld.HEARTS && g < 40f) { w.update(0.05f, 0f, 0f, 0f); g += 0.05f }
+        assertEquals(PrisonWorld.HEARTS - 1, w.hearts)
+        fun settle() { var k = 0f; while (w.grabStage >= 0 && k < 40f) { w.update(0.05f, 0f, 0f, 0f); k += 0.05f } }
+        settle(); w.debugBeat(); g = 0f; while (w.hearts > 1 && g < 40f) { w.update(0.05f, 0f, 0f, 0f); g += 0.05f }
+        settle(); w.debugBeat(); g = 0f; while (!w.dead && g < 40f) { w.update(0.05f, 0f, 0f, 0f); g += 0.05f }
+        assertTrue("YOU DIED", w.dead)
+        val day = w.day
+        run(w, PrisonWorld.DEAD_S + 0.2f); w.retry()
+        assertFalse(w.dead); assertEquals(PrisonWorld.HEARTS, w.hearts); assertEquals(day, w.day); assertTrue("you keep your things", w.has(PrisonWorld.Item.SPOON))
+        assertEquals(PrisonWorld.Period.ROLL_AM, w.period)
+    }
+
+    /** Nobody jumps from place to place and nobody walks backwards: a whole day where you do nothing (so the guards come for you). */
+    @Test fun everyoneWalksNoJumpsNoMoonwalking() {
+        val w = PrisonWorld(PrisonLevel.rock())
+        val dt = 0.05f; var frames = 0
+        var lastCount = w.countStage
+        while (frames < 9500 && w.day < 2) {
+            val before = w.npcs.map { it.x to it.y }
+            w.update(dt, 0f, 0f, 0f); frames++
+            val nightReset = w.countStage == 0 && lastCount != 0; lastCount = w.countStage
+            if (w.phase != PrisonWorld.Phase.PLAY || nightReset || w.bustStage >= 0) continue
+            for ((i, n) in w.npcs.withIndex()) {
+                val (x0, y0) = before[i]; val dx = n.x - x0; val dy = n.y - y0; val d = kotlin.math.hypot(dx, dy)
+                assertTrue("${n.id} jumped $d at ${w.clockText}", d <= 4.7f * dt + 0.02f)
+                if (d > 0.02f) { val want = kotlin.math.atan2(dy, dx); assertEquals("${n.id} faces the way he walks", kotlin.math.cos(want).toDouble(), kotlin.math.cos(n.face).toDouble(), 0.05); assertEquals(kotlin.math.sin(want).toDouble(), kotlin.math.sin(n.face).toDouble(), 0.05) }
+            }
+        }
+        assertTrue("got through the day", frames > 3000)
     }
 
     @Test fun aWatchingGuardStopsYouStealingADistractedOneDoesnt() {
         val w = awake()
         w.clock = 419.9f; run(w, 0.2f)                         // breakfast
-        for (n in w.npcs) if (n.guard) { n.x = 70.5f; n.y = 44.5f; n.path.clear(); n.post = null; n.escorting = false }
+        for (n in w.npcs) if (n.guard) { n.x = 70.5f; n.y = 44.5f; n.path.clear(); if (n.door == null) n.post = null; n.escorting = false; n.patrol = null }
         val g = w.npcs.first { it.guard }
         g.x = 15.5f; g.y = 17.5f; g.post = 15 to 17; g.attn = PrisonWorld.WATCH; g.attnT = 99f
         at(w, 12.5f, 11.5f)                                    // next to a table
+        assertTrue(w.act()); assertTrue("sat down", w.seated)
         assertEquals("TAKE A SPOON", w.prompt())
         w.update(0.05f, 0f, 0f, 0f); g.x = 15.5f; g.y = 17.5f
-        assertFalse(w.act()); assertFalse(w.has(PrisonWorld.Item.SPOON))
-        g.attn = PrisonWorld.DISTRACT; g.attnT = 99f
-        assertTrue(w.act()); assertTrue(w.has(PrisonWorld.Item.SPOON))
+        assertFalse(w.act()); assertFalse(w.has(PrisonWorld.Item.SPOON)); assertTrue("caught", w.bustStage >= 0)
+        // the same again with his back turned
+        val w2 = awake(); w2.clock = 419.9f; run(w2, 0.2f)
+        for (n in w2.npcs) if (n.guard) { n.x = 70.5f; n.y = 44.5f; n.path.clear(); if (n.door == null) n.post = null; n.escorting = false; n.patrol = null }
+        val g2 = w2.npcs.first { it.guard }; g2.x = 15.5f; g2.y = 17.5f; g2.post = 15 to 17; g2.attn = PrisonWorld.DISTRACT; g2.attnT = 99f
+        at(w2, 12.5f, 11.5f); assertTrue(w2.act()); assertTrue(w2.seated)
+        assertTrue(w2.act()); assertTrue(w2.has(PrisonWorld.Item.SPOON))
     }
 
     @Test fun inmatesHaveThingsToSay() {

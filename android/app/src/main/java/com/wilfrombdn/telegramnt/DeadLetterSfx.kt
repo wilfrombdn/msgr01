@@ -151,7 +151,7 @@ internal object DeadLetterSfx {
             lp += (hp - lp) * 0.55f
             val driven = kotlin.math.tanh(lp * (if (mood == 2) 4.5f else 3.2f))
             val hiss = (r.nextFloat() * 2f - 1f) * 0.05f
-            res[k] = ((driven * 0.62f + hiss) * 32767).toInt().coerceIn(-32767, 32767).toShort()
+            res[k] = ((driven * 0.62f + hiss) * 0.75f * 32767).toInt().coerceIn(-32767, 32767).toShort()
         }
         return res
     }

@@ -283,6 +283,15 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
     private val STEEL = K(0xFF6A7480); private val STEEL_D = K(0xFF2E343E); private val STEEL_L = K(0xFFB0BAC6); private val STEEL_M = K(0xFF4A525E)
 
     /** A strip of cell bars with their shadow on the floor. [open] slides them aside (0 shut, 1 open). */
+    /** Someone sat at a dining table: the bench hides the legs; facing the table (down = toward us), spoon going to the mouth now and then. */
+    private fun seatedEating(fx: Int, fy: Int, down: Boolean, o: Outfit, clock: Float) {
+        val c = fc
+        rect(c, fx - 7, fy - 3, 15, 3, K(0xFF3A2A1E)); rect(c, fx - 7, fy - 3, 15, 1, K(0xFF5A4630))            // the bench
+        c.save(); c.clipRect(fx - 10, fy - 40, fx + 10, fy - 3)
+        folk(c, fx, fy + 2, if (down) 2 else 0, 0, o, false, false)
+        c.restore()
+        if (down) { val up = (clock * 1.1f).toInt() % 3 == 0; rect(c, fx + 4, fy - (if (up) 13 else 9), 2, 2, o.skin); rect(c, fx + 4, fy - (if (up) 14 else 8), 1, 2, STEEL) }
+    }
     private fun bars(c: Canvas, x: Int, y: Int, open: Float, withShadow: Boolean) {
         val off = (open * 12f).roundToInt()
         if (withShadow) for (i in 0 until 4) if (i * 4 + off < 14) rect(c, x + 2 + i * 4 + off, y + 14, 2, 2, a(PX.K, 0x50))
@@ -911,6 +920,7 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
                 when (val act = world.activityOf(n)) {
                     "pushups" -> { val up = (clock * 1.6f + n.id).toInt() % 2 == 0; lying(c, fx, fy - (if (up) 2 else 0), o, n.id % 2 == 0, false); rect(c, fx + (if (n.id % 2 == 0) -9 else 7), fy - 4, 2, if (up) 4 else 2, o.skin) }
                     "weights" -> { val up = (clock * 1.2f + n.id).toInt() % 2 == 0; folk(c, fx, fy, 2, 0, o, false, false); val by = fy - (if (up) 24 else 16); rect(c, fx - 10, by, 21, 2, STEEL_D); rect(c, fx - 12, by - 2, 3, 6, PX.K); rect(c, fx + 10, by - 2, 3, 6, PX.K); rect(c, fx - 6, by + 2, 2, if (up) 8 else 2, o.skin); rect(c, fx + 5, by + 2, 2, if (up) 8 else 2, o.skin) }
+                    "eating" -> seatedEating(fx, fy, world.seatFacesDown(n.seat!!), o, clock + n.id)
                     "reader" -> { folk(c, fx, fy, 0, 0, o, false, false); rect(c, fx - 3, fy - 12, 7, 5, K(0xFF7A2A2A)); rect(c, fx - 2, fy - 11, 5, 3, K(0xFFE8E4D4)) }
                     "cards" -> { folk(c, fx, fy, 0, 0, o, false, false); if ((clock * 0.8f + n.id).toInt() % 3 == 0) { rect(c, fx - 4, fy - 20, 4, 5, PX.W); px(c, fx - 3, fy - 19, PX.RED) } }
                     "sleeper" -> { val (hc, hr) = n.home; lying(c, hc * S + 9, (hr - 1) * S + 12, o, true, false); if ((clock * 0.7f).toInt() % 2 == 0) rect(c, hc * S + 12, (hr - 1) * S - 2, 3, 1, a(PX.W, 0xB0)) }
@@ -951,6 +961,7 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
             } else {
                 tintAt(fx, fy)
                 if (world.beatT >= 0f) { lying(c, fx, fy, you, true, false); if ((clock * 12f).toInt() % 2 == 0) rect(c, fx - 10, fy - 9, 21, 9, a(PX.RED, 0x50)) }
+                else if (world.seated) seatedEating(fx, fy, dirOf(world.face) == 2, you, clock)
                 else folk(c, fx, fy, dirOf(world.face), if (world.moving) 1 + ((clock * 9f).toInt() % 2) else 0, if (world.disguised) guardOutfit else you, false, false)
                 if (dirOf(world.face) != 0) bag(c, fx, fy, world.carry)
                 noTint()
