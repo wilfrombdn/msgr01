@@ -1015,6 +1015,55 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         big(x, y, PS) { swatman(c, x, y, 1, if (moving) 1 + ((clock * 8f).toInt() % 2) else 0); rect(c, x + 1, y - 10, 9, 2, K(0xFF1A1A20)); rect(c, x - 2, y - 9, 4, 3, K(0xFF2A2A30)); px(c, x + 10, y - 10, PX.RED) }
     }
 
+    /** A bullet hole: a dark pit with a pale rim; in glass or a screen it has cracks running out of it. */
+    private fun bulletHole(c: Canvas, x: Int, y: Int, cracks: Int, seed: Int) {
+        for (k in 0 until cracks) { val an = k * 6.2832f / cracks + seed * 0.9f; val len = 4 + hash(seed, k, 53) % 9; for (i in 2..len) px(c, x + (cos(an) * i).toInt(), y + (sin(an) * i).toInt(), a(K(0xFFC8D4F0), 0x70)) }
+        rect(c, x - 2, y - 1, 5, 3, a(PX.K, 0x80)); rect(c, x - 1, y - 2, 3, 5, a(PX.K, 0x80)); rect(c, x - 1, y - 1, 3, 3, K(0xFF05060A)); px(c, x + 1, y - 2, K(0xFF8A94A8)); px(c, x - 2, y + 1, K(0xFF5A6478))
+    }
+    /** Bullet holes in and around the console, the glass, the wall, and the floor, with blood run down from some of them. */
+    private fun shotUpRoom(c: Canvas) {
+        val glass = listOf(168 to 70, 214 to 120, 120 to 150, 238 to 190, 176 to 205, 140 to 98)
+        for ((i, h) in glass.withIndex()) bulletHole(c, h.first, h.second, 7 + i % 3, i + 3)
+        val wall = listOf(24 to 130, 58 to 210, 40 to 250, 84 to 190, 96 to 262, 20 to 300, 72 to 120)
+        for ((i, h) in wall.withIndex()) { bulletHole(c, h.first, h.second, 0, i + 11); if (i % 2 == 0) rect(c, h.first, h.second + 3, 1, 8 + i * 2, K(0xFF5A0A14)) }
+        // the console and the terminal screens: shot through, glass starred, one dead and black
+        val con = listOf(206 to 262, 224 to 268, 240 to 258, 214 to 276, 246 to 272, 232 to 248)
+        for ((i, h) in con.withIndex()) bulletHole(c, h.first, h.second, 8, i + 21)
+        rect(c, 226, 240, 20, 10, K(0xFF05070C)); rect(c, 228, 242, 16, 6, K(0xFF0E2A22))
+        for (k in 0 until 20) px(c, 226 + hash(k, 1, 61) % 20, 240 + hash(k, 2, 61) % 10, K(0xFF02030A))
+        // blood on the console and run down the front of it
+        for (k in 0 until 30) { val bx = 200 + hash(k, 3, 61) % 50; val by = 236 + hash(k, 4, 61) % 36; rect(c, bx, by, 1 + k % 3, 1 + k % 2, K(0xFF7A0E1A)) }
+        for (k in 0 until 6) rect(c, 204 + k * 8, 272, 1, 10 + hash(k, 5, 61) % 22, K(0xFF5A0A14))
+        // holes in the floor around where he knelt, and in the skirting
+        for ((i, h) in listOf(YX - 30 to FLOOR + 10, YX + 40 to FLOOR + 14, YX - 8 to FLOOR + 22, YX + 70 to FLOOR + 8, 120 to FLOOR + 30).withIndex()) bulletHole(c, h.first, h.second, 0, i + 31)
+    }
+    /** A man on his knees, shot to pieces, holding the mic to his mouth in a shaking hand: drawn at 1x with his knees at ([x], [y]), facing right. */
+    private fun kneelHurt(c: Canvas, x: Int, y: Int, heave: Int, mic: Boolean) {
+        val blood = K(0xFF7A0E1A); val bloodD = K(0xFF4A0810); val bloodL = K(0xFFB02232)
+        val lean = 2 + heave
+        rect(c, x - 13, y - 3, 14, 3, you.pants); rect(c, x - 13, y - 3, 14, 1, lite0(you.pants, 20)); rect(c, x - 15, y - 3, 3, 3, you.shoes)      // shins along the floor
+        rect(c, x - 2, y - 15, 7, 13, you.pants); rect(c, x - 2, y - 15, 1, 13, lite0(you.pants, 20))                                               // the thigh, upright
+        rect(c, x - 3 + lean, y - 33, 9, 19, you.shirt); rect(c, x - 3 + lean, y - 33, 9, 1, lite0(you.shirt, 30)); rect(c, x + 2 + lean, y - 31, 2, 9, K(0xFFD8DCE8))   // the torso, hunched, and his tie
+        // blood: soaked through the shirt and trousers, with wounds
+        rect(c, x - 2 + lean, y - 31, 7, 13, a(blood, 0xE0)); rect(c, x - 3 + lean, y - 24, 4, 10, a(bloodD, 0xE0)); rect(c, x + 2 + lean, y - 22, 4, 7, a(bloodL, 0xC0)); rect(c, x - 2, y - 14, 7, 9, a(blood, 0xE0))
+        for ((wx, wy) in listOf(-1 to -29, 3 to -26, -1 to -21, 4 to -18, 1 to -14, 2 to -9, 5 to -28)) { rect(c, x + wx + lean, y + wy, 2, 2, K(0xFF2A0509)); px(c, x + wx + lean, y + wy, K(0xFF000000)) }
+        for (k in 0 until 4) rect(c, x - 2 + lean + k * 2, y - 14, 1, 4 + (k * 3) % 5, bloodD)                                                       // runs down his front
+        rect(c, x + 3, y - 8 + (heave % 2), 1, 8, blood)
+        // the arm hanging at his side, bloody to the fingertips, dripping
+        rect(c, x - 6 + lean, y - 31, 3, 14, you.shirt); rect(c, x - 6 + lean, y - 27, 3, 10, a(blood, 0xE0)); rect(c, x - 6 + lean, y - 17, 3, 3, you.skin); rect(c, x - 6 + lean, y - 15, 3, 2, bloodL)
+        rect(c, x - 5 + lean, y - 13, 1, 3 + heave * 2, bloodL)
+        // the other arm up, the mic against his mouth
+        rect(c, x + 4 + lean, y - 31, 6, 3, you.shirt); rect(c, x + 4 + lean, y - 31, 6, 3, a(blood, 0x90)); rect(c, x + 9 + lean, y - 36, 3, 8, you.shirt); rect(c, x + 9 + lean, y - 36, 3, 8, a(blood, 0x90))
+        rect(c, x + 9 + lean, y - 35, 3, 3, you.skin); rect(c, x + 9 + lean, y - 35, 3, 3, a(bloodL, 0x80))
+        if (mic) { rect(c, x + 10 + lean, y - 41, 2, 6, K(0xFF14141A)); rect(c, x + 9 + lean, y - 43, 4, 3, K(0xFF8A929A)); px(c, x + 10 + lean, y - 43, K(0xFFC8D0D8)) }
+        // the head, bowed, bleeding, glasses cracked
+        rect(c, x + 1 + lean, y - 43, 8, 10, you.skin); rect(c, x + lean, y - 44, 9, 4, you.hair); rect(c, x + 6 + lean, y - 41, 4, 6, you.skin)
+        rect(c, x + 4 + lean, y - 40, 6, 2, K(0xFF9AB8E0)); px(c, x + 6 + lean, y - 40, K(0xFF05060A)); px(c, x + 7 + lean, y - 39, K(0xFF05060A))
+        rect(c, x + 2 + lean, y - 44, 6, 2, a(blood, 0xE0)); rect(c, x + 3 + lean, y - 42, 1, 9, blood)
+        rect(c, x + 7 + lean, y - 36, 2, 4, blood); rect(c, x + 7 + lean, y - 33, 2, 5 + heave * 2, bloodL)
+        px(c, x + 8 + lean, y - 29 + heave * 2, bloodL)
+    }
+
     private fun endScene(c: Canvas, clock: Float) {
         val t = world.t
         if (t < FinaleWorld.FADE_IN) return   // black (the view draws the red words)
@@ -1026,6 +1075,7 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         rect(c, 214, 266, 6, 4, K(0xFF05070C)); if (hash(1, (clock * 9f).toInt(), 7) % 5 == 0) { for (k in 0 until 5) px(c, 216 + (hash(k, (clock * 9f).toInt(), 8) % 9) - 4, 266 - hash(k, 2, 8) % 6, K(0xFFFFE8A0)) }
         // the blood the shots through the door threw across the console and the wall behind where you knelt
         wallBlood(c, YX + 26, FLOOR - 40, 1f)
+        shotUpRoom(c)
         val fallen = ((t - FinaleWorld.DOOR_OFF) / 0.35f).coerceIn(0f, 1f)
         val bang = (t in FinaleWorld.DOOR_OFF - 1.5f..FinaleWorld.DOOR_OFF - 1.3f) || (t in FinaleWorld.DOOR_OFF - 0.8f..FinaleWorld.DOOR_OFF - 0.6f)
         roomDoor(c, if (bang) ((clock * 70f).toInt() % 3 - 1) * 3 else 0, true, fallen)
@@ -1051,10 +1101,10 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         val headX = YX + 26; val headY = FLOOR - 5
         if (t < FinaleWorld.PUSH) {
             val heave = if (((t * 0.55f) % 1f) < 0.4f) 1 else 0
-            big(YX, FLOOR, PS) { kneeling(c, YX, FLOOR, you, 1, heave, false) }
+            big(YX, FLOOR, PS) { kneelHurt(c, YX, FLOOR, heave, true) }
         } else if (t < FinaleWorld.DOWN) {
             val e = down * down * (3f - 2f * down)
-            c.save(); c.rotate(e * 86f, YX.toFloat(), FLOOR.toFloat()); big(YX, FLOOR, PS) { kneeling(c, YX, FLOOR, you, 1, 0, false) }; c.restore()
+            c.save(); c.rotate(e * 86f, YX.toFloat(), FLOOR.toFloat()); big(YX, FLOOR, PS) { kneelHurt(c, YX, FLOOR, 0, false) }; c.restore()
         } else {
             big(YX + 14, FLOOR, PS) {
                 lying(c, YX + 14, FLOOR, you, false, false)

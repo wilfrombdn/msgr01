@@ -45,6 +45,8 @@ internal class PacWorld(val spec: PacSpec) {
     var px = 0f; var py = 0f
     var dir = LEFT
     var wantDir = -1
+    private var wantAge = 0f
+    private var lastWant = -1
     var moving = false
     private var eatStall = 0f
     var eaten = 0
@@ -179,7 +181,9 @@ internal class PacWorld(val spec: PacSpec) {
     }
 
     private fun play(dt: Float, want: Int) {
-        if (want >= 0) wantDir = want
+        // a turn I asked for is remembered for half a second (so a quick flick still turns at the next junction), then forgotten,
+        // so a push I made long ago never makes the courier turn on his own later
+        if (want >= 0) { wantDir = want; lastWant = want; wantAge = 0f } else { wantAge += dt; if (wantAge > 0.5f) wantDir = -1 }
         // the scatter/chase clock
         modeT += dt
         if (modeIdx < schedule.size - 1 && modeT >= schedule[modeIdx]) {
@@ -216,16 +220,21 @@ internal class PacWorld(val spec: PacSpec) {
             if (wantDir >= 0 && wantDir != dir) {
                 if (wantDir == (dir + 2) % 4) dir = wantDir
                 else {
-                    val along = if (dir == LEFT || dir == RIGHT) abs(px - cx) else abs(py - cy)
-                    if (free(tx + DX[wantDir], ty + DY[wantDir]) && along <= 0.3f) { px = cx; py = cy; dir = wantDir }
+                    // how far past the middle of this tile I am, along the way I am going (negative = still coming up to it)
+                    val s0 = (px - cx) * DX[dir] + (py - cy) * DY[dir]
+                    if (free(tx + DX[wantDir], ty + DY[wantDir]) && s0 >= -0.3f && s0 <= 0.5f) {
+                        // turn now and keep the distance I had already gone past the middle, so a late turn does not jump back
+                        px = cx; py = cy; dir = wantDir
+                        if (s0 > 0f) { px += DX[dir] * s0; py += DY[dir] * s0 }
+                    }
                 }
             }
             val pastCentre = (px - cx) * DX[dir] + (py - cy) * DY[dir]
             if (pastCentre >= 0f && !free(tx + DX[dir], ty + DY[dir])) {
-                // a wall ahead: never stop, turn into the open side (or back the way I came at a dead end)
+                // a wall ahead: never stop. Round a corner I keep going; at a junction with no fresh push I take the side I last pushed toward
                 px = cx; py = cy
                 val opts = listOf((dir + 1) % 4, (dir + 3) % 4).filter { free(tx + DX[it], ty + DY[it]) }
-                dir = if (wantDir in opts) wantDir else opts.firstOrNull() ?: ((dir + 2) % 4)
+                dir = if (wantDir in opts) wantDir else if (lastWant in opts) lastWant else opts.firstOrNull() ?: ((dir + 2) % 4)
                 continue
             }
             px += DX[dir] * step; py += DY[dir] * step

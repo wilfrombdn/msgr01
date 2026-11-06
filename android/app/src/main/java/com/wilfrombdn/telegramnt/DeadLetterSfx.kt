@@ -68,7 +68,7 @@ internal object DeadLetterSfx {
         "mic" -> { val a = noise(0.25f, 0.5f, 18f, 0.3f, 19); val b = tone(listOf(2350f, 2370f), 0.9f, 0.08f, 2.5f); ShortArray(b.size) { ((if (it < a.size) a[it] else 0) + b[it]).coerceIn(-32767, 32767).toShort() } }   // a thump on the mic, a thin whine of feedback
         "thud" -> { val a = noise(1.1f, 1f, 4f, 0.03f, 23); val b = tone(listOf(62f, 93f, 147f, 211f), 1.1f, 0.3f, 4.5f, square = true); ShortArray(a.size) { (a[it] + b[it]).coerceIn(-32767, 32767).toShort() } }   // something heavy slams the steel door
         "radiofire" -> radioFire()
-        else -> if (name.startsWith("voice:")) { val q = name.split(':'); voice(q[1].toInt(), q[2].toInt() / 1000f, q[3].toInt()) } else null
+        else -> if (name.startsWith("voice:")) { val q = name.split(':'); voice(q[1].toInt(), q[2].toInt() / 1000f, q[3].toInt()).let { v -> ShortArray(v.size) { (v[it] * VOICE_GAIN).toInt().toShort() } } } else null
     }
     private fun makeMore(name: String): ShortArray? = when (name) {
         "breath" -> breath()
@@ -187,6 +187,8 @@ internal object DeadLetterSfx {
     /** The samples of a sound (22050 Hz mono), for tests. */
     internal fun pcm(name: String): ShortArray? = synchronized(cache) { cache.getOrPut(name) { make(name) ?: return null } }
     internal const val SAMPLE_RATE = RATE
+    /** The voice on the call is 20% quieter than it was. */
+    internal const val VOICE_GAIN = 0.8f
 
     fun play(name: String) {
         val pcm = synchronized(cache) { cache.getOrPut(name) { make(name) ?: return } }

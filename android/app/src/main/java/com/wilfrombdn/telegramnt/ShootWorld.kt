@@ -124,6 +124,7 @@ internal class ShootWorld(val spec: ShootSpec) {
     var lobbyClear = false
     private var aimedAll = false
     private var shotTheHostage = false
+    private var bodyX0 = 0f; private var bodySide = 1f
     private var diveFromX = 0f; private var diveFromY = 0f; private var diveToX = 0f; private var diveToY = 0f
     var tableHit: Pair<Int, Int>? = null
     var shooterId = -1
@@ -233,16 +234,17 @@ internal class ShootWorld(val spec: ShootSpec) {
         val walk = 3f * (t / 1.3f).coerceIn(0f, 1f)
         if (!shotTheHostage) { py = startY - walk; h.y = startY - 1.6f - walk }
         moving = t < 1.3f
-        if (t >= 1.3f && !aimedAll) {
+        if (t >= HELP_T && !aimedAll) {
             aimedAll = true
             for (n in npcs) if (!n.dead && !n.hostage) { if (n.civ) n.state = COWER else { n.state = AIMED; n.lastX = px; n.lastY = py } }
         }
-        if (t >= 1.3f) for (n in npcs) if (!n.civ && !n.dead && !n.hostage) n.face = turnToward(n.face, atan2(py - n.y, px - n.x), 6f * dt)
+        if (t >= HELP_T) for (n in npcs) if (!n.civ && !n.dead && !n.hostage) n.face = turnToward(n.face, atan2(py - n.y, px - n.x), 6f * dt)
         if (t >= SHOT_T && !shotTheHostage) {
             shotTheHostage = true
             // the officer nearest to him with a clear shot takes it
             val sh = npcs.filter { !it.civ && !it.dead && !it.hostage }.minByOrNull { hypot(it.x - h.x, it.y - h.y) }
             if (sh != null) { sh.flash = 0.14f; shooterId = sh.id; sh.face = atan2(h.y - sh.y, h.x - sh.x) }
+            bodyX0 = h.x; bodySide = if (h.x > cols / 2f) -1f else 1f
             h.dead = true; h.deadT = 0f; decals += h.x to h.y; decals += (h.x - 0.4f) to (h.y - 0.3f); decals += (h.x + 0.3f) to (h.y - 0.5f)
             flash = 0.18f; shake = 0.45f; events += "shot"
             if (sh != null) bullets += Bullet(sh.x, sh.y, cos(sh.face) * 20f, sin(sh.face) * 20f, false, true)
@@ -257,16 +259,20 @@ internal class ShootWorld(val spec: ShootSpec) {
             } else { diveToX = px; diveToY = py }
         }
         if (shotTheHostage) {
+            val D = SHOT_T + DIVE_DELAY          // a beat of dead silence after the shot, then you move
             // you run to the table in front of you, kick it over, and get down behind it
-            val k = ((t - SHOT_T - 0.2f) / 0.55f).coerceIn(0f, 1f)
+            val k = ((t - D - 0.2f) / 0.55f).coerceIn(0f, 1f)
             px = diveFromX + (diveToX - diveFromX) * k; py = diveFromY + (diveToY - diveFromY) * k
             moving = k in 0.01f..0.99f
+            // you throw his body aside as you go past
+            val bx = bodyX0 + bodySide * 1.4f * min(1f, k * 1.5f)
+            if (!solid(floor(bx).toInt(), floor(h.y).toInt())) h.x = bx
             val tb = tableHit
             if (tb != null) face = atan2(tb.second + 0.5f - py, tb.first + 0.5f - px)
-            if (t >= SHOT_T + 0.8f && tb != null && tb !in tipped) { tipped += tb; shake = 0.3f; events += "kick" }
-            kickingTable = t in SHOT_T + 0.75f..SHOT_T + 1.05f
-            diving = t >= SHOT_T + 1.05f
-            if (t >= SHOT_T + 1.6f) {
+            if (t >= D + 0.8f && tb != null && tb !in tipped) { tipped += tb; shake = 0.3f; events += "kick" }
+            kickingTable = t in D + 0.75f..D + 1.05f
+            diving = t >= D + 1.05f
+            if (t >= D + 1.6f) {
                 diving = false; kickingTable = false; phase = Phase.PLAY; phaseT = 0f; moving = false
                 for (n in npcs) if (!n.civ && !n.dead && !n.hostage) { n.state = ENGAGE; n.react = 0f; n.cd = 0.25f + rnd.nextFloat() * 0.7f; n.lastX = px; n.lastY = py; n.spotT = 0f }
             }
@@ -274,7 +280,7 @@ internal class ShootWorld(val spec: ShootSpec) {
     }
 
     /** What the hostage screams as you walk him in (cut off by the shot). */
-    fun hostageLine(): Pair<String, Int>? = if (phase == Phase.INTRO && t in 1.3f..SHOT_T) HOSTAGE_LINE to ((t - 1.3f) * 17f).toInt().coerceIn(1, HOSTAGE_LINE.length) else null
+    fun hostageLine(): Pair<String, Int>? = if (phase == Phase.INTRO && t in HELP_T..SHOT_T) HOSTAGE_LINE to ((t - HELP_T) * 17f).toInt().coerceIn(1, HOSTAGE_LINE.length) else null
     /** The clerks, as you walk in. */
     fun civLine(n: Npc): String? = if (phase == Phase.INTRO && n.civ && t in 0.3f + (n.id % 4) * 0.25f..2.9f) CIV_LINES[n.id % CIV_LINES.size] else null
     var kickingTable = false; private set
@@ -357,10 +363,12 @@ internal class ShootWorld(val spec: ShootSpec) {
     // ----- grenades -----
     companion object {
         const val SHOT_T = 3.9f
+        const val HELP_T = 1.3f         // the hostage cries for help: the music is cut dead
+        const val DIVE_DELAY = 1.3f     // you start to move 1.5 s after the shot (the run begins 0.2 s into the dive), in dead silence
         const val HOSTAGE_LINE = "PLEASE HELP ME, HE'S CRAZY! PLEASE HELP ME-"
         val CIV_LINES = listOf("OH MY GOD!", "IT'S HIM!", "HE'S GOT A GUN!", "OH GOD...", "GET DOWN!", "NO, NO, NO!", "SOMEBODY HELP!")
         // the mayor's end: the song plays from the door until he's looked at you; a second of silence; the kick
-        const val MUSIC_CUT = 17.8f
+        const val MUSIC_CUT = 18.8f
         const val KICK = 18.8f
         const val PAPER_AT = 12.0f      // he stops at one of your papers on the floor
         const val PAPER_UP = 12.6f      // ...has it in his hand, reads it, chuckles

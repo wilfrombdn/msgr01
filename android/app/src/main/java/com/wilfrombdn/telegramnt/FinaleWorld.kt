@@ -60,7 +60,8 @@ internal class FinaleWorld(seed: Int = 6) {
         const val VIGNETTE_S = 3.4f
         const val VIGNETTES = 5
         const val END_TITLE = 23.8f
-        const val END_TAP = 26.8f
+        const val END_TAP = 27.8f       // you can tap out of the credits from here
+        const val TRIED_CUT = 43.2f     // the call-for-help song is cut dead just before "I tried..."
         /** How long the plea runs before it's cut off. */
         const val PLEA_S = 45.0f
         /** The plea's shots: when each starts, and what's on screen (-1 you take the mic, -2 pacing, -3 the thud on the door, -4 breaking down; 0..4 the places listening). */

@@ -43,7 +43,7 @@ internal fun MainActivity.showDeadDrop() {
     // hold restart: once you've beaten the game, choose any letter; before that, back to level 1
     val again = icon(R.drawable.ic_restart) { game.restart() }.apply { setOnLongClickListener { if (game.beaten) game.openChooser() else { game.restartAll(); toast("Back to level 1") }; true } }
     // edge to edge: the game fills the whole screen and the title bar floats over it, see-through (the game blurs behind it)
-    val tb = topBar("Dead Letter", "Six letters. One truth.", null, skip, again, icon(R.drawable.ic_close) { showSettings() })
+    val tb = topBar("Dead Letter", null, null, skip, again, icon(R.drawable.ic_close) { showSettings() })
     tb.setBackgroundColor(Color.TRANSPARENT)
     @Suppress("DEPRECATION")
     tb.setOnApplyWindowInsetsListener { v, ins -> v.setPadding(v.paddingLeft, dp(4) + ins.systemWindowInsetTop, v.paddingRight, dp(4)); ins }
@@ -173,31 +173,54 @@ internal class DeadDropView(
     private val music = DeadLetterMusic()
     private val tracks = DeadLetterTracks(ctx)
     private var cue = ""
-    private fun applyCue() {
+    private fun applyCue(w: Cue? = null) {
         if (!soundOn) { tracks.stop(); music.stop(); return }
-        if (cue == "synth") { tracks.stop(); music.start() } else { music.stop(); tracks.play(cue) }
+        if (cue == "synth") { tracks.stop(); music.start() } else { music.stop(); if (cue.isEmpty()) tracks.cut(w?.cut ?: 0f) else tracks.play(cue, w?.vol ?: 0.85f) }
     }
 
-    /** Which song should be on right now ("" = silence, null = leave it alone). */
-    private fun wantedCue(): String? {
-        when (arcadeId) { "maze" -> return "l2"; "belt" -> return "l3"; "fly" -> return "l3b"; "hall" -> return "synth"; "tower", "uplink" -> return "l6" }
+    /** Which song should be on right now, and how loud (null = leave it alone). */
+    private fun wantedCue(): Cue? {
+        when (arcadeId) { "maze" -> return Cue("l2"); "belt" -> return Cue("l3"); "fly" -> return Cue("l3b"); "tower", "uplink" -> return Cue("l6") }
         when (mgName) {
-            "belt" -> { val b = belt ?: return ""; return if (b.phase == BeltWorld.Phase.RIDE && b.phaseT >= 1f) "l3" else "" }
-            "fly" -> { val f = fly ?: return ""; return if (f.phase != FlyWorld.Phase.DONE) "l3b" else "" }
-            "cine0" -> return ""
-            "cine1" -> return "synth"
-            "shoot" -> return if (shoot?.phase == ShootWorld.Phase.FINALE || shoot?.phase == ShootWorld.Phase.DONE) (if (shoot?.mayorMusic == true) "tremolo" else "") else "synth"   // the mayor's song, cut hard before the kick
-            "prison" -> return "synth"
-            "finale" -> return if (finale?.silent == true) "" else "l6"
+            "belt" -> { val b = belt ?: return Cue(""); return if (b.phase == BeltWorld.Phase.RIDE && b.phaseT >= 1f) Cue("l3") else Cue("") }
+            "fly" -> { val f = fly ?: return Cue(""); return if (f.phase != FlyWorld.Phase.DONE) Cue("l3b") else Cue("") }
+            // the ride in the cruiser: silent until the cop hands you the gun, then the shoot-out song fades in
+            "cine0" -> { val cn = cine ?: return Cue(""); return if (cn.t >= GUN_HANDED) Cue("hotline", ((cn.t - GUN_HANDED) / 4f).coerceIn(0f, 1f)) else Cue("") }
+            // the town hall front and the walk in: the song carries on (only if it was already playing)
+            "cine1" -> return if (cue == "hotline") Cue("hotline", 1f) else Cue("")
+            "shoot" -> {
+                val sw = shoot ?: return Cue("")
+                return when (sw.phase) {
+                    // the moment the hostage cries for help the song is cut dead; it slams back on, full, when the fight starts
+                    ShootWorld.Phase.INTRO -> if (sw.t < ShootWorld.HELP_T && cue == "hotline") Cue("hotline", 1f) else Cue("", cut = 0.05f)
+                    ShootWorld.Phase.PLAY -> Cue("hotline", 1f)
+                    ShootWorld.Phase.DEAD -> null
+                    // the mayor's door: silence, then "meeting the mayor" from the kick on the door until he kicks you in the head
+                    ShootWorld.Phase.FINALE -> if (sw.mayorMusic) Cue("mayor", 1f) else Cue("", cut = 0.05f)
+                    ShootWorld.Phase.DONE -> Cue("")
+                }
+            }
+            "prison" -> return Cue("synth")
+            "finale" -> {
+                val fw = finale ?: return Cue("")
+                return when (fw.stage) {
+                    // the call for help: the song creeps in, far quieter than the voice, and is cut dead just before the first "I tried."
+                    FinaleWorld.Stage.BROADCAST -> if (fw.t < FinaleWorld.TRIED_CUT) Cue("cell", MUSIC_VOL * (fw.t / CELL_FADE).coerceIn(0f, 1f)) else Cue("", cut = 0.05f)
+                    // then nothing, until the title comes up and the credits song starts
+                    FinaleWorld.Stage.END -> if (fw.t >= FinaleWorld.END_TITLE) Cue("credits", 1f) else Cue("", cut = 0.05f)
+                    else -> if (fw.silent) Cue("", cut = 0.05f) else Cue("l6")
+                }
+            }
         }
-        if (levelIdx == 0) return "synth"
+        if (levelIdx == 0) return Cue("synth")
         if (levelIdx == 1) {
-            if (stage == 0) return "synth"
-            val pw = pac ?: return ""
-            return when (pw.phase) { PacWorld.Phase.CAUGHT -> null; else -> "l2" }      // the song kicks in the moment the maze starts
+            if (stage == 0) return Cue("synth")
+            val pw = pac ?: return Cue("")
+            // the maze song starts the moment the courier starts running
+            return when (pw.phase) { PacWorld.Phase.CAUGHT -> null; PacWorld.Phase.PLAY, PacWorld.Phase.WON -> Cue("l2"); else -> Cue("") }
         }
-        if (levelIdx == 5) return "l6"
-        return ""
+        if (levelIdx == 5) return Cue("l6")
+        return Cue("")
     }
     private var pixelScene: PixelScene? = null
     private val nearest = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
@@ -520,10 +543,8 @@ internal class DeadDropView(
                     p.style = Paint.Style.FILL; p.color = Color.BLACK; c.drawRect(0f, 0f, w, h, p)
                     val f = ((fw.t - FinaleWorld.END_TITLE) / 1.2f).coerceIn(0f, 1f)
                     p.textAlign = Paint.Align.CENTER
-                    p.typeface = monoBold; p.letterSpacing = 0.3f; p.textSize = 26f * d; p.color = a(Color.WHITE, (f * 255).toInt()); c.drawText("DEAD LETTER", w / 2, h / 2, p)
-                    val f2 = ((fw.t - FinaleWorld.END_TITLE - 1.2f) / 1.2f).coerceIn(0f, 1f)
-                    p.typeface = mono; p.letterSpacing = 0.1f; p.textSize = 12f * d; p.color = a(Color.WHITE, (f2 * 0x99).toInt()); c.drawText("six letters. one truth.", w / 2, h / 2 + 30f * d, p)
-                    if (fw.over) { p.letterSpacing = 0f; p.textSize = 11f * d; p.color = a(Color.WHITE, 0x66); c.drawText("tap to close", w / 2, h - 40f * d, p) }
+                    p.typeface = monoBold; p.letterSpacing = 0.3f; p.textSize = 26f * d; p.color = a(Color.WHITE, (f * 255).toInt()); c.drawText("DEAD LETTER", w / 2, h / 2 - creditsScroll(fw.t - FinaleWorld.END_TITLE), p)
+                    drawCredits(c, w, h, fw.t - FinaleWorld.END_TITLE, fw.over)
                     p.letterSpacing = 0f
                 }
             }
@@ -605,6 +626,44 @@ internal class DeadDropView(
         drawFade(c, w, h)
     }
 
+
+    private val credits = listOf(
+        "DIRECTED BY" to "The Developer", "WRITTEN BY" to "The Developr", "PRODUCED BY" to "Teh Developer", "EXECUTIVE PRODUCER" to "The Develper",
+        "ART DEPARTMENT" to "The Developer", "PIXEL ARTIST" to "Thee Developer", "SOUND DESIGN" to "The Devloper", "MUSIC SUPERVISION" to "The Dev-elop-er",
+        "DESIGN CURATION" to "The Developer (curated)", "LEVEL DESIGN" to "Tha Developer", "CINEMATOGRAPHY" to "The Developer, standing on a chair",
+        "STUNT COORDINATOR" to "The Developer's Thumb", "CASTING" to "The Developer", "CATERING" to "The Developer (cereal)",
+        "BEST BOY" to "The Developer", "GAFFER" to "The Develooooper", "QUALITY ASSURANCE" to "The Developer (works on my phone)",
+        "BUGS" to "Also The Developer", "BUG FIXES" to "Mostly The Developer", "LEGAL" to "The Dvelopre", "ADDITIONAL VOICES" to "The Developer",
+        "SPECIAL THANKS" to "The Developer, The Developer, and The Developer", "NO CLERKS WERE HARMED" to "Several were",
+        "MADE BY:" to "The developer", "" to "Thanks for playing my easter egg.",
+    )
+    private fun creditsScroll(ct: Float) = max(0f, ct - 3f) * 44f * d
+
+    /** The credits roll up under the title, then the last two lines stop in the middle of the screen. */
+    private fun drawCredits(c: Canvas, w: Float, h: Float, ct: Float, over: Boolean) {
+        val gap = 62f * d
+        val s = creditsScroll(ct)
+        fun alphaAt(y: Float): Float = min(((y - barH) / (50f * d)).coerceIn(0f, 1f), ((h - 30f * d - y) / (60f * d)).coerceIn(0f, 1f))
+        val n = credits.size
+        for ((i, e) in credits.withIndex()) {
+            var y = h / 2 + 110f * d + i * gap - s
+            if (i >= n - 2) y = max(y, h / 2 + (i - (n - 2)) * 60f * d)
+            val al = alphaAt(y)
+            if (al <= 0f || ct < 2f) continue
+            p.style = Paint.Style.FILL; p.textAlign = Paint.Align.CENTER
+            if (e.first.isNotEmpty()) { p.typeface = mono; p.letterSpacing = 0.15f; p.textSize = 10.5f * d; p.color = a(0xFFFF4D6D.toInt(), (al * 0xB0).toInt()); c.drawText(e.first, w / 2, y, p) }
+            if (e.second.isNotEmpty()) { p.typeface = monoBold; p.letterSpacing = 0.04f; p.textSize = 15f * d; p.color = a(Color.WHITE, (al * 255).toInt()); wrap(c, e.second, w / 2, y + (if (e.first.isNotEmpty()) 22f * d else 0f), w - 40f * d, 19f * d) }
+        }
+        p.letterSpacing = 0f
+        if (over && ct > 3f + credits.size * gap / (44f * d)) { p.typeface = mono; p.textSize = 11f * d; p.color = a(Color.WHITE, 0x66); c.drawText("tap to close", w / 2, h - 40f * d, p) }
+    }
+
+    private companion object {
+        const val VOICE_VOL = 0.8f                // the voice on the call: 20% down from full
+        const val MUSIC_VOL = VOICE_VOL * 0.6f    // the song under it: 40% quieter than the voice
+        const val CELL_FADE = 40f                 // the call-for-help song creeps in over this long
+        const val GUN_HANDED = 14.6f              // in the cruiser: "Here. Take my gun."
+    }
 
     /** After the game is beaten: pick any of the six letters to play. */
     private fun drawChooser(c: Canvas) {
@@ -777,7 +836,11 @@ internal class DeadDropView(
                     left -= s
                 }
                 updateClue(raw)
-                wantedCue()?.let { if (it != cue) { cue = it; applyCue() } }
+                wantedCue()?.let { w ->
+                    if (w.name != cue) { cue = w.name; applyCue(w) }
+                    else if (soundOn && cue.isNotEmpty() && cue != "synth") tracks.volume(w.vol)
+                }
+                tracks.tick(raw)
                 if (lastLevel && world.state == StealthWorld.State.WON) music.setCalm(true)
             }
             last = now
@@ -797,11 +860,18 @@ internal class DeadDropView(
         val len = hypot(dx, dy)
         val shown = min(len, joyR)
         if (len > 0.001f) { knobX = dx / len * shown; knobY = dy / len * shown } else { knobX = 0f; knobY = 0f }
+        if (pac != null && joyFx >= 0f && len > joyR) { joyFx += dx / len * (len - joyR); joyFy += dy / len * (len - joyR); readJoystick(x, y); return }   // in the maze the stick follows your thumb, so turning back never needs a long drag
         val dead = if (pac != null) 4f * d else 7f * d
         if (len < dead) { mag = 0f; return }
         ix = dx / len; iy = dy / len
         mag = ((shown - dead) / (joyR - dead)).coerceIn(0f, 1f)
-        if (mag > (if (pac != null) 0.12f else 0.35f)) pacWant = if (kotlin.math.abs(ix) > kotlin.math.abs(iy)) (if (ix > 0) PacWorld.RIGHT else PacWorld.LEFT) else (if (iy > 0) PacWorld.DOWN else PacWorld.UP)
+        if (mag > (if (pac != null) 0.12f else 0.35f)) {
+            // near a diagonal, stay on the axis I was already pushing along (a wobbling thumb must not flip left/right to up/down)
+            val ax = kotlin.math.abs(ix); val ay = kotlin.math.abs(iy)
+            val wasSide = pacWant == PacWorld.LEFT || pacWant == PacWorld.RIGHT; val wasVert = pacWant == PacWorld.UP || pacWant == PacWorld.DOWN
+            val horiz = if (wasSide) ax * 1.35f >= ay else if (wasVert) ax > ay * 1.35f else ax > ay
+            pacWant = if (horiz) (if (ix > 0) PacWorld.RIGHT else PacWorld.LEFT) else (if (iy > 0) PacWorld.DOWN else PacWorld.UP)
+        }
     }
 
     /** Moves level 2 from one part to the next, with a fade to black between. */
@@ -915,7 +985,7 @@ internal class DeadDropView(
                     if (e.actionMasked == MotionEvent.ACTION_UP) { soundOn = !soundOn; saveSound(soundOn); applyCue() }
                     return true
                 }
-                joyActive = false; mag = 0f; knobX = 0f; knobY = 0f; joyFx = -1f; joyFy = -1f
+                joyActive = false; mag = 0f; knobX = 0f; knobY = 0f; joyFx = -1f; joyFy = -1f; pacWant = -1
                 if (e.actionMasked == MotionEvent.ACTION_UP && overlayAtDown) when (world.state) {
                     StealthWorld.State.CAUGHT -> if (world.stateT > 0.5f) { attempt++; if (stage == 1) restartPac() else load(true) }
                     StealthWorld.State.WON -> if (lastLevel) {
@@ -1774,8 +1844,6 @@ internal class DeadDropView(
         if (t > 9.2f) {
             val f = ((t - 9.2f) / 1.2f).coerceIn(0f, 1f)
             p.typeface = monoBold; p.letterSpacing = 0.3f; p.textSize = 26f * d; p.color = a(Color.WHITE, (f * 255).toInt()); c.drawText("DEAD LETTER", w / 2, h / 2, p)
-            val f2 = ((t - 10.4f) / 1.2f).coerceIn(0f, 1f)
-            p.typeface = mono; p.letterSpacing = 0.1f; p.textSize = 12f * d; p.color = a(Color.WHITE, (f2 * 0x99).toInt()); c.drawText("six letters. one truth.", w / 2, h / 2 + 30f * d, p)
         }
         if (t > 12f) { p.letterSpacing = 0f; p.textSize = 11f * d; p.color = a(Color.WHITE, 0x66); c.drawText("tap to close", w / 2, h - 40f * d, p) }
         p.letterSpacing = 0f
