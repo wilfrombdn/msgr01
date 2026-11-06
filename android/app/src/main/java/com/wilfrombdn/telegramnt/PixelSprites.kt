@@ -321,7 +321,7 @@ internal open class PixelSprites {
         if (glint && sx > 0.7f) { px(c, cx - (r * sx * 0.45f).roundToInt(), cy - r / 2, PX.W); if (((animT * 3f + cx * 0.1f).toInt() % 5) == 0) { px(c, cx - 3, cy - r - 2, PX.W); px(c, cx - 3, cy - r - 3, 0x99FFFFFF.toInt()); px(c, cx - 4, cy - r - 2, 0x99FFFFFF.toInt()); px(c, cx - 2, cy - r - 2, 0x99FFFFFF.toInt()) } }
     }
 
-    private fun lite0(c: Int, d: Int): Int {
+    protected fun lite0(c: Int, d: Int): Int {
         val r = (((c shr 16) and 0xFF) + d).coerceIn(0, 255); val g = (((c shr 8) and 0xFF) + d).coerceIn(0, 255); val b = ((c and 0xFF) + d).coerceIn(0, 255)
         return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
     }

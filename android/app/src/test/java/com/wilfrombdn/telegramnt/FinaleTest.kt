@@ -99,10 +99,9 @@ class FinaleTest {
         step(0.5f); save(s.render(t), "l6-control-stumble")
         step(2.5f); save(s.render(t), "l6-control-look")
         w.debugEnter(FinaleWorld.Stage.SIMON); step(1.0f); save(s.render(t), "l6-simon")
-        w.debugEnter(FinaleWorld.Stage.BROADCAST)
-        for (i in 0 until FinaleWorld.VIGNETTES) { step(1.7f); save(s.render(t), "l6-broadcast-$i"); step(FinaleWorld.VIGNETTE_S - 1.7f) }
-        w.debugEnter(FinaleWorld.Stage.END); step(1.5f); save(s.render(t), "l6-end-broadcast")
-        step(8.5f); save(s.render(t), "l6-end-words")
-        step(3.0f); save(s.render(t), "l6-end-sirens")
+        w.debugEnter(FinaleWorld.Stage.BROADCAST); var bt = 0f
+        for (at in listOf(0.5f, 1.4f, 2.6f, 6.5f, 11f, 15f, 17f, 21f, 26f, 30.2f, 30.5f, 31.6f, 34f, 38f, 42f, 44.5f)) { step(at - bt); bt = at; save(s.render(t), "l6-plea-${(at * 10).toInt()}") }
+        w.debugEnter(FinaleWorld.Stage.END); var et = 0f
+        for (at in listOf(5.4f, 7.5f, 10.15f, 11.2f, 13.0f, 15.4f, 16.3f, 17.4f, 18.4f, 19.6f, 20.02f)) { step(at - et); et = at; save(s.render(t), "l6-end-${(at * 100).toInt()}") }
     }
 }

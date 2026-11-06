@@ -459,6 +459,16 @@ internal class DeadDropView(
                     if (fw.stage != FinaleWorld.Stage.SIMON) { p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x99); c.drawRect(0f, sy - 18f * d, w, sy + 8f * d, p) }
                     mgText(c, cap, w / 2f, sy, 10.5f, a(Color.WHITE, 0xEE))
                 }
+                // the cut: black, and the last words in red
+                if (fw.redText.isNotEmpty()) {
+                    p.style = Paint.Style.FILL; p.color = Color.BLACK; c.drawRect(0f, 0f, w, h, p)
+                    val f = if (fw.t > FinaleWorld.RED_OFF - 0.4f) ((FinaleWorld.RED_OFF - fw.t) / 0.4f).coerceIn(0f, 1f) else 1f
+                    val jx = if (fw.t in 0.35f..2.0f) ((fw.clock * 47f).toInt() % 3 - 1) * 2f * d else 0f
+                    p.textAlign = Paint.Align.CENTER; p.typeface = monoBold; p.letterSpacing = 0.05f; p.textSize = 30f * d
+                    while (p.measureText(fw.redText) > w - 32f * d && p.textSize > 14f * d) p.textSize -= 1f * d
+                    p.color = a(0xFFE0182C.toInt(), (f * 255).toInt()); c.drawText(fw.redText, w / 2 + jx, h / 2, p)
+                    p.letterSpacing = 0f
+                }
                 // the very end: black, and the title
                 if (fw.stage == FinaleWorld.Stage.END && fw.t > FinaleWorld.END_TITLE - 1.5f) {
                     p.style = Paint.Style.FILL; p.color = Color.BLACK; c.drawRect(0f, 0f, w, h, p)

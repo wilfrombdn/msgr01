@@ -562,7 +562,19 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
         val px0 = (w.px * S).roundToInt(); val py0 = (w.py * S).roundToInt() + 6
         list += DItem(w.py) {
             rect(c, px0 - 5, py0 - 1, 11, 3, a(PX.K, 0x70))
-            if (w.playerDown) lying(c, px0, py0, clerk, true, false)
+            if (w.playerDown) {
+                // your copies of the letters burst out of your coat and slide across the floor as they pile on you
+                val k = ((w.ft - 9.8f) / 0.7f).coerceIn(0f, 1f); val e = 1f - (1f - k) * (1f - k)
+                for (i in 0 until 14) {
+                    val ang = i * 2.4f + 0.3f; val dist = (10 + (i * 37) % 26) * e
+                    val lx = px0 + (cos(ang) * dist * 1.3f).roundToInt(); val ly = py0 - 3 + (sin(ang) * dist * 0.7f).roundToInt()
+                    val wide = i % 3 != 0
+                    rect(c, lx - 1, ly - 1, if (wide) 7 else 5, if (wide) 5 else 7, a(PX.K, 0x90))
+                    rect(c, lx, ly, if (wide) 5 else 3, if (wide) 3 else 5, if (i % 4 == 0) K(0xFFD8C8A0) else K(0xFFF0ECE0))
+                    if (i % 2 == 0) px(c, lx + 1, ly + 1, PX.RED)                                     // the wax seal
+                }
+                lying(c, px0, py0, clerk, true, false)
+            }
             else {
                 folk(c, px0, py0, 0, if (w.moving) 1 + ((clock * 8f).toInt() % 2) else 0, clerk, false, false)
                 if (w.kicking) { rect(c, px0 - 2, py0 - 13, 5, 3, PX.W); rect(c, px0 - 2, py0 - 12, 5, 1, K(0xFFD8DCE8)) }
