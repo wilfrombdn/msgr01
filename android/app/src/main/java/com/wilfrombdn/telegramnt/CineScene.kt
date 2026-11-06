@@ -91,7 +91,7 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         for (wx in intArrayOf(x + 12, x + 54)) { rect(c, wx - 1, floor - 11, 14, 14, PX.K); rect(c, wx + 1, floor - 9, 10, 10, 0xFF2A3040.toInt()); rect(c, wx + 4, floor - 6, 4, 4, steelCL) }
         if (doorOpen) { rect(c, x + 27, floor - 20, 9, 16, PX.K); rect(c, x + 28, floor - 19, 7, 14, 0xFF14204E.toInt()) }
         if (moving) for (k in 0..3) rect(c, x - 8 - k * 7, floor - 5 + (sin(animT * 9f + k) * 1.5f).toInt(), 6, 5, a(0xFF8A94AC.toInt(), 0x90 - k * 0x20))
-        if (lights) { p.color = a(if ((animT * 5f).toInt() % 2 == 0) PX.RED else PX.BLUE, 0x26); c.drawRect((x - 20).toFloat(), (floor - 44).toFloat(), (x + 92).toFloat(), floor.toFloat(), p) }   // the light bar's glow on the car
+        if (lights) lightBar(c, x + 29, floor - 36)
     }
 
     private fun exit(c: Canvas) {
@@ -156,6 +156,19 @@ internal class CineScene(val kind: Int) : PixelSprites() {
             val v = (1f - y / h.toFloat() * 0.7f) * (1f - ac / half); if (bayer[(y and 3) * 4 + (x and 3)] / 16f < v * 0.45f) pxs[y * w + x] = a(0xFFFFE0A0.toInt(), 0x30) }
         bm.setPixels(pxs, 0, w, 0, 0, w, h); bm
     }
+    /** The light bar on the roof: the lit side blazes with a white-hot core, a soft round glow and a few streaks of light; the other side stays dark. Centre at ([cx], [cy]). */
+    private fun lightBar(c: Canvas, cx: Int, cy: Int) {
+        val redOn = ((animT * 5f).toInt() % 2 == 0)
+        val lx = if (redOn) cx - 5 else cx + 5
+        c.drawBitmap(if (redOn) barRed else barBlue, lx - 30f, cy - 30f, plain)
+        val col = if (redOn) PX.RED else PX.BLUE
+        rect(c, lx - 4, cy - 1, 9, 3, col); rect(c, lx - 2, cy - 1, 5, 1, PX.W); px(c, lx, cy, PX.W)
+        val dir = if (redOn) -1 else 1
+        for (k in 0..2) rect(c, lx + dir * (6 + k * 3), cy - 1 + k % 2, 3 - k % 2, 1, a(col, 0xB0 - k * 0x30))        // streaks of light
+        rect(c, lx - 7, cy, 15, 1, a(col, 0x50))
+    }
+    private val barRed by lazy { glowBitmap(30, PX.RED, 0x58) }
+    private val barBlue by lazy { glowBitmap(30, PX.BLUE, 0x58) }
     private val redWash by lazy { glowBitmap(90, PX.RED, 0x40) }
     private val blueWash by lazy { glowBitmap(90, PX.BLUE, 0x40) }
     private val vig: Bitmap by lazy {
@@ -249,7 +262,6 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         for (k in 0 until 3) { val period = 520f + k * 170f; val cx = W + 60 - ((lt * 150f + k * 210f) % period).toInt(); if (cx in -80..W + 10) civCar(c, cx, 241, listOf(0xFF8A2A2A, 0xFFB8B8C0, 0xFF2A5A8A)[k].toInt(), true) }
         // our cruiser, bouncing on the road, its light bar going
         val carX = 70; val floor = 264 + if ((lt * 6f).toInt() % 5 == 0) -1 else 0
-        c.drawBitmap(redWashC, carX + 36f - 60f, floor - 50f - 60f, plain)
         sideCar(c, carX, floor, doorOpen = false, lights = true, moving = true)
         rect(c, carX + 2, floor + 3, 68, 4, a(0xFF3A56B8.toInt(), 0x40)); if ((animT * 5f).toInt() % 2 == 0) rect(c, carX + 20, floor + 6, 18, 6, a(PX.RED, 0x40)) else rect(c, carX + 30, floor + 6, 18, 6, a(PX.BLUE, 0x40))   // its lights in the wet road
         rect(c, carX + 72, floor - 14, 40, 6, a(0xFFFFE9A0.toInt(), 0x30)); rect(c, carX + 72, floor - 12, 70, 2, a(0xFFFFE9A0.toInt(), 0x20))   // headlight beams

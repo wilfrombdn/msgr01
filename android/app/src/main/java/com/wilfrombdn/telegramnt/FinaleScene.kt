@@ -941,7 +941,9 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
     /** The red and blue from outside sweeping over the room. */
     private fun sirenWash(c: Canvas, clock: Float, k: Float) {
         val flip = (clock * 2.6f).toInt() % 2 == 0
-        p.style = Paint.Style.FILL; p.color = a(if (flip) PX.RED else PX.BLUE, (k * 0x38).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p)
+        p.alpha = (k * 255 * 0.8f).toInt().coerceIn(0, 255)
+        if (flip) c.drawBitmap(bigRed, -90f, H * 0.35f - 140f, p) else c.drawBitmap(bigBlue, W - 190f, H * 0.35f - 140f, p)
+        p.alpha = 255
     }
 
     private fun plea(c: Canvas, clock: Float) {

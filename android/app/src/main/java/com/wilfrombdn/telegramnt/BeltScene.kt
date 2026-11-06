@@ -47,6 +47,7 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
         }
     }
 
+    private val headGlow by lazy { glowBitmap(34, 0xFFFFE9A0.toInt(), 0x40) }
     private fun sy(sw: Float): Int = H - ((sw * S).roundToInt() - camWy)
     private fun sx(xw: Float): Int = (xw * S).roundToInt()
     private val laneHalf = 0.68f            // the belts: just wider than you
@@ -362,7 +363,7 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
                 rect(c, x - 8, y + 4, 16, 10, PX.K); rect(c, x - 6, y + 6, 12, 6, 0xFFC03030.toInt())
                 rect(c, x - 22, y + 26, 5, 14, steelL); rect(c, x + 18, y + 26, 5, 14, steelL); rect(c, x - 22, y + 38, 5, 3, PX.K); rect(c, x + 18, y + 38, 5, 3, PX.K)    // the forks, pointing at you
                 rect(c, x - 26, y + 22, 8, 5, PX.W); rect(c, x + 19, y + 22, 8, 5, PX.W)
-                p.color = a(0xFFFFE9A0.toInt(), 0x30); c.drawRect((x - 34).toFloat(), (y + 26).toFloat(), 68f, 36f, p)
+                c.drawBitmap(headGlow, x - 34f, y + 14f, plain)
                 if ((clock * 8f).toInt() % 2 == 0) { rect(c, x - 3, y - 26, 6, 4, PX.RED) }
             }
             BeltWorld.SAWB -> { // a saw on a rail across all three belts

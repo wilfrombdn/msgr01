@@ -641,13 +641,14 @@ internal class DeadDropView(
 
     /** The credits roll up under the title, then the last two lines stop in the middle of the screen. */
     private fun drawCredits(c: Canvas, w: Float, h: Float, ct: Float, over: Boolean) {
-        val gap = 62f * d
+        val gap = 84f * d
+        val startGap = h - barH - 70f * d         // the first credit comes up from the bottom as the title is almost off the top
         val s = creditsScroll(ct)
         fun alphaAt(y: Float): Float = min(((y - barH) / (50f * d)).coerceIn(0f, 1f), ((h - 30f * d - y) / (60f * d)).coerceIn(0f, 1f))
         val n = credits.size
         for ((i, e) in credits.withIndex()) {
-            var y = h / 2 + 110f * d + i * gap - s
-            if (i >= n - 2) y = max(y, h / 2 + (i - (n - 2)) * 60f * d)
+            var y = h / 2 + startGap + i * gap - s
+            if (i >= n - 2) y = max(y, h / 2 + (i - (n - 2)) * 70f * d)
             val al = alphaAt(y)
             if (al <= 0f || ct < 2f) continue
             p.style = Paint.Style.FILL; p.textAlign = Paint.Align.CENTER
@@ -655,7 +656,7 @@ internal class DeadDropView(
             if (e.second.isNotEmpty()) { p.typeface = monoBold; p.letterSpacing = 0.04f; p.textSize = 15f * d; p.color = a(Color.WHITE, (al * 255).toInt()); wrap(c, e.second, w / 2, y + (if (e.first.isNotEmpty()) 22f * d else 0f), w - 40f * d, 19f * d) }
         }
         p.letterSpacing = 0f
-        if (over && ct > 3f + credits.size * gap / (44f * d)) { p.typeface = mono; p.textSize = 11f * d; p.color = a(Color.WHITE, 0x66); c.drawText("tap to close", w / 2, h - 40f * d, p) }
+        if (over && ct > 3f + (startGap + credits.size * gap) / (44f * d)) { p.typeface = mono; p.textSize = 11f * d; p.color = a(Color.WHITE, 0x66); c.drawText("tap to close", w / 2, h - 40f * d, p) }
     }
 
     private companion object {
