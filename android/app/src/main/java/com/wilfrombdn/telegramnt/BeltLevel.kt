@@ -12,12 +12,12 @@ internal object BeltLevel {
     private val laneX = floatArrayOf(3.2f, 7.0f, 10.8f)
     const val END = 420f
 
-    private class Gen(seed: Int, val obs: MutableList<BeltObs>, val coins: MutableList<BeltCoin>) {
+    private class Gen(seed: Int, val obs: MutableList<BeltObs>, val coins: MutableList<BeltCoin>, val arcade: Boolean = false) {
         val r = Random(seed.toLong())
         var s = 13f; var row = 0; var prevFree = 1
         private var bag = mutableListOf<Int>(); private var bagKey: List<Int> = emptyList()
 
-        private fun speed(ss: Float) = 5.2f + 5.2f * (ss.coerceIn(0f, END) / END)
+        private fun speed(ss: Float) = 5.2f + 5.2f * (ss.coerceIn(0f, END) / END) + (if (arcade) minOf(4.2f, maxOf(0f, ss - END) * 0.006f) else 0f)
         private fun lanes(vararg l: Int) = l.toList()
         private fun coinRun(lane: Int, s0: Float, n: Int, high: Boolean = false) { for (i in 0 until n) coins += BeltCoin(s0 + i * 1.15f, lane, high) }
 
@@ -33,7 +33,8 @@ internal object BeltLevel {
                 p < 0.28f -> listOf(0, 1, 2, 8, 9, 13)
                 p < 0.50f -> listOf(2, 3, 4, 5, 8, 9, 11, 13)
                 p < 0.72f -> listOf(3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14)
-                else -> listOf(4, 6, 7, 9, 10, 11, 12, 13, 14, 5, 3)
+                !arcade || s < END -> listOf(4, 6, 7, 9, 10, 11, 12, 13, 14, 5, 3)
+                else -> listOf(4, 6, 7, 9, 10, 11, 12, 13, 14, 5, 3, 15, 16, 17, 18, 15, 17)      // the arcade, past the story's end: more, and worse
             }
             if (bag.isEmpty() || bagKey != kinds) { bag = kinds.shuffled(r).toMutableList(); bagKey = kinds }
             val k = bag.removeAt(0)
@@ -112,6 +113,32 @@ internal object BeltLevel {
                     for (f in path) { for (l in 0..2) if (l != f) obs += BeltObs(BeltWorld.BOX, ss, laneX[l], 0.8f, 0.8f); coinRun(f, ss - 4.5f, 3); ss += g2 }
                     free = path.last(); advance = g2 * 2f + maxOf(8f, sp * 0.95f)
                 }
+                15 -> { // two presses slamming in turn on two belts, a crate behind the open one: wait for your moment
+                    val a = (free + 1) % 3; val b = (free + 2) % 3
+                    obs += BeltObs(BeltWorld.PRESS, s, laneX[a], 1.3f, 1.0f, 0f, 2.0f, ph, 0.5f)
+                    obs += BeltObs(BeltWorld.PRESS, s, laneX[b], 1.3f, 1.0f, 0f, 2.0f, ph + 1.0f, 0.5f)
+                    obs += BeltObs(BeltWorld.BOX, s + 5.5f, laneX[free], 0.8f, 0.8f)
+                    coinRun(free, s - 7f, 4, false); coinRun(free, s + 4.8f, 3, true)
+                }
+                16 -> { // a forklift down one side, then a saw sweeping back: leap, then leap again
+                    val a = if (free == 0) 1 else 0; val b = a + 1
+                    obs += BeltObs(BeltWorld.TRUCK, s + 10f, (laneX[a] + laneX[b]) / 2f, (laneX[b] - laneX[a]) / 2f + 0.9f, 1.7f)
+                    obs += BeltObs(BeltWorld.SMALL, s + 7f, laneX[free], 1.0f, 0.5f)
+                    coinRun(free, s - 7f, 5); coinRun(free, s + 5f, 3, true)
+                    advance += 3f
+                }
+                17 -> { // a wall: crates on two belts and a barrier on the third. Leap across and jump at once
+                    for (l in 0..2) obs += if (l == free) BeltObs(BeltWorld.SMALL, s, laneX[l], 1.0f, 0.5f) else BeltObs(BeltWorld.BOX, s, laneX[l], 0.8f, 0.8f)
+                    coinRun(free, s - 7f, 3); coinRun(free, s - 2.2f, 4, true)
+                }
+                18 -> { // holes in all three belts, then crates on two: jump, land, leap
+                    for (l in 0..2) obs += BeltObs(BeltWorld.GAP, s, laneX[l], 1.45f, 1.1f)
+                    coinRun(1, s - 2.0f, 4, true)
+                    val g2 = maxOf(7.0f, sp * 0.75f)
+                    for (l in 0..2) if (l != free) obs += BeltObs(BeltWorld.BOX, s + g2, laneX[l], 0.8f, 0.8f)
+                    coinRun(free, s + g2 - 4f, 3)
+                    advance = g2 + maxOf(8f, sp * 0.95f)
+                }
                 else -> { // a chain: barriers to jump, then straight away a wall of crates to leap round
                     for (l in 0..2) obs += BeltObs(BeltWorld.SMALL, s, laneX[l], 1.0f, 0.5f)
                     coinRun(1, s - 2.2f, 5, true)
@@ -123,6 +150,7 @@ internal object BeltLevel {
                 }
             }
             prevFree = free
+            if (arcade && s > END) advance *= maxOf(0.72f, 1f - (s - END) * 0.0006f)
             s += advance; row++
         }
     }
@@ -130,14 +158,14 @@ internal object BeltLevel {
     /** The arcade version: the belts never end; how far you get and the coins you grab are your score. */
     val warehouseArcade: BeltSpec get() {
         val obs = ArrayList<BeltObs>(); val coins = ArrayList<BeltCoin>()
-        val g = Gen(21 + (System.nanoTime() % 1000).toInt(), obs, coins)
-        return BeltSpec(obs, coins, END, laneX, 1_000_000) { upTo -> g.fill(upTo) }
+        val g = Gen(21 + (System.nanoTime() % 1000).toInt(), obs, coins, arcade = true)
+        return BeltSpec(obs, coins, END, laneX, 1_000_000, { upTo -> g.fill(upTo) }, arcade = true)
     }
 
     /** A fresh run every attempt: things are made ahead of you as the belts go on. */
     val warehouse: BeltSpec get() {
         val obs = ArrayList<BeltObs>(); val coins = ArrayList<BeltCoin>()
         val g = Gen(21, obs, coins)
-        return BeltSpec(obs, coins, END, laneX, 100) { upTo -> g.fill(upTo) }
+        return BeltSpec(obs, coins, END, laneX, 100, extend = { upTo -> g.fill(upTo) })
     }
 }

@@ -70,11 +70,11 @@ internal class DeadDropView(
     /** The "choose a letter" screen is up (it opens first once the game is beaten). */
     private var choosing = beaten
     private val chooserRows = ArrayList<RectF>()
-    internal fun openChooser() { choosing = true; arcadeId = null; tracks.stop(); invalidate() }
+    internal fun openChooser() { choosing = true; hangar = false; arcadeId = null; tracks.stop(); invalidate() }
 
     // ---------- the arcade (after the game is beaten): each mini-game as an endless game with a score ----------
     private val ARCADE = listOf("maze" to "SEWER MAZE", "belt" to "CONVEYOR RUN", "fly" to "JETPACK", "hall" to "TOWN HALL", "tower" to "THE TOWER", "uplink" to "UPLINK")
-    private val ARCADE_HOW = mapOf("maze" to "ENDLESS MAZES. 3 LIVES.", "belt" to "HOW FAR CAN YOU GET?", "fly" to "COLLECT COINS. 3 HITS.", "hall" to "CLEAR THE WHOLE HALL.", "tower" to "EVERY CLIMB GETS FASTER.", "uplink" to "HOW LONG CAN YOU REMEMBER?")
+    private val ARCADE_HOW = mapOf("maze" to "ENDLESS MAZES. 3 LIVES.", "belt" to "HOW FAR CAN YOU GET?", "fly" to "BANK COINS. BUY BETTER JETPACKS.", "hall" to "CLEAR THE WHOLE HALL.", "tower" to "EVERY CLIMB GETS FASTER.", "uplink" to "HOW LONG CAN YOU REMEMBER?")
     private var arcadeId: String? = null
     private var arcLives = 3; private var arcScore = 0; private var arcOver = false; private var arcOverT = 0f; private var arcWon = false
     private var pacBank = 0; private var arcRound = 1; private var flyHit = false; private var pacCaughtT = -1f
@@ -85,25 +85,93 @@ internal class DeadDropView(
         when (id) {
             "maze" -> { levelIdx = 1; load(false); attempt = 2; toStage(1); newArcadeMaze() }
             "belt" -> { levelIdx = 2; load(false); belt = BeltWorld(BeltLevel.warehouseArcade); beltScene = BeltScene(belt!!) }
-            "fly" -> { levelIdx = 2; load(false); startMg(1); fly = FlyWorld(FlySpec((System.nanoTime() % 1000).toInt(), 1_000_000)); flyScene = FlyScene(fly!!) }
+            "fly" -> { levelIdx = 2; load(false); startMg(1); fly = FlyWorld(FlySpec((System.nanoTime() % 1000).toInt(), 1_000_000, packNow, arcade = true)); flyScene = FlyScene(fly!!) }
             "hall" -> { levelIdx = 3; load(false); startMg(1) }
             "tower" -> { levelIdx = 5; load(false); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.CLIMB) }
             "uplink" -> { levelIdx = 5; load(false); finale = FinaleWorld((System.nanoTime() % 100000).toInt()); finaleScene = FinaleScene(finale!!); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.SIMON); finale?.let { fw -> fw.debugNewSeq() } }
         }
         fade = 0f; fadeDir = 0; cue = ""; applyCue()
     }
+    // ---------- the hangar (arcade jetpack): bank the coins you collect, buy jetpacks that fly differently ----------
+    private var hangar = false
+    private val hangarRows = ArrayList<RectF>()
+    private var hangarFly = RectF(); private var hangarBack = RectF()
+    private var hangarMsg = ""; private var hangarMsgT = 0f
+    private val bank get() = prefsDD.getInt("fly_bank", 0)
+    private val owned get() = prefsDD.getInt("fly_owned", 1) or 1
+    private val packNow get() = prefsDD.getInt("fly_pack", 0).takeIf { owned and (1 shl it) != 0 } ?: 0
+    internal fun openHangar() { hangar = true; choosing = false; arcadeId = null; arcOver = false; fly = null; flyScene = null; mgIdx = -1; tracks.stop(); invalidate() }
+    internal fun isHangar() = hangar
+    internal fun debugBank(n: Int) = prefsDD.edit().putInt("fly_bank", n).apply()
+    internal fun debugBuy(i: Int) = hangarTap(i)
+    private fun hangarTap(i: Int) {
+        val have = owned and (1 shl i) != 0
+        if (have) { prefsDD.edit().putInt("fly_pack", i).apply(); hangarMsg = "${JetPacks.NAMES[i]} READY."; hangarMsgT = 2f; return }
+        val price = JetPacks.PRICE[i]
+        if (bank < price) { hangarMsg = "NEED ${price - bank} MORE COINS."; hangarMsgT = 2f; return }
+        prefsDD.edit().putInt("fly_bank", bank - price).putInt("fly_owned", owned or (1 shl i)).putInt("fly_pack", i).apply()
+        hangarMsg = "BOUGHT ${JetPacks.NAMES[i]}!"; hangarMsgT = 2.5f
+    }
+    private fun hangarTouch(e: MotionEvent): Boolean {
+        if (e.actionMasked != MotionEvent.ACTION_UP) return true
+        if (hangarFly.contains(e.x, e.y)) { hangar = false; startArcade("fly"); return true }
+        if (hangarBack.contains(e.x, e.y)) { hangar = false; openChooser(); return true }
+        for ((i, r) in hangarRows.withIndex()) if (r.contains(e.x, e.y)) { hangarTap(i); invalidate(); break }
+        return true
+    }
+    private fun drawHangar(c: Canvas) {
+        val w = width.toFloat(); val h = height.toFloat()
+        c.drawColor(0xFF03050A.toInt())
+        val top = barH + 30f * d
+        mgText(c, "THE HANGAR", w / 2f, top + 20f * d, 22f, Color.WHITE)
+        mgText(c, "COINS IN THE BANK:  ${bank}", w / 2f, top + 46f * d, 13f, 0xFFFFD84D.toInt())
+        hangarRows.clear()
+        val rowH = min(92f * d, (h - top - 200f * d - botInset) / JetPacks.NAMES.size)
+        val sel = packNow
+        for (i in JetPacks.NAMES.indices) {
+            val y0 = top + 64f * d + i * rowH
+            val r = RectF(20f * d, y0, w - 20f * d, y0 + rowH - 8f * d); hangarRows += r
+            val col = JetPacks.COLOR[i]; val have = owned and (1 shl i) != 0
+            p.style = Paint.Style.FILL; p.color = if (i == sel) 0xFF142034.toInt() else 0xFF0A0E16.toInt(); c.drawRoundRect(r, 6f * d, 6f * d, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = (if (i == sel) 2.5f else 1f) * d; p.color = a(col, if (i == sel) 0xFF else 0x88); c.drawRoundRect(r, 6f * d, 6f * d, p)
+            // a little jetpack in its colour
+            p.style = Paint.Style.FILL; val jx = r.left + 30f * d; val jy = r.centerY()
+            p.color = col; c.drawRoundRect(jx - 9f * d, jy - 16f * d, jx + 9f * d, jy + 12f * d, 3f * d, 3f * d, p)
+            p.color = a(Color.WHITE, 0x70); c.drawRect(jx - 9f * d, jy - 16f * d, jx + 9f * d, jy - 12f * d, p)
+            p.color = 0xFFFF9A3A.toInt(); c.drawRect(jx - 5f * d, jy + 12f * d, jx + 5f * d, jy + 18f * d + ((clock * 20f).toInt() % 3) * d, p)
+            p.textAlign = Paint.Align.LEFT; p.typeface = monoBold; p.letterSpacing = 0.04f; p.textSize = 15f * d; p.color = if (have) Color.WHITE else a(Color.WHITE, 0x99)
+            c.drawText(JetPacks.NAMES[i], r.left + 56f * d, r.centerY() - 4f * d, p)
+            p.typeface = mono; p.textSize = 10f * d; p.color = a(col, 0xDD); c.drawText(JetPacks.HOW[i], r.left + 56f * d, r.centerY() + 14f * d, p)
+            p.textAlign = Paint.Align.RIGHT; p.typeface = monoBold; p.textSize = 11f * d
+            p.color = when { i == sel -> 0xFF3BFF9A.toInt(); have -> a(Color.WHITE, 0xAA); bank >= JetPacks.PRICE[i] -> 0xFFFFD84D.toInt(); else -> a(0xFFFFD84D.toInt(), 0x66) }
+            c.drawText(when { i == sel -> "EQUIPPED"; have -> "OWNED"; else -> "${JetPacks.PRICE[i]} ¢" }, r.right - 14f * d, r.centerY() + 4f * d, p)
+            p.textAlign = Paint.Align.CENTER; p.letterSpacing = 0f
+        }
+        val by = top + 64f * d + JetPacks.NAMES.size * rowH + 10f * d
+        hangarFly = RectF(w / 2f - 110f * d, by, w / 2f + 110f * d, by + 54f * d)
+        p.style = Paint.Style.FILL; p.color = 0xFFE0A020.toInt(); c.drawRoundRect(hangarFly, 8f * d, 8f * d, p)
+        mgText(c, "FLY!", w / 2f, hangarFly.centerY() + 8f * d, 20f, 0xFF140C02.toInt())
+        hangarBack = RectF(w / 2f - 80f * d, by + 66f * d, w / 2f + 80f * d, by + 104f * d)
+        mgText(c, "BACK TO THE ARCADE", w / 2f, hangarBack.centerY() + 4f * d, 11f, a(Color.WHITE, 0x99), false)
+        hangarMsgT -= 1f / 60f
+        if (hangarMsgT > 0f) mgText(c, hangarMsg, w / 2f, top + 64f * d - 4f * d, 11f, 0xFF3BFF9A.toInt())
+        mgText(c, "COINS YOU COLLECT GO IN THE BANK. TAP A JETPACK TO BUY OR EQUIP IT.", w / 2f, h - botInset - 16f * d, 8.5f, a(Color.WHITE, 0x77), false)
+    }
+
     private fun arcadeOver(won: Boolean = false) {
         if (arcOver) return
         arcOver = true; arcOverT = 0f; arcWon = won
+        if (arcadeId == "fly") fly?.let { f -> prefsDD.edit().putInt("fly_bank", bank + f.coins).apply() }
         val id = arcadeId ?: return
         if (arcScore > best(id)) prefsDD.edit().putInt("best_$id", arcScore).apply()
     }
     /** The arcade games run here instead of the story's stage-to-stage flow. */
     private fun arcadeUpdate(dt: Float) {
         if (arcOver) { arcOverT += dt; return }
+        beltZoneT += dt
         belt?.let { b -> b.update(dt, ix, iy, mag); arcScore = b.coins * 10 + b.s.toInt(); if (b.phase == BeltWorld.Phase.FALL && b.phaseT > 1.2f) arcadeOver() }
         fly?.let { f ->
-            f.thrust = thrustId >= 0; f.update(dt); arcScore = f.coins * 10
+            f.thrust = thrustId >= 0; f.update(dt); if (soundOn) for (e in f.events) DeadLetterSfx.play(e); f.events.clear(); arcScore = f.coins * 10 + f.scroll.toInt()
             if (f.hitFlash > 0.4f && !flyHit) { flyHit = true; arcLives--; if (arcLives <= 0) arcadeOver() } else if (f.hitFlash < 0.3f) flyHit = false
         }
         shoot?.let { sw ->
@@ -121,6 +189,7 @@ internal class DeadDropView(
     /** The sewer maze in the arcade: four sewers in turn, faster each level, with flares that make the police panic; 3 lives. */
     private fun newArcadeMaze(keep: PacWorld? = null) { pac = PacWorld(PacMaze.arcade(arcRound)).also { if (keep != null) it.carryOn(keep) }; pacScene = PacScene(pac!!); pacWant = -1; if (keep == null) arcBanner = 0f }
     private var arcBanner = 9f
+    private var beltZone = -1; private var beltZoneT = 9f
     private fun arcadePacTick(dt: Float) {
         val pw = pac ?: return
         arcBanner += dt
@@ -141,6 +210,8 @@ internal class DeadDropView(
         p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x90); c.drawRect(0f, y - 18f * d, w, y + 8f * d, p)
         mgText(c, "SCORE $arcScore", w / 2f - 70f * d, y, 12f, 0xFFFFD84D.toInt())
         mgText(c, if (id == "belt" || id == "hall" || id == "uplink") "BEST ${best(id)}" else "♥".repeat(arcLives.coerceAtLeast(0)) + "  BEST ${best(id)}", w / 2f + 70f * d, y, 12f, if (id == "belt" || id == "hall" || id == "uplink") a(Color.WHITE, 0xCC) else 0xFFFF6A7A.toInt())
+        if (id == "belt") belt?.let { b -> val z = BeltWorld.zoneAt(b.s); if (z != beltZone) { beltZone = z; beltZoneT = 0f }
+            if (beltZoneT < 3f && b.s > 5f) { val k = min(1f, (3f - beltZoneT) * 2f); mgText(c, BeltWorld.ZONES[z], w / 2f, y + 26f * d, 13f, a(0xFF3DE8F5.toInt(), (k * 255).toInt())) } }
         if (id == "tower") finale?.let { fw ->
             if (fw.screenT < 3f && fw.stage == FinaleWorld.Stage.CLIMB) { val k = min(1f, (3f - fw.screenT) * 2f); mgText(c, "SCREEN ${fw.arcadeRound + 1}  ·  ${fw.lay.name}", w / 2f, y + 26f * d, 13f, a(0xFF3DE8F5.toInt(), (k * 255).toInt()))
                 mgText(c, if (fw.lay.breakers.isNotEmpty()) "THROW EVERY BREAKER" else "GET TO THE TOP", w / 2f, y + 44f * d, 10f, a(Color.WHITE, (k * 0xCC).toInt())) }
@@ -152,7 +223,8 @@ internal class DeadDropView(
             mgText(c, if (arcWon) "HALL CLEARED" else "GAME OVER", w / 2f, h / 2f - 30f * d, 26f, a(if (arcWon) 0xFF3BFF9A.toInt() else 0xFFFF4A5A.toInt(), (k * 255).toInt()))
             mgText(c, "SCORE  $arcScore", w / 2f, h / 2f + 4f * d, 15f, a(0xFFFFD84D.toInt(), (k * 255).toInt()))
             mgText(c, if (arcScore >= best(id) && arcScore > 0) "A NEW BEST!" else "BEST  ${best(id)}", w / 2f, h / 2f + 28f * d, 12f, a(Color.WHITE, (k * 0xCC).toInt()))
-            if (arcOverT > 0.8f) mgText(c, "TAP TO PLAY AGAIN  ·  HOLD ↻ FOR THE MENU", w / 2f, h / 2f + 64f * d, 10f, a(Color.WHITE, 0x99), false)
+            if (id == "fly") fly?.let { f -> mgText(c, "+${f.coins} COINS TO THE BANK  (${bank})", w / 2f, h / 2f + 46f * d, 11f, a(0xFFFFD84D.toInt(), (k * 0xDD).toInt())) }
+            if (arcOverT > 0.8f) mgText(c, if (id == "fly") "TAP FOR THE HANGAR" else "TAP TO PLAY AGAIN  ·  HOLD ↻ FOR THE MENU", w / 2f, h / 2f + 64f * d, 10f, a(Color.WHITE, 0x99), false)
         }
     }
     internal fun isChoosing() = choosing
@@ -371,7 +443,7 @@ internal class DeadDropView(
                 else if (m == "shoot" && hypot(x - gunCx, y - joyCy) < gunR * 1.25f) gunId = id
                 else if (m == "shoot" && hypot(x - grCx, y - grCy) < grR * 1.4f) { grId = id; grX0 = x; grY0 = y }   // drag from the grenade button to aim it
                 else if (m == "shoot" && joyId >= 0) { rollId = id; rollX = x; rollY = y; rolled = false }
-                else if (m == "fly") thrustId = id
+                else if (m == "fly") { thrustId = id; fly?.tap() }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (soundTap) return true
@@ -968,10 +1040,11 @@ internal class DeadDropView(
 
     // ---------- thumb ----------
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (arcadeId != null && arcOver) { if (e.actionMasked == MotionEvent.ACTION_UP && arcOverT > 0.8f) startArcade(arcadeId!!); return true }
+        if (hangar) return hangarTouch(e)
+        if (arcadeId != null && arcOver) { if (e.actionMasked == MotionEvent.ACTION_UP && arcOverT > 0.8f) { if (arcadeId == "fly") openHangar() else startArcade(arcadeId!!) }; return true }
         if (choosing) {
             if (e.actionMasked == MotionEvent.ACTION_UP) for ((i, r) in chooserRows.withIndex()) if (r.contains(e.x, e.y)) {
-                if (i < ARCADE.size) startArcade(ARCADE[i].first)
+                if (i < ARCADE.size) { if (ARCADE[i].first == "fly") openHangar() else startArcade(ARCADE[i].first) }
                 else { choosing = false; arcadeId = null; levelIdx = 0; saveLevel(0); load(false) }   // the story, from the start
                 break
             }
@@ -1044,6 +1117,7 @@ internal class DeadDropView(
     }
 
     private fun drawAll(c: Canvas) {
+        if (hangar) { drawHangar(c); return }
         if (choosing) { drawChooser(c); return }
         if (mgIdx >= 0) { drawMg(c); drawArcade(c); return }
         val w = width.toFloat(); val h = height.toFloat()

@@ -101,6 +101,8 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
                 if (r % 2 == 0) { rect(c, x0, y, wR, 3, 0xFFC8642A.toInt()); rect(c, x0, y, wR, 1, 0xFFF0904A.toInt()); rect(c, x0, y + 2, wR, 1, 0xFF6A3418.toInt()) }   // the beams
                 val kind = hash(r, (rx * 10).toInt(), 17) % 9
                 val bx = x0 + 4; val by = y + (if (r % 2 == 0) 4 else 1); val bw = wR - 8; val bh = 11
+                val zone = if (world.spec.arcade) BeltWorld.zoneAt(r / DEPTH) else 0
+                if (zone != 0) { zoneBay(c, zone, kind, r, x0, y, wR, bx, by, bw, bh); continue }
                 when {
                     kind == 0 -> { }                                                                                  // an empty bay
                     kind < 5 -> {                                                                                     // a pallet stacked with boxes, shrink-wrapped
@@ -114,6 +116,11 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
                     else -> { for (q in 0..2) { val sx2 = bx + q * 7; rect(c, sx2, by + 1, 6, 9, 0xFFC8B890.toInt()); rect(c, sx2, by + 1, 6, 2, 0xFFE8DCB8.toInt()); rect(c, sx2 + 2, by + 4, 2, 2, 0xFF8A7A50.toInt()) } }                  // sacks
                 }
             }
+        }
+        // the arcade's parts of the warehouse: a wash of their own colour over the floor
+        if (world.spec.arcade) for (r in fr0..fr1) { val z = BeltWorld.zoneAt(r / DEPTH); if (z == 0) continue
+            val y = fy(r.toFloat() + 1f); rect(c, 0, y, W, S, a(when (z) { 1 -> 0xFF8AD0FF.toInt(); 2 -> 0xFFFFB050.toInt(); else -> 0xFF60FF9A.toInt() }, 0x16))
+            if (z == 1 && hash(r, 3, 31) % 3 == 0) for (k in 0 until 6) px(c, hash(r, k, 32) % W, y + hash(r, k, 33) % S, a(PX.W, 0x90))      // frost glinting
         }
         // everything down there is far below and dim: a blue-black haze over it so the belts stand out
         rect(c, -4, -4, W + 8, H + 8, 0x9004070E.toInt())
@@ -171,6 +178,31 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
             for (k in 0 until n) { val x = hash(k, (clock * 22f).toInt(), 9) % W; val y = hash(k, (clock * 22f).toInt(), 10) % H; rect(c, x, y, 1, 10 + k % 6, a(PX.W, 0x30)) }
         }
         return frame
+    }
+
+    /** One bay of the floor below in the arcade's other parts of the warehouse (our own scenery, drawn from above). */
+    private fun zoneBay(c: Canvas, zone: Int, kind: Int, r: Int, x0: Int, y: Int, wR: Int, bx: Int, by: Int, bw: Int, bh: Int) {
+        when (zone) {
+            1 -> { // the cold store: white freezer units with frosted lids and plastic strip curtains between them
+                rect(c, x0 - 1, y, wR + 2, S, 0xFF0A1218.toInt())
+                if (r % 3 != 0) { rect(c, x0 + 1, y + 1, wR - 2, S - 2, 0xFFB8D4E8.toInt()); rect(c, x0 + 1, y + 1, wR - 2, 2, 0xFFE8F6FF.toInt()); rect(c, x0 + 3, y + 5, wR - 6, 1, 0xFF6A8AA0.toInt())
+                    if (kind % 3 == 0) rect(c, x0 + wR / 2 - 3, y + 7, 6, 3, 0xFF3BA0FF.toInt()) }
+                else for (k in 0 until wR step 4) rect(c, x0 + k, y, 2, S, a(0xFFC8E8FF.toInt(), 0x70))
+            }
+            2 -> { // the loading docks: trailers backed up to the bays, roller doors, a yellow bumper on each bay
+                rect(c, x0 - 1, y, wR + 2, S, 0xFF0C0A08.toInt())
+                val trailer = hash(r / 4, x0, 41) % 3 != 0
+                if (trailer) { rect(c, x0 + 2, y, wR - 4, S, 0xFF8A8E96.toInt()); rect(c, x0 + 2, y, 2, S, 0xFFC0C6D0.toInt()); for (k in 0 until S step 4) rect(c, x0 + 4, y + k, wR - 8, 1, 0xFF5A5E66.toInt())
+                    if (r % 4 == 0) { rect(c, x0 + 2, y, wR - 4, 3, 0xFFE8A020.toInt()); rect(c, x0 + 6, y + 4, wR - 12, 5, 0xFF2A3A4C.toInt()) } }
+                else { rect(c, x0 + 2, y, wR - 4, S, 0xFF2A2420.toInt()); if (r % 4 == 1) rect(c, x0 + 2, y + 6, wR - 4, 3, 0xFFFFC82E.toInt()) }
+            }
+            else -> { // the sorting hall: parcel chutes with rollers, parcels sliding down, sorting bins
+                rect(c, x0 - 1, y, wR + 2, S, 0xFF080C0A.toInt())
+                rect(c, x0 + 2, y, wR - 4, S, 0xFF2A3A30.toInt()); for (k in 0 until S step 3) rect(c, x0 + 3, y + k, wR - 6, 1, 0xFF4A6A54.toInt())
+                if (kind < 5) { val bc = boxCols[kind % boxCols.size]; val off = ((animT * 10f).toInt() + r * 5) % S; rect(c, x0 + 6 + (kind % 3) * 4, y + off, 8, 6, bc); rect(c, x0 + 6 + (kind % 3) * 4, y + off, 8, 1, lite(bc, 30)) }
+                if (r % 5 == 0) { rect(c, x0, y + 2, wR, 10, 0xFF1A5A3A.toInt()); rect(c, x0 + 2, y + 4, wR - 4, 6, 0xFF0A1A12.toInt()) }
+            }
+        }
     }
 
     // ---------------- the belts ----------------

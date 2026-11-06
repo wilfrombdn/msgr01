@@ -228,7 +228,12 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
         for (z in world.hazards) {
             val x = ((z.wx - sc) * S).roundToInt()
             if (x < -30 || x > W + 30) continue
-            if (z.kind == 0) saw(c, x, (world.sawY(z) * S).roundToInt(), z, clock) else gate(c, x, (world.sawY(z) * S).roundToInt(), z, clock)
+            when (z.kind) {
+                0 -> saw(c, x, (world.sawY(z) * S).roundToInt(), z, clock)
+                2 -> { val e = world.spinEnds(z); zapBar(c, ((e[0] - sc) * S).roundToInt(), (e[1] * S).roundToInt(), ((e[2] - sc) * S).roundToInt(), (e[3] * S).roundToInt(), clock); rect(c, x - 4, (z.y * S).roundToInt() - 4, 9, 9, PX.K); rect(c, x - 3, (z.y * S).roundToInt() - 3, 7, 7, steel) }
+                3 -> drone(c, x, (world.droneY(z) * S).roundToInt(), clock)
+                else -> gate(c, x, (world.sawY(z) * S).roundToInt(), z, clock)
+            }
         }
         for (co in world.coinList) {
             if (co.taken) continue
@@ -241,19 +246,7 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
             val x1 = ((z.wx - sc) * S).roundToInt(); val x2 = ((z.wx + z.dx - sc) * S).roundToInt()
             if ((x1 < -30 && x2 < -30) || (x1 > W + 30 && x2 > W + 30)) continue
             val y1 = (z.y1 * S).roundToInt(); val y2 = (z.y2 * S).roundToInt()
-            val n = 14
-            for (k in 0 until n) {
-                val t0 = k / n.toFloat(); val t1 = (k + 1) / n.toFloat()
-                val ax = x1 + ((x2 - x1) * t0).roundToInt(); val ay = y1 + ((y2 - y1) * t0).roundToInt()
-                val bx = x1 + ((x2 - x1) * t1).roundToInt(); val by = y1 + ((y2 - y1) * t1).roundToInt()
-                val j = ((hash(k, (clock * 24f).toInt(), 6) % 7) - 3)
-                rect(c, minOf(ax, bx) + j, minOf(ay, by), abs(bx - ax) + 3, abs(by - ay) + 3, a(cyan, 0x90))
-                rect(c, minOf(ax, bx) + j, minOf(ay, by), abs(bx - ax) + 1, abs(by - ay) + 1, PX.W)
-            }
-            for ((nx, ny) in listOf(x1 to y1, x2 to y2)) {
-                rect(c, nx - 5, ny - 5, 10, 10, PX.K); rect(c, nx - 4, ny - 4, 8, 8, steel); rect(c, nx - 3, ny - 3, 3, 3, steelL); rect(c, nx - 2, ny - 2, 4, 4, a(cyan, 0xC0))
-                c.drawBitmap(cyanGlow, (nx - 14).toFloat(), (ny - 14).toFloat(), plain)
-            }
+            zapBar(c, x1, y1, x2, y2, clock)
         }
         rockets(c, clock)
 
@@ -278,10 +271,13 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
                 val tumble = world.phase == FlyWorld.Phase.DROP
                 c.save()
                 if (tumble) c.rotate((world.phaseT * 340f) % 360f, fx.toFloat(), (bodyY - 8).toFloat())
-                rect(c, fx - 10, bodyY - 12, 6, 13, PX.K); rect(c, fx - 9, bodyY - 11, 4, 11, 0xFFC03030.toInt()); rect(c, fx - 9, bodyY - 11, 4, 2, 0xFFFF7070.toInt())
+                if (world.flipped) c.scale(1f, -1f, fx.toFloat(), (bodyY - 2).toFloat())   // the flipper: upside down on the ceiling
+                val packC = JetPacks.COLOR[world.spec.pack.coerceIn(0, 4)]
+                rect(c, fx - 10, bodyY - 12, 6, 13, PX.K); rect(c, fx - 9, bodyY - 11, 4, 11, packC); rect(c, fx - 9, bodyY - 11, 4, 2, lite0(packC, 70))
+                if (world.spec.pack == 4) { rect(c, fx - 12, bodyY - 9, 2, 6, 0xFFC03030.toInt()); rect(c, fx - 12, bodyY - 9, 2, 2, 0xFFE8EEF8.toInt()) }   // the magnet
                 rect(c, fx - 9, bodyY, 4, 2, steel)
                 folk(c, fx, bodyY + 8, 1, if (world.phase == FlyWorld.Phase.FLY && world.thrust) 1 else 0, clerk, false, true)
-                val burning = (world.phase == FlyWorld.Phase.FLY && world.thrust) || (world.phase == FlyWorld.Phase.SPUTTER && (world.phaseT % 0.55f) < 0.16f)
+                val burning = (world.phase == FlyWorld.Phase.FLY && (if (world.spec.pack == 2 || world.spec.pack == 3) world.vy * (if (world.flipped) 1f else -1f) > 2f else world.thrust)) || (world.phase == FlyWorld.Phase.SPUTTER && (world.phaseT % 0.55f) < 0.16f)
                 if (burning) {
                     // a layered flame: white-hot core, gold, orange, a red tip, flickering; a warm glow on everything near
                     val fl = 10 + (clock * 30f).toInt() % 6; val wob = ((clock * 40f).toInt() % 3) - 1
@@ -304,9 +300,47 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
         for (i in -1..(W / 170 + 2)) { val idx = (frontOff + i * 170) / 170; val x = i * 170 - mod(frontOff, 170) + 30
             if (hash(idx, 2, 21) % 3 == 0) { rect(c, x, 0, 14, H, 0xFF05080C.toInt()); rect(c, x + 13, 0, 1, H, 0xFF1A2230.toInt()); for (yy in 20 until H step 40) rect(c, x - 2, yy, 18, 4, 0xFF080C12.toInt()) }
             else if (hash(idx, 3, 21) % 2 == 0) { rect(c, x, H - 46, 40, 8, 0xFF05080C.toInt()); rect(c, x + 34, H - 46, 8, 46, 0xFF05080C.toInt()); rect(c, x, H - 46, 40, 1, 0xFF1A2230.toInt()) } }
+        if (world.spec.arcade && world.zone != 0) {   // the arcade's parts of the factory: the boiler room glows red, the server vault cold blue, the foundry orange
+            val z = world.zone; val col = when (z) { 1 -> 0xFFFF5A2A.toInt(); 2 -> 0xFF2AC8FF.toInt(); else -> 0xFFFFA02A.toInt() }
+            p.color = a(col, 0x22 + ((sin(clock * (if (z == 3) 5f else 1.5f)) + 1f) * 8).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p)
+            val off = (world.scroll * S).toInt()
+            for (i in -1..(W / 60 + 2)) { val x = i * 60 - mod(off, 60) + 20; val idx = (off + i * 60) / 60
+                when (z) {
+                    1 -> { val ph = (clock * 1.2f + idx * 0.3f) % 1f; rect(c, x, H - 40 - (ph * 50).toInt(), 6, 6, a(0xFFFF8A3A.toInt(), ((1f - ph) * 0xB0).toInt())) }     // embers rising
+                    2 -> for (k in 0..3) px(c, x + k * 3, 60 + (idx % 4) * 30 + k * 5, if ((clock * 5f + k + idx).toInt() % 3 == 0) 0xFF3BFF9A.toInt() else 0xFF2AC8FF.toInt())   // blinking racks
+                    else -> { if (hash(idx, 4, 7) % 3 == 0) { rect(c, x, H - 22, 30, 4, 0xFFFFC84A.toInt()); rect(c, x + 2, H - 21, 26, 1, PX.W) } }                  // molten channels
+                }
+            }
+        }
         c.drawBitmap(vignette, 0f, 0f, plain)
         if (world.hitFlash > 0f) { p.color = a(cyan, (world.hitFlash * 0x70).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
         return frame
+    }
+
+    /** An electric zapper between two posts. */
+    private fun zapBar(c: Canvas, x1: Int, y1: Int, x2: Int, y2: Int, clock: Float) {
+            val n = 14
+            for (k in 0 until n) {
+                val t0 = k / n.toFloat(); val t1 = (k + 1) / n.toFloat()
+                val ax = x1 + ((x2 - x1) * t0).roundToInt(); val ay = y1 + ((y2 - y1) * t0).roundToInt()
+                val bx = x1 + ((x2 - x1) * t1).roundToInt(); val by = y1 + ((y2 - y1) * t1).roundToInt()
+                val j = ((hash(k, (clock * 24f).toInt(), 6) % 7) - 3)
+                rect(c, minOf(ax, bx) + j, minOf(ay, by), abs(bx - ax) + 3, abs(by - ay) + 3, a(cyan, 0x90))
+                rect(c, minOf(ax, bx) + j, minOf(ay, by), abs(bx - ax) + 1, abs(by - ay) + 1, PX.W)
+            }
+            for ((nx, ny) in listOf(x1 to y1, x2 to y2)) {
+                rect(c, nx - 5, ny - 5, 10, 10, PX.K); rect(c, nx - 4, ny - 4, 8, 8, steel); rect(c, nx - 3, ny - 3, 3, 3, steelL); rect(c, nx - 2, ny - 2, 4, 4, a(cyan, 0xC0))
+                c.drawBitmap(cyanGlow, (nx - 14).toFloat(), (ny - 14).toFloat(), plain)
+            }
+            }
+
+    /** A little security drone (arcade): grey body, red eye, spinning rotors. */
+    private fun drone(c: Canvas, x: Int, y: Int, clock: Float) {
+        rect(c, x - 9, y - 5, 19, 11, PX.K); rect(c, x - 8, y - 4, 17, 9, steelD); rect(c, x - 8, y - 4, 17, 2, steelL)
+        rect(c, x - 6, y - 1, 5, 4, PX.K); rect(c, x - 5, y, 3, 2, if ((clock * 8f).toInt() % 2 == 0) PX.RED else 0xFFFFB0B0.toInt())
+        val sp = (clock * 30f).toInt() % 2
+        rect(c, x - 12 + sp * 2, y - 8, 9, 2, steelL); rect(c, x + 4 - sp * 2, y - 8, 9, 2, steelL); rect(c, x - 1, y - 7, 3, 3, PX.K)
+        c.drawBitmap(redGlow, (x - 7 - 16).toFloat(), (y + 1 - 16).toFloat(), plain)
     }
 
     private fun saw(c: Canvas, x: Int, y: Int, z: FlyWorld.Haz, clock: Float) {

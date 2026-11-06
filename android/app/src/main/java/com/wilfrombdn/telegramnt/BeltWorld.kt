@@ -24,6 +24,8 @@ internal class BeltCoin(val s: Float, val lane: Int, val high: Boolean) { var ta
 internal class BeltSpec(
     val obstacles: MutableList<BeltObs>, val coins: MutableList<BeltCoin>, val endS: Float, val laneX: FloatArray,
     val coinGoal: Int = 100, val extend: (Float) -> Unit = {},
+    /** The arcade's endless run: it keeps getting faster past the story's end, through new parts of the warehouse. */
+    val arcade: Boolean = false,
 )
 
 internal class BeltWorld(val spec: BeltSpec) {
@@ -72,7 +74,7 @@ internal class BeltWorld(val spec: BeltSpec) {
         }
     }
 
-    fun speedAt(ss: Float) = 5.2f + 5.2f * (ss.coerceIn(0f, spec.endS) / spec.endS)
+    fun speedAt(ss: Float) = 5.2f + 5.2f * (ss.coerceIn(0f, spec.endS) / spec.endS) + (if (spec.arcade) min(4.2f, max(0f, ss - spec.endS) * 0.006f) else 0f)
 
     fun obsX(o: BeltObs): Float = obsXAt(o, t)
     fun obsXAt(o: BeltObs, tt: Float): Float = if (o.amp != 0f && o.period > 0f) o.x + o.amp * sin(2f * PI.toFloat() * (tt + o.phase) / o.period) else o.x
@@ -168,6 +170,10 @@ internal class BeltWorld(val spec: BeltSpec) {
     }
 
     companion object {
+        /** The arcade run's parts of the warehouse, in order, each [ZONE] long (measured on the belts). */
+        val ZONES = listOf("THE PALLET RACKS", "THE COLD STORE", "THE LOADING DOCKS", "THE SORTING HALL")
+        const val ZONE = 160f
+        fun zoneAt(ss: Float) = (max(0f, ss) / ZONE).toInt() % ZONES.size
         // the way in, watched: up out of a manhole in the warehouse floor, across to a scaffold, up it, and a jump onto the belts
         const val MAN_X = 3.0f; const val MAN_S = -2.6f          // the manhole
         const val SCAF_X = 1.0f; const val SCAF_S = -1.0f        // the foot of the scaffold tower
