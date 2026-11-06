@@ -75,6 +75,8 @@ internal open class PixelSprites {
     /** You: an old-timey clerk. Blond hair, round glasses, a white shirt with braces, khaki trousers, brown shoes. */
     protected val clerk = Outfit(PX.SKIN, 0xFFE8C860.toInt(), null, null, 0xFFF4F0E6.toInt(), null, 0xFFB8A070.toInt(), 0xFF4A2E1B.toInt(), null, glasses = true, straps = 0xFF5A3A22.toInt())
     protected val vendor = Outfit(PX.SKIN, 0xFF59647A.toInt(), 0xFF59647A.toInt(), 0xFF3A4458.toInt(), 0xFFE8E0C8.toInt(), null, 0xFF3A4458.toInt(), PX.K, null, apron = 0xFF2E8F66.toInt())
+    /** The level 1 contact: a man in a dark trench coat and hat, out of the shadows. */
+    protected val stranger = Outfit(PX.SKIN, 0xFF1A1418.toInt(), 0xFF26232E.toInt(), 0xFF141218.toInt(), 0xFF8A8478.toInt(), 0xFF35303C.toInt(), 0xFF1E1C24.toInt(), PX.K, null)
 
     /** Draws one person standing with their feet at (fx, fy). [dir]: 0 away from you, 1 right, 2 toward you, 3 left. */
     protected fun folk(c: Canvas, fx: Int, fy: Int, dir: Int, frame: Int, o: Outfit, torch: Boolean, letter: Boolean, hd: Int = 0, cross: Int = -1, pose: Int = 0, pdir: Int = 0, sorrow: Boolean = false, handsUp: Boolean = false) {

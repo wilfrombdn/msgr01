@@ -66,7 +66,7 @@ internal object StealthLevels {
             pal(0xFF0B1A16, 0xFF11302A, 0xFF030907, 0xFF1B5A4A, 0xFF5EE6A8, 0xFFFFC27A, 0xFFFF9F43),
             g.map { String(it) },
             cover = "bin", pixel = true, walk = true, theme = "sewer",
-            worker = WorkerSpec(12.5f, 3.5f, "You shouldn't have come here."),
+            worker = WorkerSpec(12.5f, 3.5f, "Another clerk? Thought you were all gone.|$SHOW_ID|Chen came through here. Left this for you.|$GIVE_ENVELOPE|Factory's above. Move, they're searching."),
             props = listOf(
                 Prop("none", 12.5f, 4.5f, text = "A ladder, up to the street."),
                 Prop("ladder", 12.5f, 2.5f),
@@ -86,7 +86,7 @@ internal object StealthLevels {
             pal(0xFF0B1230, 0xFF121D47, 0xFF03050A, 0xFF1B2B66, 0xFF29F0FF, 0xFFDCEBFF, 0xFFFF3B55),
             backstreetsMap(),
             cover = "bin", pixel = true, walk = true,
-            scene = SceneSpec(3.5f, 9.5f, 22.5f, intArrayOf(0, 0, 15, 21), listOf(1.2f to 8.5f, -2.0f to 8.5f), contactLine = "Thank God I didn't need to shoot."),
+            scene = SceneSpec(3.5f, 9.5f, 22.5f, intArrayOf(0, 0, 15, 21), listOf(1.2f to 8.5f, -2.0f to 8.5f), contactLine = "Thank God I didn't have to shoot anyone.|$SHOW_ID|Shit... you're the last one. Sarah got caught.|$GIVE_ENVELOPE|Get underground. They'll take you from here.", speaker = "STRANGER"),
             flashers = listOf(15.5f to 45.5f, 0.2f to 35.5f, 15.8f to 24.5f, 0.2f to 8.0f, 15.8f to 7.0f),
             beams = listOf(
                 CamSpec(0.9f, 35.5f, 0f, 22f, 7.0f, 0f, range = 9f, half = 0.16f),

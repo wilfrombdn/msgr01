@@ -57,6 +57,11 @@ internal class LevelSpec(
 )
 
 /** The contact walks ahead of you to a manhole, flips the lid open, says farewell, and waits while you go down. */
+/** In a contact's lines: you hold up your clerk ID. */
+internal const val SHOW_ID = "<ID>"
+/** In a contact's lines: they hand you an envelope (information to broadcast). */
+internal const val GIVE_ENVELOPE = "<ENV>"
+
 internal class LeadSpec(val path: List<Pair<Float, Float>>, val manholeX: Float, val manholeY: Float, val farewell: String, val speaker: String = "NEWSPAPER VENDOR")
 
 /** A worker wrenching on a pipe: he turns, lights a cigarette, takes your letter, says [line] and points to the ladder. */
@@ -66,7 +71,7 @@ internal class WorkerSpec(val ladderX: Float, val ladderY: Float, val line: Stri
  * The scripted moment of a walking level: a cop stands at a fork, hidden in fog. When you get past [triggerY] the fog clears,
  * he hesitates (dots, one at a time), turns around, then walks away along [exit].
  */
-internal class SceneSpec(val copX: Float, val copY: Float, val triggerY: Float, val fog: IntArray, val exit: List<Pair<Float, Float>>, val contactLine: String = "")
+internal class SceneSpec(val copX: Float, val copY: Float, val triggerY: Float, val fog: IntArray, val exit: List<Pair<Float, Float>>, val contactLine: String = "", val speaker: String = "")
 
 /** Something that can see: a guard or a camera at one moment. */
 internal class Eye(val x: Float, val y: Float, val face: Float, val half: Float, val range: Float)
@@ -342,11 +347,34 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
     /** I'm being walked into place by a scripted moment (the drawing shows my legs moving). */
     var autoWalk = false
     var sayT = 0f
+    // a conversation: lines split by '|', SHOW_ID = you hold up your clerk ID; each line stays up long enough to read
+    private var script: List<String> = emptyList()
+    private var lineIdx = 0
+    /** How long the current line has been up (the panel types it out from this). */
+    var lineT = 0f
+    /** You're holding up your clerk ID right now. */
+    val showingId get() = sayText == SHOW_ID
+    /** They're handing you the envelope right now. */
+    val givingEnvelope get() = sayText == GIVE_ENVELOPE
+    /** You have their envelope. */
+    var hasEnvelope = false
+    /** How far the level 1 stranger has come out of the dark. */
+    val contactOut get() = contactTravel
+    private fun holdFor(l: String) = when (l) { SHOW_ID -> 2.8f; GIVE_ENVELOPE -> 1.6f; else -> 1.3f + l.length * 0.05f }
+    /** The whole conversation has been said. */
+    val scriptDone get() = sayText != null && lineIdx >= script.size - 1 && lineT > holdFor(sayText ?: "")
+    fun say(lines: String) { script = lines.split('|'); lineIdx = 0; lineT = 0f; sayT = 0f; sayText = script[0] }
+    private fun talk(dt: Float) {
+        if (sayText == null) return
+        sayT += dt; lineT += dt
+        if (lineIdx < script.size - 1 && lineT > holdFor(script[lineIdx])) { if (script[lineIdx] == GIVE_ENVELOPE) hasEnvelope = true; lineIdx++; lineT = 0f; sayText = script[lineIdx] }
+        if (givingEnvelope && lineT > 0.8f) hasEnvelope = true
+    }
     private val contactPath = ArrayDeque<Pair<Int, Int>>()
     private var contactTravel = 0f
     private var contactRepath = 0f
     /** Which step of crossing himself the contact is on (0 forehead, 1 chest, 2 left shoulder, 3 right shoulder), or -1. */
-    val crossFrame: Int get() { if (sayText == null) return -1; val u = sayT - 1.8f; return if (u < 0f || u > 2.8f) -1 else (u / 0.7f).toInt().coerceIn(0, 3) }
+    val crossFrame: Int get() { if (sayText == null || lineIdx > 0) return -1; val u = sayT - 1.8f; return if (u < 0f || u > 2.8f) -1 else (u / 0.7f).toInt().coerceIn(0, 3) }
 
     // ---------- the walk to the manhole (level 2, first part) ----------
     var lidOpen = 0f                 // 0 shut .. 1 open
@@ -360,7 +388,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
     /** The contact leads you to a manhole, opens it, says farewell and crosses himself, then waits for you to go down. */
     private fun leadUpdate(dt: Float, l: LeadSpec) {
         leadT += dt
-        if (sayText != null) sayT += dt
+        talk(dt)
         when (leadStage) {
             0 -> {
                 val tgt = l.path.getOrNull(leadIdx)
@@ -396,7 +424,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
                 val tx = contactX; val ty = contactY + 1.25f
                 val dx = tx - px; val dy = ty - py; val d = hypot(dx, dy)
                 if (d > 0.05f) { val mv = min(2.2f * dt, d); px += dx / d * mv; py += dy / d * mv; face = atan2(dy, dx); autoWalk = true }
-                else { px = tx; py = ty; face = -PI.toFloat() / 2; autoWalk = false; leadStage = 2; leadT = 0f; sayText = l.farewell; sayT = 0f }
+                else { px = tx; py = ty; face = -PI.toFloat() / 2; autoWalk = false; leadStage = 2; leadT = 0f; say(l.farewell) }
             }
             2 -> { turnContact(PI.toFloat() / 2, dt, 6f); face = -PI.toFloat() / 2; if (sayT > 5.4f) { leadStage = 3; leadT = 0f } }
             3 -> { turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (hypot(px - l.manholeX, py - l.manholeY) < 0.75f) { enteredManhole = true; sayText = null } }
@@ -413,16 +441,16 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
     /** He wrenches on a pipe, turns, lights a cigarette, takes your letter, says his piece, and points to the ladder. */
     private fun workerUpdate(dt: Float, wk: WorkerSpec) {
         workerT += dt
-        if (sayText != null) sayT += dt
+        talk(dt)
         when (workerStage) {
             0 -> { workerPose = 1; contactFace = -PI.toFloat() / 2; if (hypot(px - contactX, py - contactY) < 7f) { workerStage = 1; workerT = 0f } }
             1 -> { workerPose = 0; turnContact(atan2(py - contactY, px - contactX), dt, 1.6f); if (workerT > 1.4f) { workerStage = 2; workerT = 0f } }
             2 -> { workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (workerT > 2.6f) { workerStage = 3; workerT = 0f } }
             3 -> {
                 workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f)
-                if (hypot(px - contactX, py - contactY) < 2.0f) { letterGiven = true; sayText = wk.line; sayT = 0f; workerStage = 4; workerT = 0f }
+                if (hypot(px - contactX, py - contactY) < 2.0f) { say(wk.line); workerStage = 4; workerT = 0f }
             }
-            4 -> { workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (workerT > 2.4f) { workerStage = 5; workerT = 0f } }
+            4 -> { workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (scriptDone && workerT > 2.4f) { workerStage = 5; workerT = 0f } }
             5 -> {
                 workerPose = 3; workerPointDir = if (wk.ladderX >= contactX) PacWorld.RIGHT else PacWorld.LEFT
                 contactFace = PI.toFloat() / 2
@@ -457,7 +485,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         val s = spec.scene ?: return
         val a = cop ?: return
         sceneT += dt
-        if (sayText != null) sayT += dt
+        talk(dt)
         when (sceneStage) {
             0 -> { a.face = PI.toFloat() / 2 + 0.05f * sin(t * 0.7f); if (py < s.triggerY) { sceneStage = 1; sceneT = 0f } }     // I rounded the corner
             1 -> { fog = (1f - sceneT / 2.5f).coerceIn(0f, 1f); if (sceneT > 3.2f) { sceneStage = 2; sceneT = 0f } }              // the fog clears
@@ -498,7 +526,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
             }
             7 -> {   // he waits for me, watching me come, and speaks when I am near
                 contactWalking = false
-                if (sayText == null && hypot(px - contactX, py - contactY) < 6.5f) { sayText = s.contactLine; sayT = 0f }
+                if (sayText == null && hypot(px - contactX, py - contactY) < 6.5f) say(s.contactLine)
             }
         }
         // while the cop leaves, the contact watches him; after that, he watches me
@@ -612,7 +640,8 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         bodyFoundT = max(0f, bodyFoundT - dt)
 
         // my feet: a gentle drag is a quiet sneak, a full drag is a loud run
-        val frozen = (spec.scene != null && sceneStage in 1..6) || (spec.lead != null && leadStage in setOf(2, 5))   // scripted moments: I can't walk
+        val frozen = (spec.scene != null && (sceneStage in 1..6 || (sceneStage == 7 && sayText != null && !scriptDone))) || (spec.lead != null && leadStage in setOf(2, 5)) ||
+            (spec.worker != null && workerStage == 4)   // stand and talk   // scripted moments: I can't walk
         speed = if (frozen) 0f else if (mag < 0.5f) SNEAK * (mag / 0.5f) else SNEAK + (mag - 0.5f) / 0.5f * (RUN - SNEAK)
         noise = if (speed > QUIET) (speed - QUIET) / (RUN - QUIET) * NOISE_MAX else 0f
         if (speed > 0.01f && mag > 0.02f) {

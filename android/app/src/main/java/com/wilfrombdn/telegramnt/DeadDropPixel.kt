@@ -22,6 +22,7 @@ import kotlin.math.sin
  * The ground and buildings are drawn once; people, props that people can walk behind, lights and effects are redrawn each frame.
  */
 internal class PixelScene(private val spec: LevelSpec, private val world: StealthWorld) : PixelSprites() {
+    private val shadeP = Paint()
     private val S = 16
     val W = world.cols * S
     val H = world.rows * S
@@ -487,14 +488,32 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
         val walkFrame = if (world.speed > 0.05f) ((clock * (3f + world.speed * 2.2f)).toInt() % 2) else if (world.autoWalk) ((clock * 7f).toInt() % 2) else 0
         val climbing = world.state == StealthWorld.State.WON && spec.worker != null
         val rise = if (climbing) min(30, (world.stateT * 18f).toInt()) else 0
-        list += Item(pyy.toFloat() + (if (climbing) 40f else 0f)) { cv -> folk(cv, pxx, pyy - rise, if (climbing) 0 else dirOf(world.face), if (climbing) ((world.stateT * 6f).toInt() % 2) else walkFrame, clerk, false, !world.letterGiven) }
         val vx = (world.contactX * S).roundToInt(); val vy = (world.contactY * S).roundToInt() + 6
+        val carrying = if (spec.worker != null || spec.scene != null) world.hasEnvelope else !world.letterGiven
+        list += Item(pyy.toFloat() + (if (climbing) 40f else 0f)) { cv -> folk(cv, pxx, pyy - rise, if (climbing) 0 else dirOf(world.face), if (climbing) ((world.stateT * 6f).toInt() % 2) else walkFrame, clerk, false, carrying) }
+        // the clerk ID and the envelope passing between you, drawn over both of you
+        if (world.showingId || world.givingEnvelope) list += Item(maxOf(pyy, vy) + 1f) { cv ->
+            val hx = pxx + (if (vx < pxx) -7 else 7); val hy = pyy - 13          // your hand
+            val cx = vx + (if (pxx < vx) -7 else 7); val cy = vy - 13             // theirs
+            if (world.showingId) {   // you hold it out, they take it and look it over, then hand it back
+                val k = ((world.lineT - 0.9f) / 0.4f).coerceIn(0f, 1f); val back = ((world.lineT - 2.4f) / 0.3f).coerceIn(0f, 1f)
+                val m = k * (1f - back); val kx = (hx + (cx - hx) * m).roundToInt() - 4; val ky = (hy + (cy - hy) * m).roundToInt() - 3
+                rect(cv, kx - 1, ky - 1, 10, 8, PX.K); rect(cv, kx, ky, 8, 6, 0xFFF0E8D0.toInt()); rect(cv, kx, ky, 8, 1, 0xFF3A56B8.toInt())
+                rect(cv, kx + 1, ky + 2, 3, 3, 0xFFE8C860.toInt()); rect(cv, kx + 5, ky + 2, 2, 1, 0xFF6A6A6A.toInt()); rect(cv, kx + 5, ky + 4, 2, 1, 0xFF6A6A6A.toInt())
+            } else {                 // the envelope goes from their hand to yours
+                val m = (world.lineT / 0.8f).coerceIn(0f, 1f); val ex = (cx + (hx - cx) * m).roundToInt() - 4; val ey = (cy + (hy - cy) * m).roundToInt() - 3 - (sin(m * PI.toFloat()) * 4f).roundToInt()
+                if (m < 1f) { rect(cv, ex - 1, ey - 1, 10, 7, PX.K); rect(cv, ex, ey, 8, 5, 0xFFD8C8A0.toInt()); px(cv, ex + 2, ey + 1, 0xFFA89870.toInt()); px(cv, ex + 5, ey + 1, 0xFFA89870.toInt()); px(cv, ex + 3, ey + 2, 0xFFA89870.toInt()); px(cv, ex + 4, ey + 2, 0xFFA89870.toInt()); rect(cv, ex + 3, ey + 3, 2, 1, PX.RED) }
+            }
+        }
         val vFrame = if (world.contactWalking) ((clock * 5f).toInt() % 2) else 0
-        val outfit = if (spec.worker != null) worker else vendor
+        val outfit = if (spec.worker != null) worker else if (spec.scene != null) stranger else vendor
         val wp = if (spec.worker != null) world.workerPose else 0
         list += Item(vy.toFloat()) { cv ->
-            folk(cv, vx, vy, dirOf(world.contactFace), vFrame, outfit, false, false, 0, world.crossFrame, wp, world.workerPointDir)
-            if (world.letterGiven && spec.worker != null) { rect(cv, vx - 9, vy - 9, 6, 5, PX.K); rect(cv, vx - 8, vy - 8, 4, 3, PX.W); px(cv, vx - 6, vy - 7, PX.RED) }   // he holds your letter
+            // level 1: a figure steps out of the dark; he stays a silhouette until he has come a few steps into the light
+            val shade = if (spec.scene != null) (world.contactOut / 3.5f).coerceIn(0f, 1f) else 1f
+            if (shade < 1f) { val v = (0x14 + (0xFF - 0x14) * shade * shade).toInt(); shadeP.colorFilter = android.graphics.LightingColorFilter((v shl 16) or (v shl 8) or v, 0); cv.saveLayer(null, shadeP) }
+            folk(cv, vx, vy, dirOf(world.contactFace), vFrame, outfit, false, world.sayText != null && !world.hasEnvelope && !world.givingEnvelope, 0, world.crossFrame, wp, world.workerPointDir)
+            if (shade < 1f) cv.restore()
         }
         world.cop?.let { cop ->
             if (cop.visible) {

@@ -1501,7 +1501,9 @@ internal class DeadDropView(
     private fun drawSay(c: Canvas, w: Float, h: Float, pal: Palette) {
         val t = world.sayText ?: return
         if (world.state != StealthWorld.State.PLAY) return
-        panel(c, w, h, pal, (world.spec.lead?.speaker ?: world.spec.worker?.speaker ?: spec.contact.uppercase()) + ": “" + t + "”", 1f, (world.sayT * 45f).toInt())
+        if (world.showingId) { val look = world.lineT >= 1.0f; panel(c, w, h, pal, if (look) "THEY LOOK IT OVER." else "YOU SHOW YOUR CLERK ID.", 1f, ((if (look) world.lineT - 1.0f else world.lineT) * 45f).toInt()); return }
+        if (world.givingEnvelope) { panel(c, w, h, pal, "THEY HAND YOU A SEALED ENVELOPE. INFORMATION TO BROADCAST.", 1f, (world.lineT * 45f).toInt()); return }
+        panel(c, w, h, pal, (world.spec.lead?.speaker ?: world.spec.worker?.speaker ?: world.spec.scene?.speaker?.ifEmpty { null } ?: spec.contact.uppercase()) + ": “" + t + "”", 1f, (world.lineT * 45f).toInt())
     }
 
     private fun panel(c: Canvas, w: Float, h: Float, pal: Palette, t: String, f: Float, typed: Int) {

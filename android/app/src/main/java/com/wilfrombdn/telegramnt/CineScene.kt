@@ -26,11 +26,10 @@ internal class CineScene(val kind: Int) : PixelSprites() {
     val done get() = t >= duration
 
     /** The line shown under the picture right now (or null). */
-    fun caption(): String? = if (kind == 0) when {   // all said in the car, on the way
-        t in 7.9f..9.5f -> "I know what the mayor has done."
-        t in 9.6f..11.1f -> "I know what you plan to do,"
-        t in 11.2f..12.6f -> "and I can get you there."
-        t in 12.8f..14.3f -> "Let's end this shit, brother."
+    fun caption(): String? = if (kind == 0) when {   // he finds you and reads the letter in the factory, then the plan in the car
+        t in 0.5f..2.3f -> "You again. What the fuck is going on?"
+        t in 2.6f..4.9f -> "Things are getting out of hand. Looks like you've got a plan."
+        t in 5.1f..7.0f -> "I've been on the wrong side long enough. Get in."
         t in 14.6f..16.2f -> "Here. Take my gun."
         t in 16.4f..18.4f -> "Use me as a hostage. It's the only way they let you in close."
         t in 18.6f..20.4f -> "Nobody else gets through those doors."
