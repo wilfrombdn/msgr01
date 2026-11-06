@@ -411,7 +411,7 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
     }
 
     private fun catwalk(c: Canvas, i: Int) {
-        val l = FinaleWorld.spanL(i).toInt(); val r = FinaleWorld.spanR(i).toInt()
+        val l = world.spanLOf(i).toInt(); val r = world.spanROf(i).toInt()
         for (x in l..r) {
             val y = world.floorY(i, x.toFloat()).roundToInt()
             rect(c, x, y, 1, 1, K(0xFFB8C4D8)); rect(c, x, y + 1, 1, 1, K(0xFF6A7488))
@@ -427,6 +427,35 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         for (y in y1 + 2 until y0 step 4) rect(c, x - 4, y, 8, 1, K(0xFF5A6478))
     }
 
+    /** The arcade's tower screens: the room's colour, conveyor arrows sliding along the floors, breakers, and the security drones. */
+    private fun arcadeExtras(c: Canvas, clock: Float) {
+        val lay = world.lay
+        if (lay.tint != 0) { p.style = Paint.Style.FILL; p.color = a(lay.tint, 0x1C); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
+        for (i in 0..FinaleWorld.TOP) {
+            val v = lay.conv[i]; if (v == 0f) continue
+            val l = world.spanLOf(i).toInt() + 6; val r = world.spanROf(i).toInt() - 6
+            val off = ((clock * v) % 16f + 16f) % 16f
+            var x = l + off.toInt()
+            while (x < r) { val y = world.floorY(i, x.toFloat()).roundToInt() + 3; val dir = if (v > 0) 1 else -1
+                px(c, x, y - 1, K(0xFF7AE0FF)); px(c, x + dir, y, K(0xFF7AE0FF)); px(c, x, y + 1, K(0xFF7AE0FF)); x += 16 }
+        }
+        for ((k, b) in lay.breakers.withIndex()) {
+            val bx = b.second.roundToInt(); val by = world.floorY(b.first, b.second).roundToInt()
+            val on = k !in world.flipped
+            rect(c, bx - 4, by - 14, 9, 12, PX.K); rect(c, bx - 3, by - 13, 7, 10, K(0xFF3A4252))
+            rect(c, bx - 1, if (on) by - 12 else by - 7, 3, 4, if (on) K(0xFFFF3A3A) else K(0xFF3BFF9A))
+            if (on && (clock * 4f + k).toInt() % 2 == 0) { px(c, bx - 5, by - 15, PX.WARM); px(c, bx + 5, by - 12, PX.W) }
+        }
+        for (dr in world.drones) {
+            val x = dr.x.roundToInt(); val y = world.floorY(dr.floor, dr.x).roundToInt() - 6
+            val hov = if ((clock * 6f).toInt() % 2 == 0) 0 else 1
+            rect(c, x - 5, y - 3 - hov, 11, 6, PX.K); rect(c, x - 4, y - 2 - hov, 9, 4, K(0xFF5A6478)); rect(c, x - 4, y - 2 - hov, 9, 1, K(0xFFA9B4C8))
+            px(c, x + (if (dr.dir > 0) 2 else -2), y - 1 - hov, if ((clock * 8f).toInt() % 2 == 0) K(0xFFFF3A3A) else K(0xFFFFB0B0))
+            rect(c, x - 6, y - 5 - hov, 4, 1, K(0xFF9AA4B5)); rect(c, x + 3, y - 5 - hov, 4, 1, K(0xFF9AA4B5))      // rotors
+            for (k in 0..1) px(c, x - 3 + k * 6 + ((clock * 20f).toInt() % 3 - 1), y + 3, a(K(0xFF7AE0FF), 0xA0))       // a zap under it
+        }
+    }
+
     private fun tower(c: Canvas, clock: Float) {
         val t = world.t
         val st = world.stage
@@ -440,13 +469,14 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         for (f in 0 until FinaleWorld.FLOORS) { val yb = FinaleWorld.base(f).toInt() - 6; val yt = FinaleWorld.base(f + 1).toInt() + 8; var x = 4; var n = 0; while (x < W - 16) { for (u in yt + 4 until yb - 3 step 4) { val on = hash(x + n, u, (clock * 3f).toInt() + n) % 5 != 0; px(c, x + 14, u + 1, if (on) (if ((x + u) % 3 == 0) K(0xFF3BFF9A) else PX.CYAN) else K(0xFF0A2A2A)); if (hash(x, u, (clock * 7f).toInt()) % 9 == 0) px(c, x + 12, u + 1, PX.WARM) }; x += 22; n++ } }
         for (f in 0 until FinaleWorld.FLOORS) c.drawBitmap(coldGlow, 128f - 42f + (f % 2) * 60f - 30f, FinaleWorld.base(f + 1) - 10f, plain)
         // catwalks and ladders
-        for ((f, lx) in FinaleWorld.LADDERS) ladder(c, f, lx)
+        for ((f, lx) in world.ladders) ladder(c, f, lx)
         for (i in 0..FinaleWorld.TOP) catwalk(c, i)
         // sparks as the catwalks clank over
-        if (st == FinaleWorld.Stage.INTRO && t in 6f..7.6f) for (i in 1 until FinaleWorld.FLOORS) for (e in 0..1) { val x = if (e == 0) FinaleWorld.spanL(i) else FinaleWorld.spanR(i); val y = world.floorY(i, x); for (k in 0 until 3) { val ph = (clock * 9f + k * 0.3f + i) % 1f; px(c, (x + (k - 1) * 4 * ph).toInt(), (y + ph * 10f).toInt(), if (k == 1) PX.W else PX.WARM) } }
+        if (st == FinaleWorld.Stage.INTRO && t in 6f..7.6f) for (i in 1 until FinaleWorld.FLOORS) for (e in 0..1) { val x = if (e == 0) world.spanLOf(i) else world.spanROf(i); val y = world.floorY(i, x); for (k in 0 until 3) { val ph = (clock * 9f + k * 0.3f + i) % 1f; px(c, (x + (k - 1) * 4 * ph).toInt(), (y + ph * 10f).toInt(), if (k == 1) PX.W else PX.WARM) } }
         // the terminal screen (typing the code)
         val ty = FinaleWorld.base(FinaleWorld.TOP).toInt() - 16
         if (st == FinaleWorld.Stage.INTRO && t in 4.7f..6.1f) { for (i in 0 until ((t - 4.7f) * 5).toInt().coerceAtMost(4)) rect(c, 96 + i * 3, ty + 3, 2, 3, K(0xFF3BFF9A)) } else rect(c, 96, ty + 3, 12, 1, a(PX.CYAN, 0x80))
+        if (world.arcade && st == FinaleWorld.Stage.CLIMB) arcadeExtras(c, clock)
         // spools, and a sparkle where you cleared one
         for (s in world.spools) spool(c, s.x, s.y, s.spin)
         if (st == FinaleWorld.Stage.CLIMB && world.clearT < 0.6f) { val k = world.clearT / 0.6f; for (i in 0 until 6) { val an = i * 1.047f + k; val r = 4f + k * 10f; px(c, (world.clearX + cos(an) * r).roundToInt(), (world.clearY + sin(an) * r - k * 6f).roundToInt(), a(PX.GOLD, ((1f - k) * 255).toInt())) } }

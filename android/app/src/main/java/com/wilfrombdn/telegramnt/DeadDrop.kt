@@ -88,7 +88,7 @@ internal class DeadDropView(
             "fly" -> { levelIdx = 2; load(false); startMg(1); fly = FlyWorld(FlySpec((System.nanoTime() % 1000).toInt(), 1_000_000)); flyScene = FlyScene(fly!!) }
             "hall" -> { levelIdx = 3; load(false); startMg(1) }
             "tower" -> { levelIdx = 5; load(false); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.CLIMB) }
-            "uplink" -> { levelIdx = 5; load(false); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.SIMON) }
+            "uplink" -> { levelIdx = 5; load(false); finale = FinaleWorld((System.nanoTime() % 100000).toInt()); finaleScene = FinaleScene(finale!!); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.SIMON); finale?.let { fw -> fw.debugNewSeq() } }
         }
         fade = 0f; fadeDir = 0; cue = ""; applyCue()
     }
@@ -114,7 +114,7 @@ internal class DeadDropView(
         }
         finale?.let { fw ->
             fw.update(dt, ix, iy, mag); if (soundOn) for (e in fw.events) DeadLetterSfx.play(e); fw.events.clear()
-            arcScore = if (arcadeId == "tower") fw.arcadeRound * 1000 + fw.jumpsCleared * 100 else (fw.round - 1) * 100
+            arcScore = if (arcadeId == "tower") fw.arcadeRound * 1000 + fw.jumpsCleared * 100 + fw.flipped.size * 50 else (fw.round - 1) * 100
             if (fw.gameOver) arcadeOver()
         }
     }
@@ -141,6 +141,11 @@ internal class DeadDropView(
         p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x90); c.drawRect(0f, y - 18f * d, w, y + 8f * d, p)
         mgText(c, "SCORE $arcScore", w / 2f - 70f * d, y, 12f, 0xFFFFD84D.toInt())
         mgText(c, if (id == "belt" || id == "hall" || id == "uplink") "BEST ${best(id)}" else "♥".repeat(arcLives.coerceAtLeast(0)) + "  BEST ${best(id)}", w / 2f + 70f * d, y, 12f, if (id == "belt" || id == "hall" || id == "uplink") a(Color.WHITE, 0xCC) else 0xFFFF6A7A.toInt())
+        if (id == "tower") finale?.let { fw ->
+            if (fw.screenT < 3f && fw.stage == FinaleWorld.Stage.CLIMB) { val k = min(1f, (3f - fw.screenT) * 2f); mgText(c, "SCREEN ${fw.arcadeRound + 1}  ·  ${fw.lay.name}", w / 2f, y + 26f * d, 13f, a(0xFF3DE8F5.toInt(), (k * 255).toInt()))
+                mgText(c, if (fw.lay.breakers.isNotEmpty()) "THROW EVERY BREAKER" else "GET TO THE TOP", w / 2f, y + 44f * d, 10f, a(Color.WHITE, (k * 0xCC).toInt())) }
+            if (fw.lay.breakers.isNotEmpty()) mgText(c, "BREAKERS ${fw.flipped.size}/${fw.lay.breakers.size}", w / 2f, y + 62f * d, 11f, 0xFFFFC040.toInt())
+        }
         if (arcOver) {
             val k = (arcOverT / 0.5f).coerceIn(0f, 1f)
             p.color = a(Color.BLACK, (k * 0xC8).toInt()); c.drawRect(0f, 0f, w, h, p)

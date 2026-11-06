@@ -119,13 +119,55 @@ internal class FinaleWorld(seed: Int = 6) {
         const val JUMP_S = 0.62f
         const val JUMP_H = 17f
         const val SPOOL_R = 6f
+        private fun story(): Layout {
+            val l = FloatArray(7) { i -> when { i == 0 -> 8f; i >= TOP -> 8f; i % 2 == 1 -> 8f; else -> 20f } }
+            val r = FloatArray(7) { i -> when { i == 0 -> 248f; i >= TOP -> 112f; i % 2 == 1 -> 236f; else -> 248f } }
+            val sl = FloatArray(7) { i -> when { i == 0 || i >= TOP -> 0f; i % 2 == 1 -> 0.05f; else -> -0.05f } }
+            return Layout("THE SERVER HALL", l, r, sl, floatArrayOf(-1f, 1f, -1f, 1f, -1f, 1f, -1f), listOf(0 to 204f, 1 to 56f, 1 to 150f, 2 to 186f, 3 to 76f, 3 to 128f, 4 to 214f, 5 to 96f))
+        }
+        val STORY = story()
+        /** The arcade's four screens, in order (our own designs). */
+        val SCREENS: List<Layout> by lazy {
+            val s = STORY
+            val flat = FloatArray(7)
+            listOf(
+                s,
+                Layout("THE COOLING PLANT", s.spanL, s.spanR, flat, s.roll, listOf(0 to 120f, 1 to 40f, 1 to 200f, 2 to 128f, 3 to 48f, 3 to 180f, 4 to 140f, 5 to 72f),
+                    conv = floatArrayOf(0f, 22f, -22f, 26f, -26f, 30f, 0f), tint = 0xFF3AA0FF.toInt()),
+                Layout("THE DRONE BAY", s.spanL, s.spanR, FloatArray(7) { i -> s.slope[i] * 0.6f }, s.roll, listOf(0 to 40f, 1 to 220f, 2 to 60f, 2 to 160f, 3 to 200f, 4 to 40f, 4 to 120f, 5 to 60f),
+                    drones = 3, tint = 0xFFFF4A6A.toInt(), throwK = 1.5f),
+                Layout("THE BREAKER ROOM", s.spanL, s.spanR, flat, s.roll, listOf(0 to 128f, 1 to 30f, 1 to 226f, 2 to 128f, 3 to 30f, 3 to 226f, 4 to 128f, 5 to 90f),
+                    drones = 2, breakers = listOf(1 to 60f, 1 to 196f, 2 to 60f, 2 to 196f, 3 to 80f, 3 to 176f, 4 to 60f, 4 to 196f), tint = 0xFFFFC040.toInt(), throwK = 1.4f),
+            )
+        }
         val TAUNTS = listOf("NOBODY'S LISTENING, TELLEM.", "THE MAYOR SENDS HIS REGARDS.", "YOU'RE ALREADY DEAD. IT'S ON FILE.", "GO HOME. OH WAIT.", "THEY'LL NEVER BELIEVE YOU.")
     }
 
     // ---------------------------------------------------------------------------------------------------------------- the tower
+    /**
+     * One screen of the tower. The story only ever uses [STORY] (the old fixed layout); the arcade goes round all four:
+     * the slanted catwalks, the conveyor floors (they carry you along), the drone floors (little security drones patrol them),
+     * and the breaker floors (walk over every breaker to cut the power instead of reaching the top).
+     */
+    class Layout(
+        val name: String, val spanL: FloatArray, val spanR: FloatArray, val slope: FloatArray, val roll: FloatArray,
+        val ladders: List<Pair<Int, Float>>, val conv: FloatArray = FloatArray(7), val drones: Int = 0,
+        val breakers: List<Pair<Int, Float>> = emptyList(), val tint: Int = 0, val throwK: Float = 1f,
+    )
+    var lay = STORY; private set
+    fun spanLOf(i: Int) = lay.spanL[i.coerceIn(0, TOP)]
+    fun spanROf(i: Int) = lay.spanR[i.coerceIn(0, TOP)]
+    private fun slopeOf(i: Int) = lay.slope[i.coerceIn(0, TOP)]
+    val ladders get() = lay.ladders
     /** How far the catwalks have tilted into place (0 flat, 1 slanted). */
     var tilt = 0f; private set
-    fun floorY(i: Int, x: Float) = base(i) + slope(i) * (x - 128f) * tilt
+    fun floorY(i: Int, x: Float) = base(i) + slopeOf(i) * (x - 128f) * tilt
+
+    // arcade extras: drones walking the floors, breakers to throw
+    class Drone(var floor: Int, var x: Float, var dir: Float) { var cleared = false }
+    val drones = ArrayList<Drone>()
+    val flipped = HashSet<Int>()          // which of [Layout.breakers] are thrown
+    var screenT = 0f; private set
 
     // you
     var px = 22f; var py = base(0)
@@ -178,7 +220,7 @@ internal class FinaleWorld(seed: Int = 6) {
     var litT = 0f; private set
     var simonMsg = ""; private set
     var simonMsgT = 0f; private set
-    private val stepS get() = 0.62f * (1f + 0.22f * min(simonFails, 5))
+    private val stepS get() = if (arcade) 0.62f * max(0.45f, 1f - 0.03f * (round - 1)) else 0.62f * (1f + 0.22f * min(simonFails, 5))
 
     // ---------------------------------------------------------------------------------------------------------------- end
     /** True while the room is silent after the transmission cuts out (the music stops). */
@@ -254,6 +296,8 @@ internal class FinaleWorld(seed: Int = 6) {
     }
 
     /** Skip straight to a stage (for tests and the skip arrow). */
+    /** The arcade uplink: start from a fresh random pattern (the world's seed is new every game). */
+    internal fun debugNewSeq() { seq.clear(); repeat(SIMON_GOAL) { seq += rnd.nextInt(4) } }
     internal fun debugEnter(s: Stage) { next = null; fade = 0f; enter(s) }
 
     // ---------------------------------------------------------------------------------------------------------------- intro
@@ -286,21 +330,28 @@ internal class FinaleWorld(seed: Int = 6) {
         tilt = 1f; px = 22f; floor = 0; py = floorY(0, px); onLadder = null; jumpT = -1f; hitT = -1f; faceRight = true
         gx = 30f; gy = base(TOP); gPose = 3; gFace = true
         spools.clear(); nextThrow = 1.0f
+        if (arcade) {
+            lay = SCREENS[arcadeRound % SCREENS.size]; screenT = 0f
+            drones.clear(); for (k in 0 until lay.drones) drones += Drone(1 + (k * 2) % 5, 60f + k * 70f, if (k % 2 == 0) 1f else -1f)
+        }
     }
+    /** The breakers still to throw on this screen (arcade). */
+    val breakersLeft get() = lay.breakers.size - flipped.size
     fun jump() {
         if (stage != Stage.CLIMB || jumpT >= 0f || onLadder != null || hitT >= 0f) return
         jumpT = 0f; jumpDir = if (walking) (if (faceRight) 1f else -1f) else 0f
         events += "jump"
     }
 
-    private fun spoolSpeed() = if (arcade) 54f * (1f + 0.14f * arcadeRound) else max(30f, 54f * (1f - 0.12f * fails))
-    private fun throwGap() = if (arcade) 2.3f / (1f + 0.15f * arcadeRound) else 2.3f * (1f + 0.18f * min(fails, 5))
+    private val arcadeK get() = min(2.2f, 1f + 0.1f * arcadeRound)
+    private fun spoolSpeed() = if (arcade) 54f * arcadeK else max(30f, 54f * (1f - 0.12f * fails))
+    private fun throwGap() = if (arcade) 2.3f * lay.throwK / arcadeK else 2.3f * (1f + 0.18f * min(fails, 5))
 
     private fun climbTick(dt: Float, ix: Float, iy: Float, mag: Float) {
-        throwT += dt; clearT += dt
+        throwT += dt; clearT += dt; screenT += dt
         if (hitT >= 0f) {
             hitT += dt
-            if (hitT > 1.6f) { lives--; if (lives <= 0) { if (arcade) { gameOver = true; hitT = -1f; return }; lives = 3; fails++ }; resetClimb() }
+            if (hitT > 1.6f) { lives--; if (lives <= 0) { if (arcade) { gameOver = true; hitT = -1f; return }; lives = 3; fails++ }; val keep = HashSet(flipped); resetClimb(); flipped.addAll(keep) }
             return
         }
         // the patrol throws
@@ -316,7 +367,18 @@ internal class FinaleWorld(seed: Int = 6) {
             if (dx < 7f && dy < 9f) { hitT = 0f; events += "hit"; return }
             if (dx < 5f && jumpH > 8f && s.floor == floor && s.fallTo < 0 && s !in cleared) { cleared += s; clearX = px; clearY = py - 24f; clearT = 0f; events += "over"; jumpsCleared++ }
         }
-        if (floor == TOP) { if (arcade) { arcadeRound++; events += "ok"; resetClimb() } else go(Stage.EXECUTE) }
+        if (arcade) {
+            moveDrones(dt)
+            for (dr in drones) {
+                val dx = abs(dr.x - px); val feet = py - jumpH; val dy = abs(floorY(dr.floor, dr.x) - feet)
+                if (onLadder == null && dr.floor == floor && dx < 7f && dy < 7f) { hitT = 0f; events += "hit"; return }
+                if (dr.floor == floor && dx < 5f && jumpH > 8f && !dr.cleared) { dr.cleared = true; clearX = px; clearY = py - 24f; clearT = 0f; events += "over"; jumpsCleared++ }
+                if (dx > 12f) dr.cleared = false
+            }
+            for ((i, b) in lay.breakers.withIndex()) if (i !in flipped && onLadder == null && b.first == floor && abs(b.second - px) < 7f) { flipped += i; events += "clank"; clearX = b.second; clearY = py - 24f; clearT = 0f }
+            val doneScreen = if (lay.breakers.isNotEmpty()) flipped.size >= lay.breakers.size else floor == TOP
+            if (doneScreen) { arcadeRound++; events += "ok"; flipped.clear(); resetClimb() }
+        } else if (floor == TOP) go(Stage.EXECUTE)
     }
 
     private fun movePlayer(dt: Float, ix: Float, iy: Float, mag: Float) {
@@ -333,7 +395,7 @@ internal class FinaleWorld(seed: Int = 6) {
         }
         // start climbing?
         if (jumpT < 0f && mag > 0.2f && abs(iy) > abs(ix) && abs(iy) > 0.35f) {
-            for ((f, lx) in LADDERS) {
+            for ((f, lx) in ladders) {
                 if (abs(px - lx) > 6f) continue
                 if (iy < 0f && f == floor) { onLadder = f to lx; px = lx; return }
                 if (iy > 0f && f + 1 == floor) { onLadder = f to lx; px = lx; py += 1f; return }
@@ -343,7 +405,8 @@ internal class FinaleWorld(seed: Int = 6) {
         val vx = if (jumpT >= 0f) jumpDir * WALK else if (mag > 0.2f && abs(ix) > 0.3f) (if (ix > 0) WALK else -WALK) else 0f
         walking = vx != 0f && jumpT < 0f
         if (vx != 0f) faceRight = vx > 0
-        px = (px + vx * dt).coerceIn(spanL(floor) + 3f, spanR(floor) - 3f)
+        val belt = if (jumpT < 0f) lay.conv[floor.coerceIn(0, TOP)] else 0f
+        px = (px + (vx + belt) * dt).coerceIn(spanLOf(floor) + 3f, spanROf(floor) - 3f)
         py = floorY(floor, px)
         if (jumpT >= 0f) { jumpT += dt; if (jumpT >= JUMP_S) jumpT = -1f }
     }
@@ -358,21 +421,31 @@ internal class FinaleWorld(seed: Int = 6) {
                 val land = floorY(s.fallTo, s.x) - SPOOL_R
                 if (s.y >= land) {
                     s.y = land; s.floor = s.fallTo; s.fallTo = -1; s.vy = 0f; s.ladderX = -1f
-                    s.dir = if (slope(s.floor) > 0f) 1f else if (slope(s.floor) < 0f) -1f else -1f
+                    s.dir = lay.roll[s.floor.coerceIn(0, TOP)]
                 }
                 continue
             }
             s.x += s.dir * sp * dt
             s.y = floorY(s.floor, s.x) - SPOOL_R
             // down a ladder now and then
-            for ((f, lx) in LADDERS) if (f + 1 == s.floor && abs(s.x - lx) < sp * dt + 0.5f && s.ladderX != lx && rnd.nextFloat() < 0.3f) { s.ladderX = lx; s.x = lx; s.fallTo = f; s.vy = 30f }
+            for ((f, lx) in ladders) if (f + 1 == s.floor && abs(s.x - lx) < sp * dt + 0.5f && s.ladderX != lx && rnd.nextFloat() < 0.3f) { s.ladderX = lx; s.x = lx; s.fallTo = f; s.vy = 30f }
             if (s.fallTo >= 0) continue
             // off the end: drop to the next catwalk down (or out of the tower at the bottom)
-            if (s.x > spanR(s.floor) || s.x < spanL(s.floor)) {
+            if (s.x > spanROf(s.floor) || s.x < spanLOf(s.floor)) {
                 if (s.floor == 0) s.gone = true else { s.fallTo = s.floor - 1; s.vy = 0f }
             }
         }
         spools.removeAll { it.gone }
+    }
+
+    private fun moveDrones(dt: Float) {
+        val sp = 26f * arcadeK
+        for (dr in drones) {
+            dr.x += dr.dir * sp * dt
+            if (dr.x < spanLOf(dr.floor) + 12f) { dr.x = spanLOf(dr.floor) + 12f; dr.dir = 1f }
+            if (dr.x > spanROf(dr.floor) - 12f) { dr.x = spanROf(dr.floor) - 12f; dr.dir = -1f }
+            if (rnd.nextFloat() < 0.15f * dt) dr.dir = -dr.dir
+        }
     }
 
     // ---------------------------------------------------------------------------------------------------------------- execute
@@ -425,7 +498,8 @@ internal class FinaleWorld(seed: Int = 6) {
         if (inputAt >= round) {
             if (!arcade && round >= SIMON_GOAL) { simonMsg = "UPLINK ESTABLISHED."; simonMsgT = 2f; events += "ok"; go(Stage.BROADCAST); return }
             round++
-            while (seq.size < round) seq += rnd.nextInt(4)
+            if (arcade) { seq.clear(); repeat(round) { seq += rnd.nextInt(4) } }     // the arcade: a brand-new pattern every round
+            else while (seq.size < round) seq += rnd.nextInt(4)
             showing = true; showT = -0.7f; inputAt = 0
         }
     }
