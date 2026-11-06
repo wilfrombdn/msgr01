@@ -739,6 +739,8 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
         Outfit(0xFFA87858.toInt(), 0xFF2A1A10.toInt(), null, null, 0xFF6A8CBC.toInt(), null, 0xFF8A8670.toInt(), PX.K, null),
         Outfit(0xFF6A4434.toInt(), 0xFF0A0808.toInt(), null, null, 0xFF52769E.toInt(), null, 0xFF7E7A66.toInt(), PX.K, null),
     )
+    private val boatman = Outfit(0xFFC89A78.toInt(), 0xFF2A1A10.toInt(), 0xFF3A2A3A.toInt(), null, 0xFF2A3A2A.toInt(), 0xFF3A4436.toInt(), 0xFF22261E.toInt(), PX.K, null)
+    private val cartGlow by lazy { glowBitmap(22, 0xFFFFC85A.toInt(), 0x70) }
     private val you = Outfit(PX.SKIN, 0xFFE8C860.toInt(), null, null, 0xFF6E96CC.toInt(), null, 0xFF8A8670.toInt(), 0xFF1A1410.toInt(), null, glasses = true)
     private val guardOutfit = Outfit(PX.SKIN, 0xFF1A1420.toInt(), 0xFF2A303C.toInt(), 0xFF101418.toInt(), 0xFF5E6676.toInt(), null, 0xFF2A303C.toInt(), PX.K, PX.K, badge = true)
 
@@ -1029,6 +1031,28 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
                 rect(c, ix - 7, iy - 8, 15, 15, a(PX.K, 0xA0)); itemIcon(c, ix, iy, world.gotItem)
             }
         }
+        // the supply boat at the laundry's loading door: the door rolled up onto the pier and the evening outside, the boatman and the
+        // duty guard arguing over a clipboard with their backs to the room, and the clean cart standing open in the warm light
+        if (world.boatT >= 0f && (world.boatHere || world.route == PrisonWorld.Route.BOAT)) {
+            val dx = 71 * S; val dy = 43 * S
+            val up = (world.boatT / 1.5f).coerceIn(0f, 1f)
+            rect(c, dx, dy, S, 3 * S, K(0xFF1A2438)); rect(c, dx, dy, S, (3 * S * up).toInt(), K(0xFFE89A5A)); rect(c, dx, dy, S, (S * up).toInt(), K(0xFFF2C27A))
+            for (k in 0 until 3) rect(c, dx - 10 - k * 8, dy + 4 + k * 4, 10 + k * 8, 3 * S - 8 - k * 8, a(K(0xFFFFC27A), (up * (0x30 - k * 0x0C)).toInt()))     // light spilling in
+            rect(c, dx, dy - 4, S, 4, STEEL_D); for (i in 0 until (3 * S * (1f - up)).toInt() step 4) rect(c, dx, dy + i, S, 1, STEEL)
+            val bob = if (((clock * 3f).toInt() % 2) == 0) 0 else 1
+            folk(c, dx + 4, dy + 22 + bob, 3, 0, boatman, false, false)                                  // the boatman, waving his papers
+            rect(c, dx - 2, dy + 8 - bob, 5, 6, K(0xFFF0ECE0))
+            folk(c, dx - 10, dy + 24, 1, 0, guardOutfit, false, false)                                  // the guard, back to the room
+            if (((clock * 1.3f).toInt() % 2) == 0) { rect(c, dx - 24, dy - 6, 22, 9, a(PX.K, 0xB0)); rect(c, dx - 22, dy - 4, 3, 5, PX.W); rect(c, dx - 17, dy - 4, 3, 5, PX.W); rect(c, dx - 12, dy - 4, 3, 5, PX.W); rect(c, dx - 7, dy - 4, 3, 5, PX.W) }   // "!!!!" they argue
+            if (world.boatHere) {
+                val (cc, cr) = world.cartSpot; val cx = cc * S + 8; val cy = cr * S + 8
+                val pulse = (sin(clock * 4f) * 0.5f + 0.5f)
+                c.drawBitmap(cartGlow, cx - 22f, cy - 22f, plain)
+                for (i in 0 until 6) { val an = i * PI.toFloat() / 3f + clock; px(c, cx + (cos(an) * (11f + pulse * 3f)).roundToInt(), cy + (sin(an) * (9f + pulse * 3f)).roundToInt(), a(PX.GOLD, (0x80 + pulse * 0x7F).toInt())) }
+                rect(c, cx - 6, cy - 11, 12, 3, K(0xFFF4F0E6)); rect(c, cx - 4, cy - 13, 8, 2, K(0xFFFFFFFF))   // the sheets folded back: room for one
+            }
+        }
+
         // a bouncing arrow over what to do next
         world.nextStep().second?.let { (tc, tr) ->
             if (world.phase == PrisonWorld.Phase.PLAY && (clock * 2f).toInt() % 3 != 2) {

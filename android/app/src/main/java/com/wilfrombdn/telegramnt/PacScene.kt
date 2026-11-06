@@ -25,6 +25,11 @@ internal class PacScene(private val world: PacWorld) : PixelSprites() {
     private val ghostColors = intArrayOf(0xFFFF3B3B.toInt(), 0xFFFF8CE0.toInt(), 0xFF3DE8F5.toInt(), 0xFFFFA23A.toInt())
     private val outfits by lazy { Array(4) { policeIn(ghostColors[it]) } }
     private val auras by lazy { Array(4) { glowBitmap(15, ghostColors[it], 0x66) } }
+    // arcade: panicking police (blue, flashing white as it wears off) and the flares that cause it
+    private val scared by lazy { policeIn(0xFF2A4AFF.toInt()) }
+    private val scaredEnd by lazy { policeIn(0xFFE8ECFF.toInt()) }
+    private val scaredAura by lazy { glowBitmap(15, 0xFF4A6AFF.toInt(), 0x66) }
+    private val flareGlow by lazy { glowBitmap(14, 0xFFFF4A3A.toInt(), 0x80) }
     private val spotGlow by lazy { glowBitmap(34, PX.LAMP, 0x70) }
 
     private fun isWall(x: Int, y: Int) = world.tile(x, y).let { it == '#' || it == ' ' }
@@ -121,6 +126,9 @@ internal class PacScene(private val world: PacWorld) : PixelSprites() {
         // the key fragments
         for (y in 0 until world.h) for (x in 0 until world.w) if (world.frag[y][x]) fragment(c, x * S + 8, y * S + 8, x + y * 3, clock)
 
+        // flares (arcade): a lit red road flare stuck in the muck, spitting sparks
+        for (y in 0 until world.h) for (x in 0 until world.w) if (world.power[y][x]) flare(c, x * S + 8, y * S + 8, x * 5 + y, clock)
+
         // the manhole in the chamber ceiling, with its spotlight
         val hx = (world.hatchX * S).roundToInt(); val hy = (world.hatchY * S).roundToInt()
         hatch(c, hx, hy, world.lidClose)
@@ -138,9 +146,16 @@ internal class PacScene(private val world: PacWorld) : PixelSprites() {
             val dirIdx = when (g.dir) { PacWorld.UP -> 0; PacWorld.RIGHT -> 1; PacWorld.DOWN -> 2; else -> 3 }
             val facing = if (g.state == PacWorld.IN_CHAMBER) 2 else dirIdx
             val frame = if (g.state == PacWorld.IN_CHAMBER) 0 else ((clock * 6f).toInt() % 2)
+            if (g.state == PacWorld.RETURNING) {   // caught: only his cap and eyes scurry back to the chamber
+                list += Who(fy) { rect(c, fx - 4, fy - 15, 9, 3, 0xFF1A2A5A.toInt()); rect(c, fx - 3, fy - 12, 3, 3, PX.W); rect(c, fx + 1, fy - 12, 3, 3, PX.W); px(c, fx - 2 + (if (g.dir == PacWorld.LEFT) -1 else if (g.dir == PacWorld.RIGHT) 1 else 0), fy - 11, PX.K); px(c, fx + 2 + (if (g.dir == PacWorld.LEFT) -1 else if (g.dir == PacWorld.RIGHT) 1 else 0), fy - 11, PX.K) }
+                continue
+            }
+            val panic = g.fright
+            val ending = panic && world.frightT < 2f && (clock * 6f).toInt() % 2 == 0
             list += Who(fy) {
-                c.drawBitmap(auras[g.id], fx - 15f, fy - 15f, plain)
-                folk(c, fx, fy, facing, frame, outfits[g.id], g.id == PacWorld.BLINKY, false)
+                c.drawBitmap(if (panic) scaredAura else auras[g.id], fx - 15f, fy - 15f, plain)
+                folk(c, fx, fy, facing, frame, if (panic) (if (ending) scaredEnd else scared) else outfits[g.id], g.id == PacWorld.BLINKY && !panic, false)
+                if (panic) { px(c, fx - 6, fy - 22 + ((clock * 8f).toInt() % 2), PX.W); px(c, fx + 6, fy - 21, PX.W) }   // sweat
             }
         }
         val pxx = (world.px * S).roundToInt(); val pyy = (world.py * S).roundToInt() + 7
@@ -158,6 +173,14 @@ internal class PacScene(private val world: PacWorld) : PixelSprites() {
             c.restore()
         }
         return frame
+    }
+
+    private fun flare(c: Canvas, cx: Int, cy: Int, seed: Int, clock: Float) {
+        val pulse = ((clock * 5f + seed).toInt() % 2 == 0)
+        c.drawBitmap(flareGlow, cx - 14f, cy - 14f, plain)
+        rect(c, cx - 1, cy - 3, 3, 8, PX.K); rect(c, cx, cy - 2, 1, 6, 0xFFC02A2A.toInt()); rect(c, cx, cy + 1, 1, 1, PX.W)
+        rect(c, cx - 1, cy - 6, 3, 3, if (pulse) 0xFFFFF0A0.toInt() else 0xFFFF8A3A.toInt())
+        for (k in 0..2) { val ph = (clock * 3f + k * 0.33f + seed * 0.1f) % 1f; px(c, cx + ((k - 1) * 3 * ph).toInt(), cy - 6 - (ph * 6).toInt(), a(0xFFFFC04A.toInt(), ((1f - ph) * 255).toInt())) }
     }
 
     private fun fragment(c: Canvas, cx: Int, cy: Int, seed: Int, clock: Float) {

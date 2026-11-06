@@ -83,7 +83,7 @@ internal class DeadDropView(
     private fun startArcade(id: String) {
         choosing = false; arcadeId = id; arcLives = 3; arcScore = 0; arcOver = false; arcOverT = 0f; arcWon = false; pacBank = 0; arcRound = 1; flyHit = false; pacCaughtT = -1f
         when (id) {
-            "maze" -> { levelIdx = 1; load(false); attempt = 2; toStage(1) }
+            "maze" -> { levelIdx = 1; load(false); attempt = 2; toStage(1); newArcadeMaze() }
             "belt" -> { levelIdx = 2; load(false); belt = BeltWorld(BeltLevel.warehouseArcade); beltScene = BeltScene(belt!!) }
             "fly" -> { levelIdx = 2; load(false); startMg(1); fly = FlyWorld(FlySpec((System.nanoTime() % 1000).toInt(), 1_000_000)); flyScene = FlyScene(fly!!) }
             "hall" -> { levelIdx = 3; load(false); startMg(1) }
@@ -118,15 +118,19 @@ internal class DeadDropView(
             if (fw.gameOver) arcadeOver()
         }
     }
-    /** The sewer maze in the arcade: a new maze each time you clear one; 3 lives. */
+    /** The sewer maze in the arcade: four sewers in turn, faster each level, with flares that make the police panic; 3 lives. */
+    private fun newArcadeMaze(keep: PacWorld? = null) { pac = PacWorld(PacMaze.arcade(arcRound)).also { if (keep != null) it.carryOn(keep) }; pacScene = PacScene(pac!!); pacWant = -1; if (keep == null) arcBanner = 0f }
+    private var arcBanner = 9f
     private fun arcadePacTick(dt: Float) {
         val pw = pac ?: return
+        arcBanner += dt
+        if (soundOn) for (e in pw.events) DeadLetterSfx.play(e); pw.events.clear()
         if (arcOver) { arcOverT += dt; return }
-        arcScore = pacBank + pw.eaten * 10
-        if (pw.phase == PacWorld.Phase.WON && pw.phaseT > 0.9f) { pacBank += pw.eaten * 10 + 500; arcRound++; pac = PacWorld(spec.pac!!); pacScene = PacScene(pac!!); pacWant = -1 }
+        arcScore = pacBank + pw.eaten * 10 + pw.bonus
+        if (pw.phase == PacWorld.Phase.WON && pw.phaseT > 0.9f) { pacBank += pw.eaten * 10 + pw.bonus + 500; arcRound++; newArcadeMaze() }
         if (pw.phase == PacWorld.Phase.CAUGHT) {
             if (pacCaughtT < 0f) { pacCaughtT = 0f; arcLives--; if (arcLives <= 0) arcadeOver() }
-            else { pacCaughtT += dt; if (pacCaughtT > 1.2f && !arcOver) { pacCaughtT = -1f; pacBank += pw.eaten * 10; pac = PacWorld(spec.pac!!).also { it.fails = 0 }; pacScene = PacScene(pac!!); pacWant = -1 } }
+            else { pacCaughtT += dt; if (pacCaughtT > 1.2f && !arcOver) { pacCaughtT = -1f; pacBank += pw.eaten * 10 + pw.bonus; newArcadeMaze(pw) } }
         }
     }
     /** The arcade's score, lives and the game-over card, over whatever is on screen. */
@@ -607,6 +611,7 @@ internal class DeadDropView(
             val can = pr.isNotEmpty() && !pr.endsWith("…") && pr != "CLOSED" && pr != "HANDS FULL" && pr != "CART EMPTY" && pr != "WASHER" && pr != "DRYER" && pr != "FOLDING TABLE" && pr != "CLEAN CART"
             val gold = 0xFFFFD84D.toInt()
             p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(gunCx, joyCy, gunR + 4f * d, p)
+            if (pr == "GET IN THE CART") { val pu = sin(clock * 6f) * 0.5f + 0.5f; p.color = a(gold, (0x30 + pu * 0x50).toInt()); c.drawCircle(gunCx, joyCy, gunR + (8f + pu * 10f) * d, p) }   // the boat: the button calls to you
             p.color = a(gold, if (can) 0x66 else 0x1E); c.drawCircle(gunCx, joyCy, gunR - 4f * d, p)
             p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; p.color = a(gold, if (can) 0xCC else 0x50); c.drawCircle(gunCx, joyCy, gunR, p)
             p.style = Paint.Style.FILL
@@ -1049,6 +1054,11 @@ internal class DeadDropView(
         val ps = pacScene; val pw = pac
         if (ps != null && pw != null) {
             drawPacStage(c, w, h, ps, pw)
+            if (arcadeId == "maze") {
+                if (arcBanner < 3f) { val k = min(1f, (3f - arcBanner) * 2f); mgText(c, "LEVEL $arcRound  ·  ${PacMaze.ARCADE_NAMES[(arcRound - 1) % 4]}", w / 2f, offY - 8f * d, 13f, a(0xFF3DE8F5.toInt(), (k * 255).toInt())) }
+                if (pw.popT < 1f) mgText(c, "${pw.popPts}", offX + pw.popX * T, offY + (pw.popY - 0.6f - pw.popT) * T, 12f, a(0xFF8AB0FF.toInt(), ((1f - pw.popT) * 255).toInt()))
+                if (pw.frightT > 0f) mgText(c, "THEY'RE SCARED! CATCH THEM!", w / 2f, offY + ps.H * T / 16f + 40f * d, 11f, if ((clock * 4f).toInt() % 2 == 0) 0xFF8AB0FF.toInt() else Color.WHITE)
+            }
         } else if (pix != null) {
             // pixel-art level: the scene is drawn small and scaled up by a whole number so every pixel is the same size.
             // Tall maps scroll: the view follows the courier (kept to whole art pixels so nothing shimmers).
@@ -1744,7 +1754,7 @@ internal class DeadDropView(
         p.color = if (pw.doorOpen) 0xFF3BFF9A.toInt() else 0xFFFFD84D.toInt()
         c.drawText(if (pw.doorOpen) "THE DOOR IS OPEN. GO!" else "KEY FRAGMENTS  $have / ${pw.total}", w / 2f, offY + ps.H * sc + 22f * d, p)
         p.typeface = mono; p.letterSpacing = 0f; p.textSize = 11.5f * d; p.color = a(Color.WHITE, 0x99)
-        if (pw.phase != PacWorld.Phase.PLAY || pw.eaten < 6) wrap(c, spec.pacTip, w / 2f, offY + ps.H * sc + 42f * d, w - 40f * d, 15f * d)
+        if (pw.phase != PacWorld.Phase.PLAY || pw.eaten < 6) wrap(c, if (arcadeId == "maze") "Collect every fragment to open the door. Grab a red flare and the police panic for a few seconds: catch them for points." else spec.pacTip, w / 2f, offY + ps.H * sc + 42f * d, w - 40f * d, 15f * d)
         p.letterSpacing = 0f
     }
 

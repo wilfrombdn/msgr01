@@ -84,6 +84,7 @@ internal object DeadLetterSfx {
         "chuckle" -> chuckle()
         "pump" -> { val a = noise(0.08f, 0.7f, 40f, 0.7f, 43); val gap = (RATE * 0.16f).toInt(); val b = noise(0.08f, 0.8f, 40f, 0.7f, 47); ShortArray(a.size + gap + b.size) { when { it < a.size -> a[it]; it < a.size + gap -> 0; else -> b[it - a.size - gap] } } }   // shk-shk
         "shotgun" -> { val a = noise(3.0f, 1.6f, 1.7f, 0.1f, 53); val b = noise(0.2f, 1.6f, 18f, 0.9f, 59); val lo = tone(listOf(42f, 55f), 3.0f, 0.9f, 1.4f); ShortArray(a.size) { (a[it] + (if (it < b.size) b[it] else 0) + lo[it]).coerceIn(-32767, 32767).toShort() } }   // a crack, a deep boom, the room ringing
+        "boathorn" -> tone(listOf(98f, 123.5f, 147f), 1.8f, 0.32f, 1.1f, square = true)     // a low ship's horn
         "keys" -> tone(listOf(2100f, 2900f, 3600f), 0.25f, 0.12f, 14f, square = true)
         else -> null
     }

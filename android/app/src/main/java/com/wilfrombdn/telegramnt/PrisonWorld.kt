@@ -28,7 +28,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     /** Things you can steal and make. */
     enum class Item(val label: String) { SPOON("SPOON"), FORK("FORK"), FILE("FILE"), PIPE("PIPE"), SHEET("SHEET"), POSTER("POSTER"), UNIFORM("UNIFORM"), ROPE("ROPE"), HOOK("HOOK") }
     /** The ways out. */
-    enum class Route { DIG, CHIP, WALL, CART, GATE }
+    enum class Route { DIG, CHIP, WALL, CART, GATE, BOAT }
 
     /** The parts of the day: when they start (minutes after midnight), what they're called, and where you must be. */
     enum class Period(val start: Int, val label: String, val place: String?) {
@@ -131,8 +131,10 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
                 Route.WALL -> "OVER THE WALL. DOWN THE CLIFF TO THE WATER."
                 Route.CART -> "THE CART ROLLS DOWN TO THE DOCK. YOU SLIP OUT."
                 Route.GATE -> "THE GATE GUARD NODS. YOU WALK DOWN TO THE WATER."
+                Route.BOAT -> "UNDER THE SHEETS, THE CART IS WHEELED DOWN THE PIER AND ONTO THE BOAT..."
                 null -> ""
             }
+            route == Route.BOAT -> "THE SUPPLY BOAT PULLS AWAY. NOBODY COUNTS THE LAUNDRY."
             signalSent -> "THE BOAT WAS WAITING."
             else -> ""
         }
@@ -184,6 +186,8 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     private val rnd = Random(seed)
 
     companion object {
+        const val BOAT_S = 32f          // how long the supply boat waits at the laundry door
+        const val STUN_S = 1.5f
         const val SPEED = 3.4f
         const val R = 0.28f
         const val WAKE_STAND = 2.6f
@@ -337,7 +341,8 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
             val (dc, dr) = spec.myDoor
             if (doorOpen < 0.9f && floor(px).toInt() == dc && floor(py).toInt() == dr) py = spec.startY
             if (seated && mag > 0.5f && grabStage < 0) standUp()
-            moving = mag > 0.05f && !solitary && !lockedInSpot && grabStage < 0 && !seated
+            stunT = max(0f, stunT - dt)
+            moving = mag > 0.05f && !solitary && stunT <= 0f && grabStage < 0 && !seated
             idle = if (moving) 0f else idle + dt
             if (seated) eatTick(dt)
             if (moving) {
@@ -351,6 +356,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
             zone.let { if (it.isNotEmpty()) visited += it }
         }
         if (fireT >= 0f) fireT += dt
+        if (phase == Phase.PLAY) boatTick(dt)
         for (n in npcs) if (!gone(n)) updateNpc(n, dt)
         // everyone faces the way they actually moved (never backwards, never spinning)
         for (n in npcs) { val dx = n.x - n.px0; val dy = n.y - n.py0; if (dx * dx + dy * dy > 1e-6f) { n.face = atan2(dy, dx); n.moving = true } }
@@ -427,7 +433,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         if (g.path.isEmpty()) { px = goal.first + 0.5f; py = goal.second + 0.5f; letGo(g) }
     }
     private fun letGo(g: Npc) {
-        grabStage = -1; beatT = -1f; enforcer = null
+        grabStage = -1; beatT = -1f; enforcer = null; if (grabSmack) stunT = max(stunT, STUN_S)
         // back to where he was: his door, or his rounds
         val home = if (g.door != null) g.post else rounds.filter { hypot(it.first - g.x, it.second - g.y) in 4f..12f }.randomOrNull(rnd)
         if (home != null) g.path = route(floor(g.x).toInt() to floor(g.y).toInt(), home)
@@ -444,7 +450,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     private fun standUp() { seated = false }
     private fun eatTick(dt: Float) {
         if (!meal) { standUp(); return }
-        if (!attended) { eatMin += DAY_RATE * dt; if (eatMin >= EAT_MIN) { attended = true; say("YOU ATE.") } }
+        if (!attended) { eatMin += DAY_RATE * dt; if (eatMin >= EAT_MIN) { attended = true; ateEver = true; say("YOU ATE.") } }
     }
 
     private fun blockedAt(x: Float, y: Float): Boolean {
@@ -561,6 +567,8 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     val cellsShut get() = phase == Phase.WAKE || countStage == 0
     /** Locked on your square till the count's done (after the guards have had to drag you there). */
     var lockedInSpot = false; private set
+    /** After a beating you're dazed for a moment (you can't move), then you're free again (it used to hold you till the count ended: it felt frozen). */
+    var stunT = 0f; private set
     var beatT = -1f; private set
     var enforcer: Npc? = null; private set
     val clipboards = ArrayList<Npc>()
@@ -601,7 +609,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
                 if (countT > 6f && clipboards.all { it.path.isEmpty() }) { countStage = 2; countT = 0f; if (!onSpot) beatUp() }
             }
             2 -> {
-                if (!onSpot && !lockedInSpot) beatUp()
+                if (!onSpot && grabStage < 0) beatUp()
                 var allDone = true
                 for (g in clipboards) {
                     val stops = (0..9).map { PrisonLevel.CX0 + 3 * it + 1 + 0.5f }
@@ -631,11 +639,11 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     }
     private val clipAt = HashMap<Int, Int>()
     private fun beatUp() {
-        if (grabStage >= 0 || lockedInSpot) return
+        if (grabStage >= 0) return
         heat += 10f
         say("YOU'RE NOT ON YOUR SQUARE. A GUARD IS COMING.", true)
         grab(roamers.filter { it !in clipboards }.minByOrNull { hypot(it.x - px, it.y - py) }, true, countSpot, "WHAT DID I SAY? ON YOUR SQUARE!") {
-            lockedInSpot = true; say("DRAGGED TO YOUR SQUARE. YOU STAY THERE TILL THE COUNT'S DONE.", true)
+            lockedInSpot = true; stunT = STUN_S; say("DRAGGED TO YOUR SQUARE. STAY ON IT TILL THE COUNT'S DONE.", true)
         }
     }
     private fun assignEscortForNow() { routineForNpcs(period); assignEscort(period) }
@@ -826,6 +834,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     /** Can this guard see you (close enough, and no wall in the way)? */
     fun sees(n: Npc): Boolean {
         if (n.attn != WATCH || n.inEvent || gone(n)) return false
+        if (boatHere && px > 59f && py > 37f && py < 47.5f) return false     // the boat: everyone's out on the pier, arguing
         val d = hypot(n.x - px, n.y - py)
         if (d > seeRange) return false
         if (d > 1.6f) { var da = kotlin.math.atan2(py - n.y, px - n.x) - n.face; while (da > Math.PI) da -= (2 * Math.PI).toFloat(); while (da < -Math.PI) da += (2 * Math.PI).toFloat(); if (abs(da) > (if (alert) 1.45f else CONE)) return false }
@@ -898,8 +907,41 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         return best
     }
 
+    // ---------- the supply boat: the easy way out, offered once per game ----------
+    // After you've eaten one meal and finished one whole laundry load, the supply boat comes for the clean laundry. The loading door
+    // at the back of the laundry rolls up onto the pier, the guard on duty goes out to argue with the boatman over his paperwork,
+    // and the clean cart stands open, lit by the evening light, with nobody looking. Climb in and the cart is wheeled onto the boat.
+    // Miss it and the boat leaves: from then on you have to plan a real escape.
+    /** You've sat down and eaten at least one meal. */
+    var ateEver = false; private set
+    /** Seconds since the boat came in (-1 = not yet); it leaves at [BOAT_S]. */
+    var boatT = -1f; private set
+    var boatGone = false; private set
+    val boatHere get() = boatT >= 0f && !boatGone
+    val cartSpot = 69 to 45
+    private fun nearCart() = near(cartSpot.first, cartSpot.second, 1.8f)
+    private var whispered = false
+    private fun boatTick(dt: Float) {
+        if (boatGone) return
+        if (boatT < 0f) {
+            if (ateEver && shiftDone && period.work && countStage < 0 && grabStage < 0 && bustStage < 0 && !solitary) {
+                boatT = 0f; events += "boathorn"
+                say("INTERCOM: SUPPLY BOAT AT THE LAUNDRY DOOR. CLEAN LAUNDRY OUT TO THE PIER.")
+            }
+            return
+        }
+        boatT += dt
+        // one of the men at work sees it too, and nods you at it
+        if (!whispered && hypot(px - cartSpot.first, py - cartSpot.second) < 9f) {
+            npcs.filter { !it.guard && !gone(it) }.minByOrNull { hypot(it.x - px, it.y - py) }?.takeIf { hypot(it.x - px, it.y - py) < 6f }?.let { speak(it, "PSST. THE CART. NOBODY'S LOOKING."); whispered = true }
+        }
+        if (boatT >= BOAT_S - 6f && boatT - dt < BOAT_S - 6f) { events += "boathorn"; say("THE BOATMAN SIGNS. THE ENGINE STARTS UP.") }
+        if (boatT >= BOAT_S) { boatGone = true; say("THE SUPPLY BOAT PULLS AWAY. THAT WAS YOUR CHANCE. YOU'LL HAVE TO PLAN A WAY OUT.", true) }
+    }
+
     /** What tapping the action button would do right now ("" = nothing to do here). */
     fun prompt(): String {
+        if (phase == Phase.PLAY && boatHere && nearCart() && grabStage < 0) return "GET IN THE CART"
         val s = station() ?: return options().firstOrNull()?.label ?: ""
         if (s.kind == 'C' && canHideInCart()) return "HIDE IN THE CART"
         if (s.kind == 'F' && laundryOpen && carry == Carry.NONE && folding < 0f && wantSheet()) return "TAKE A SHEET"
@@ -926,6 +968,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     /** The action button. Returns true if something happened. */
     fun act(): Boolean {
         if (phase != Phase.PLAY) return false
+        if (boatHere && nearCart() && grabStage < 0) { signalSent = true; boatGone = true; escape(Route.BOAT); return true }
         val s = station() ?: return options().firstOrNull()?.run?.invoke() ?: false
         if (s.kind == 'C' && canHideInCart()) return tryUnseen { escape(Route.CART) }
         if (s.kind == 'F' && laundryOpen && carry == Carry.NONE && folding < 0f && wantSheet()) return steal(Item.SHEET)
@@ -1410,6 +1453,8 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     internal val debugEventSteps get() = stepAt
     internal fun debugHaircut() { haircut = true }
     internal fun debugNoEscort() { escort?.let { it.escorting = false; it.hold = false }; escort = null; escortComing = false }
+    internal fun debugAte() { ateEver = true }
+    internal fun debugFinishShift() { shiftDone = true }
     internal fun debugBeat() = grab(null, true, null, "THAT'S FOR NOTHING.")
     internal fun debugEndCount() { if (countStage < 0) return; countStage = -1; lockedInSpot = false; enforcer = null; beatT = -1f; attended = true; clipboards.clear(); doorOpen = 1f; doorTarget = 1f; assignEscortForNow() }
 

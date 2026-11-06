@@ -3,6 +3,7 @@ package com.wilfrombdn.telegramnt
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -21,8 +22,10 @@ import kotlin.math.sin
 // Instead of dots you collect key fragments; when all are collected the exit door opens.
 
 internal class PacSpec(
-    val maze: List<String>,       // # wall, ' ' void, . path, M chamber, - chamber door, S your start, D the exit door
+    val maze: List<String>,       // # wall, ' ' void, . path, o path with a flare (arcade), M chamber, - chamber door, S your start, D the exit door
     val tunnelRow: Int,           // the row that wraps from one side to the other
+    /** Arcade level (0 = the story): higher levels are faster and the flares scare the police for less time. */
+    val level: Int = 0,
 )
 
 internal class PacWorld(val spec: PacSpec) {
@@ -52,6 +55,20 @@ internal class PacWorld(val spec: PacSpec) {
     var eaten = 0
     private var idleT = 0f
 
+    // ---- arcade only: flares ('o'). Grab one and for a few seconds the police panic (blue), turn tail and can be caught;
+    // a caught officer runs back to the chamber and comes out again. Nothing here runs in the story (it has no flares).
+    val power = Array(h) { BooleanArray(w) }
+    var frightT = 0f; private set
+    val frightS = if (spec.level <= 0) 0f else max(1.6f, 7f - 0.9f * (spec.level - 1))
+    private var chain = 0
+    /** Points earned for catching panicking police (200, 400, 800, 1600 in a row). */
+    var bonus = 0; private set
+    /** Where the last catch happened, its points and how long ago (for the score pop-up). */
+    var popX = 0f; var popY = 0f; var popPts = 0; var popT = 9f
+    val events = ArrayList<String>()
+    private val frRnd = java.util.Random(spec.level * 7919L + 13)
+    private val levelK = 1f + 0.06f * min(spec.level, 6)
+
     // the intro: the four police climb down a manhole in the middle of the chamber, then it is covered
     var lidClose = 0f              // 0 open .. 1 shut
     var spot = 1f                  // the spotlight from above
@@ -73,6 +90,7 @@ internal class PacWorld(val spec: PacSpec) {
         var visible = false
         var homeX = 0f
         var bob = 1f
+        var fright = false
         val tileX get() = floor(x).toInt()
         val tileY get() = floor(y).toInt()
     }
@@ -89,13 +107,14 @@ internal class PacWorld(val spec: PacSpec) {
         for (r in 0 until h) for (c in 0 until w) when (g[r][c]) {
             'S' -> { startX = c; startY = r; g[r][c] = '.' }
             'D' -> { doorX = c; doorY = r }
+            'o' -> { power[r][c] = true; g[r][c] = '.' }
         }
         var top = h; var bottom = 0
         for (r in 0 until h) for (c in 0 until w) if (g[r][c] == 'M') { top = min(top, r); bottom = maxOf(bottom, r + 1) }
         chamberTop = top; chamberBottom = bottom
         for (r in 0 until h) for (c in 0 until w) {
             val tunnel = r == spec.tunnelRow && (c < 5 || c > w - 6)
-            val ok = g[r][c] == '.' && !tunnel && !(c == startX && r == startY) && (c + r) % 2 == 0
+            val ok = g[r][c] == '.' && !power[r][c] && !tunnel && !(c == startX && r == startY) && (c + r) % 2 == 0
             if (ok) { frag[r][c] = true; total++ }
         }
         left = total
@@ -103,6 +122,14 @@ internal class PacWorld(val spec: PacSpec) {
         // where each cop waits down in the chamber
         ghosts[BLINKY].homeX = w / 2f; ghosts[PINKY].homeX = w / 2f; ghosts[INKY].homeX = w / 2f - 2f; ghosts[CLYDE].homeX = w / 2f + 2f
         for (gh in ghosts) { gh.x = gh.homeX; gh.y = top + 0.5f + (if (gh.id == BLINKY) 0f else 1f) }
+    }
+
+    /** Arcade, after being caught: carry on in this maze with what [old] had already collected; the police are back at the chamber. */
+    fun carryOn(old: PacWorld) {
+        for (r in 0 until h) for (c in 0 until w) { frag[r][c] = old.frag[r][c]; power[r][c] = old.power[r][c] }
+        left = old.left; doorOpen = old.doorOpen
+        for (gh in ghosts) gh.visible = true
+        lidClose = 1f; spot = 0f; landed = 4; phase = Phase.READY; phaseT = 0f; t = 9f; ghosts[BLINKY].state = LEAVING
     }
 
     // ---------- the maze ----------
@@ -129,6 +156,7 @@ internal class PacWorld(val spec: PacSpec) {
     /** Where cop [id] is heading right now. */
     internal fun targetTile(id: Int): Pair<Int, Int> {
         val gh = ghosts[id]
+        if (gh.state == RETURNING) return (w / 2) to (chamberTop - 2)
         if (!chase && !(id == BLINKY && elroy() > 0)) return scatterCorner[id]
         val me = myTile()
         return when (id) {
@@ -141,6 +169,10 @@ internal class PacWorld(val spec: PacSpec) {
 
     /** At tile ([bx],[by]), having arrived heading [dirIn]: the next direction a cop picks (nearest to his target; ties up, left, down, right). */
     internal fun choose(gh: Ghost, bx: Int, by: Int, dirIn: Int): Int {
+        if (gh.fright && gh.state == OUT) {         // panicking: any way but back, at random
+            val opts = (0..3).filter { it != (dirIn + 2) % 4 && ghostFree(bx + DX[it], by + DY[it]) }
+            return if (opts.isEmpty()) (dirIn + 2) % 4 else opts[frRnd.nextInt(opts.size)]
+        }
         val target = targetTile(gh.id)
         var best = -1; var bd = Int.MAX_VALUE
         for (d in 0..3) {
@@ -184,8 +216,10 @@ internal class PacWorld(val spec: PacSpec) {
         // a turn I asked for is remembered for half a second (so a quick flick still turns at the next junction), then forgotten,
         // so a push I made long ago never makes the courier turn on his own later
         if (want >= 0) { wantDir = want; lastWant = want; wantAge = 0f } else { wantAge += dt; if (wantAge > 0.5f) wantDir = -1 }
-        // the scatter/chase clock
-        modeT += dt
+        popT += dt
+        if (frightT > 0f) { frightT -= dt; if (frightT <= 0f) { frightT = 0f; chain = 0; for (gh in ghosts) gh.fright = false } }
+        // the scatter/chase clock (stopped while the police panic)
+        if (frightT <= 0f) modeT += dt
         if (modeIdx < schedule.size - 1 && modeT >= schedule[modeIdx]) {
             modeT -= schedule[modeIdx]; modeIdx++; chase = modeIdx % 2 == 1
             for (gh in ghosts) if (gh.state == OUT) gh.pendingReverse = true      // they all turn round when the mode changes
@@ -194,9 +228,16 @@ internal class PacWorld(val spec: PacSpec) {
         releaseCops()
         movePac(dt)
         moveLeavers(dt)
-        for (gh in ghosts) if (gh.state == OUT) moveCop(gh, dt)
+        for (gh in ghosts) if (gh.state == OUT || gh.state == RETURNING) moveCop(gh, dt)
         // caught?
-        for (gh in ghosts) if (gh.state != IN_CHAMBER && gh.visible && hypot(gh.x - px, gh.y - py) < CATCH - 0.03f * min(fails, 4)) { phase = Phase.CAUGHT; phaseT = 0f }
+        for (gh in ghosts) if (gh.state != IN_CHAMBER && gh.state != RETURNING && gh.visible && hypot(gh.x - px, gh.y - py) < CATCH - 0.03f * min(fails, 4)) {
+            if (gh.fright) {   // caught him: he runs back to the chamber
+                gh.fright = false; gh.state = RETURNING; chain++; val pts = 100 shl chain.coerceAtMost(4); bonus += pts
+                popX = gh.x; popY = gh.y; popPts = pts; popT = 0f; events += "over"
+                continue
+            }
+            phase = Phase.CAUGHT; phaseT = 0f
+        }
     }
 
     private fun releaseCops() {
@@ -211,7 +252,7 @@ internal class PacWorld(val spec: PacSpec) {
     // ----- me -----
     private fun movePac(dt: Float) {
         if (eatStall > 0f) { eatStall -= dt; moving = false; return }
-        var remaining = PAC * dt
+        var remaining = PAC * (if (spec.level > 0) 1f + 0.03f * min(spec.level, 6) else 1f) * dt
         moving = false
         while (remaining > 1e-4f) {
             val step = min(remaining, 0.08f); remaining -= step
@@ -247,6 +288,10 @@ internal class PacWorld(val spec: PacSpec) {
                 frag[n.second][n.first] = false; left--; eaten++; idleT = 0f; eatStall = 0.02f
                 if (left == 0) doorOpen = true
             }
+            if (n != null && hypot(px - (ex + 0.5f), py - (ey + 0.5f)) < 0.4f && power[n.second][n.first]) {
+                power[n.second][n.first] = false; frightT = frightS; chain = 0; events += "ok"
+                for (gh in ghosts) if (gh.state == OUT) { gh.fright = true; gh.pendingReverse = true }
+            }
             if (doorOpen && ex == doorX && ey == doorY) { phase = Phase.WON; phaseT = 0f; return }
         }
     }
@@ -278,7 +323,12 @@ internal class PacWorld(val spec: PacSpec) {
     }
 
     // ----- a cop out in the sewer -----
-    private fun copSpeed(gh: Ghost): Float = copSpeedRaw(gh) * (1f - 0.06f * fails).coerceAtLeast(0.6f)
+    private fun copSpeed(gh: Ghost): Float = when {
+        gh.state == RETURNING -> U * 1.6f
+        gh.fright -> U * 0.5f
+        spec.level > 0 -> copSpeedRaw(gh) * levelK
+        else -> copSpeedRaw(gh) * (1f - 0.06f * fails).coerceAtLeast(0.6f)
+    }
 
     private fun copSpeedRaw(gh: Ghost): Float {
         val inTunnel = floor(gh.y).toInt() == spec.tunnelRow && (gh.x < 5f || gh.x > w - 5f)
@@ -298,6 +348,9 @@ internal class PacWorld(val spec: PacSpec) {
                 gh.x = tcx; gh.y = tcy
                 // arrived: wrap through the tunnel if need be, then turn as already decided (or turn round if the mode changed)
                 if (gh.tx < 0) { gh.tx += w; gh.x += w } else if (gh.tx >= w) { gh.tx -= w; gh.x -= w }
+                if (gh.state == RETURNING && gh.tx == w / 2 && gh.ty == chamberTop - 2) {   // home: back in through the gate
+                    gh.x = w / 2f; gh.y = chamberTop + 0.5f; gh.state = LEAVING; gh.pendingReverse = false; return
+                }
                 val arrivalDir = gh.dir
                 gh.dir = if (gh.pendingReverse) { gh.pendingReverse = false; (arrivalDir + 2) % 4 } else gh.next
                 gh.tx += DX[gh.dir]; gh.ty += DY[gh.dir]
@@ -313,7 +366,7 @@ internal class PacWorld(val spec: PacSpec) {
         val DX = intArrayOf(0, -1, 0, 1)
         val DY = intArrayOf(-1, 0, 1, 0)
         const val BLINKY = 0; const val PINKY = 1; const val INKY = 2; const val CLYDE = 3
-        const val IN_CHAMBER = 0; const val LEAVING = 1; const val OUT = 2
+        const val IN_CHAMBER = 0; const val LEAVING = 1; const val OUT = 2; const val RETURNING = 3
         const val U = 6.6f                  // "100% speed", in tiles per second
         const val PAC = U * 0.8f
         const val LEAVE = U * 0.5f

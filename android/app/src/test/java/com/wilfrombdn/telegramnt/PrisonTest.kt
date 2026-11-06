@@ -99,6 +99,42 @@ class PrisonTest {
         assertFalse(w.lockedInSpot)
     }
 
+    /** The bug: dragged back to your square, you stayed frozen there till the whole count was done. Now you're dazed a moment, then free. */
+    @Test fun afterBeingDraggedToYourSquareYouCanMoveAgain() {
+        val w = PrisonWorld(PrisonLevel.rock()); repeat(90) { w.update(0.05f, 0f, 0f, 0f) }
+        var g = 0f; while (!w.lockedInSpot && g < 40f) { w.update(0.05f, 0f, 0f, 0f); g += 0.05f }
+        assertTrue(w.lockedInSpot && w.countStage >= 0)
+        run(w, PrisonWorld.STUN_S + 0.2f)
+        val x0 = w.px; val y0 = w.py
+        repeat(10) { w.update(0.05f, 1f, 0f, 1f) }
+        assertTrue("you can walk again while the count goes on", kotlin.math.hypot(w.px - x0, w.py - y0) > 0.3f || w.grabStage >= 0)
+    }
+
+    /** One meal, one whole laundry load, and the supply boat comes for the laundry: get in the cart and you're away. */
+    @Test fun theSupplyBoatIsTheEasyWayOut() {
+        val w = awake()
+        w.debugAte(); w.clock = 479.9f; run(w, 0.2f)                          // the morning shift
+        assertFalse(w.boatHere)
+        w.debugFinishShift(); run(w, 0.1f)
+        assertTrue("the boat comes in", w.boatHere)
+        at(w, w.cartSpot.first + 0.5f, w.cartSpot.second - 0.5f); run(w, 0.1f)
+        assertEquals("GET IN THE CART", w.prompt())
+        run(w, 1.6f); val sc = PrisonScene(w); var ct = 0f; repeat(20) { ct += 0.05f; sc.render(ct) }; save(sc.render(ct), "l5-boat", 3)
+        assertTrue(w.act())
+        run(w, 30f)
+        assertTrue("the boat takes you off the island", w.done); assertFalse(w.drowned)
+    }
+
+    @Test fun missTheBoatAndItIsGone() {
+        val w = awake()
+        w.debugAte(); w.clock = 479.9f; run(w, 0.2f); w.debugFinishShift(); run(w, 0.1f)
+        assertTrue(w.boatHere)
+        run(w, PrisonWorld.BOAT_S + 1f)
+        assertFalse(w.boatHere); assertTrue(w.boatGone)
+        w.debugFinishShift(); run(w, 0.5f)
+        assertFalse("it only comes once", w.boatHere)
+    }
+
     @Test fun beingSeenPocketingSomethingGetsYouLockedUpTillMorning() {
         val w = awake()
         w.debugGive(PrisonWorld.Item.FILE)
