@@ -52,10 +52,14 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         rect(c, cx - 9, cy - 8, 8, 3, if (lights && flip) PX.RED else 0xFF5A1020.toInt()); rect(c, cx + 1, cy - 8, 8, 3, if (lights && !flip) PX.BLUE else 0xFF102058.toInt())
     }
 
+    /** Where the person talking is (in the picture's pixels), so the view can put the words in a bubble over them; -1 = no bubble. */
+    var bubbleX = -1f; private set
+    var bubbleY = 0f; private set
     fun render(clock: Float): Bitmap {
         animT = clock
         val c = fc
         c.drawColor(0, PorterDuff.Mode.CLEAR)
+        bubbleX = -1f
         if (kind == 0) exit(c) else hall(c)
         return frame
     }
@@ -78,11 +82,11 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         for (wx in intArrayOf(x + 12, x + 54)) { rect(c, wx - 1, floor - 11, 14, 14, PX.K); rect(c, wx + 1, floor - 9, 10, 10, 0xFF2A3040.toInt()); rect(c, wx + 4, floor - 6, 4, 4, steelCL) }
         if (doorOpen) { rect(c, x + 27, floor - 20, 9, 16, PX.K); rect(c, x + 28, floor - 19, 7, 14, 0xFF14204E.toInt()) }
         if (moving) for (k in 0..3) rect(c, x - 8 - k * 7, floor - 5 + (sin(animT * 9f + k) * 1.5f).toInt(), 6, 5, a(0xFF8A94AC.toInt(), 0x90 - k * 0x20))
-        if (lights) { p.color = a(PX.RED, 0x30); c.drawRect((x - 30).toFloat(), (floor - 40).toFloat(), 130f, 40f, p) }
+        if (lights) { p.color = a(if ((animT * 5f).toInt() % 2 == 0) PX.RED else PX.BLUE, 0x26); c.drawRect((x - 20).toFloat(), (floor - 44).toFloat(), (x + 92).toFloat(), floor.toFloat(), p) }   // the light bar's glow on the car
     }
 
     private fun exit(c: Canvas) {
-        if (t >= INSIDE) { insideCar(c); return }
+        if (t >= INSIDE) { outsideCar(c); return }
         val floorTop = 305
         rect(c, 0, 0, W, H, 0xFF07101A.toInt())
         for (y in 0 until H step 8) rect(c, 0, y + 7, W, 1, 0xFF0C1C26.toInt())
@@ -124,6 +128,7 @@ internal class CineScene(val kind: Int) : PixelSprites() {
             rect(c, copX - 5, fy - 1, 11, 3, a(PX.K, 0x70))
             val kneel = if (t in 2.1f..3.4f) 6 else 0
             folk(c, copX, fy, 3, moveFrame, police, false, letterTaken && t < 5.8f, kneel)
+            if (kind == 0) { bubbleX = copX.toFloat(); bubbleY = (fy - 22 + kneel).toFloat() }
             if (t in 2.1f..3.4f) { val lk = ((t - 2.1f) / 1.3f).coerceIn(0f, 1f); rect(c, playerX + 4 - (lk * 10).toInt(), floorTop - 18 - (lk * 10).toInt(), 7, 5, PX.W); px(c, playerX + 6 - (lk * 10).toInt(), floorTop - 16 - (lk * 10).toInt(), PX.RED) }
         }
         c.drawBitmap(vig, 0f, 0f, plain)
@@ -198,6 +203,74 @@ internal class CineScene(val kind: Int) : PixelSprites() {
         if (lt < 0.6f) { p.color = a(PX.K, ((1f - lt / 0.6f) * 255).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }   // ...and up inside the car
     }
     private val dashGlow by lazy { glowBitmap(40, PX.CYAN, 0x30) }
+
+    /**
+     * The ride, seen from the side of the street: the cruiser in the near lane with its lights going, the city scrolling past behind
+     * it in layers (a skyline with the radio tower, shopfronts with neon, street lamps, the wet road throwing back every light),
+     * cars coming the other way, rain. The talk shows in a bubble over the car.
+     */
+    private fun outsideCar(c: Canvas) {
+        val lt = t - INSIDE
+        val dist = lt * 70f
+        // the sky, a moon behind cloud
+        for (y in 0 until 150) { val k = y / 150f; rect(c, 0, y, W, 1, mixC(0xFF05060F.toInt(), 0xFF2A1630.toInt(), k)) }
+        c.drawBitmap(moonGlow, 170f - 30f, 34f - 30f, plain); rect(c, 166, 30, 8, 8, 0xFFE8E4D4.toInt()); rect(c, 168, 30, 6, 2, 0xFFFFFFF0.toInt())
+        for (k in 0 until 4) { val cx = mod((k * 97 - (dist * 0.05f).toInt()), W + 80) - 40; rect(c, cx, 24 + k * 13, 60, 4, a(0xFF3A2A44.toInt(), 0xA0)); rect(c, cx + 10, 22 + k * 13, 34, 3, a(0xFF4A3A54.toInt(), 0x80)) }
+        // the far skyline (with the radio tower, its red light blinking)
+        val fsc = (dist * 0.12f).toInt()
+        for (i in -1..12) { val bx = i * 22 - mod(fsc, 22); val seed = i + fsc / 22; val bh = 34 + mod(seed * 37, 50)
+            rect(c, bx, 160 - bh, 21, bh, 0xFF0B0A18.toInt())
+            for (wy in 160 - bh + 3 until 156 step 4) for (wx in bx + 2 until bx + 19 step 4) if (mod((wx * 7 + wy * 13 + seed * 31), 9) == 0) px(c, wx, wy, if (mod(wx + wy, 5) == 0) PX.CYAN else PX.WARM) }
+        val tx = 120 - mod((dist * 0.12f).toInt(), W + 140) + W; if (tx in -10..W + 10) { for (k in 0 until 60) px(c, tx + (k % 2), 160 - k, 0xFF2A2030.toInt()); if ((animT * 1.5f).toInt() % 2 == 0) { rect(c, tx - 1, 98, 3, 3, PX.RED); c.drawBitmap(redDot, tx - 8f, 92f, plain) } }
+        // the near city: shopfronts, flats above, neon
+        val msc = (dist * 0.5f).toInt()
+        for (i in -1..6) { val seed = i + msc / 48; val bx = i * 48 - mod(msc, 48); val bh = 70 + mod(seed * 53, 80); val col = listOf(0xFF2A1E22, 0xFF1E2230, 0xFF262026, 0xFF1A2420)[mod(seed, 4)].toInt()
+            rect(c, bx, 214 - bh, 47, bh, col); rect(c, bx, 214 - bh, 47, 2, mixC(col, 0xFF8A7A8A.toInt(), 0.3f))
+            for (wy in 214 - bh + 6 until 180 step 11) for (wx in bx + 4 until bx + 42 step 10) { val lit = mod(wx * 3 + wy * 5 + seed * 7, 7) < 3; rect(c, wx, wy, 6, 7, if (lit) 0xFFE8B860.toInt() else 0xFF0A0C12.toInt()); if (lit) rect(c, wx, wy, 6, 2, 0xFFFFE0A0.toInt()) }
+            rect(c, bx + 3, 190, 41, 24, 0xFF0A0C10.toInt()); rect(c, bx + 5, 194, 37, 18, if (mod(seed, 3) == 0) 0xFF3A2A18.toInt() else 0xFF14202A.toInt())   // a shop window
+            val neon = listOf(PX.MAG, PX.CYAN, 0xFFFF5A3A.toInt(), 0xFF3BFF9A.toInt())[mod(seed * 7, 4)]
+            if ((animT * 3f + seed).toInt() % 7 != 0) { rect(c, bx + 8, 183, 30, 5, neon); c.drawBitmap(neonGlowC, bx + 23f - 30f, 185f - 30f, plain) } }
+        // the far pavement, then the road: wet, with the lights mirrored in it
+        rect(c, 0, 214, W, 8, 0xFF2A2C34.toInt()); rect(c, 0, 214, W, 1, 0xFF4A4C56.toInt())
+        rect(c, 0, 222, W, 48, 0xFF101218.toInt())
+        for (k in 0 until W step 4) if (mod(k * 31 + msc, 11) < 3) rect(c, k, 224 + mod(k * 17, 40), 3, 1, 0xFF1C2028.toInt())   // wet sheen
+        for (i in -1..6) { val bx = i * 48 - mod(msc, 48); val neon = listOf(PX.MAG, PX.CYAN, 0xFFFF5A3A.toInt(), 0xFF3BFF9A.toInt())[mod((i + msc / 48) * 7, 4)]; for (k in 0 until 6) rect(c, bx + 10 + k * 4, 226 + k * 2, 2, 6, a(neon, 0x30)) }   // neon in the puddles
+        val dsc = (dist * 1.0f).toInt(); for (i in -1..W / 24 + 1) rect(c, i * 24 - mod(dsc, 24), 244, 12, 2, 0xFFD8C890.toInt())   // the centre line
+        // cars coming the other way, headlights first
+        for (k in 0 until 3) { val period = 520f + k * 170f; val cx = W + 60 - ((lt * 150f + k * 210f) % period).toInt(); if (cx in -80..W + 10) civCar(c, cx, 241, listOf(0xFF8A2A2A, 0xFFB8B8C0, 0xFF2A5A8A)[k].toInt(), true) }
+        // our cruiser, bouncing on the road, its light bar going
+        val carX = 70; val floor = 264 + if ((lt * 6f).toInt() % 5 == 0) -1 else 0
+        c.drawBitmap(redWashC, carX + 36f - 60f, floor - 50f - 60f, plain)
+        sideCar(c, carX, floor, doorOpen = false, lights = true, moving = true)
+        rect(c, carX + 2, floor + 3, 68, 4, a(0xFF3A56B8.toInt(), 0x40)); if ((animT * 5f).toInt() % 2 == 0) rect(c, carX + 20, floor + 6, 18, 6, a(PX.RED, 0x40)) else rect(c, carX + 30, floor + 6, 18, 6, a(PX.BLUE, 0x40))   // its lights in the wet road
+        rect(c, carX + 72, floor - 14, 40, 6, a(0xFFFFE9A0.toInt(), 0x30)); rect(c, carX + 72, floor - 12, 70, 2, a(0xFFFFE9A0.toInt(), 0x20))   // headlight beams
+        // two heads in the windows: the cop driving, you beside him
+        rect(c, carX + 38, floor - 31, 5, 5, police.skin); rect(c, carX + 37, floor - 33, 7, 3, police.hat!!)
+        rect(c, carX + 14, floor - 31, 5, 5, clerk.skin); rect(c, carX + 14, floor - 32, 5, 2, clerk.hair)
+        bubbleX = carX + 40f; bubbleY = floor - 40f
+        // the near kerb and pavement, street lamps rushing past in front
+        rect(c, 0, 270, W, 4, 0xFF4A4C56.toInt()); rect(c, 0, 274, W, 16, 0xFF24262E.toInt())
+        val nsc = (dist * 1.4f).toInt()
+        for (i in -1..2) { val lx = i * 130 - mod(nsc, 130) + 40; rect(c, lx, 150, 3, 140, 0xFF14161C.toInt()); rect(c, lx - 10, 148, 14, 4, 0xFF14161C.toInt()); rect(c, lx - 12, 151, 8, 3, 0xFFFFE0A0.toInt()); c.drawBitmap(lampGlowC, lx - 8f - 40f, 152f - 40f, plain) }
+        rect(c, 0, 290, W, H - 290, 0xFF05060A.toInt())
+        // rain
+        for (k in 0 until 70) { val rx = mod(k * 37 - (lt * 40f).toInt(), W); val ry = mod(k * 61 + (lt * 300f).toInt(), H); rect(c, rx, ry, 1, 4, a(0xFF8AA0C8.toInt(), 0x60)) }
+        c.drawBitmap(vig, 0f, 0f, plain)
+        if (lt < 0.6f) { p.color = a(PX.K, ((1f - lt / 0.6f) * 255).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
+    }
+    /** An ordinary car seen from the side (nose to the left when [left]). */
+    private fun civCar(c: Canvas, x: Int, floor: Int, col: Int, left: Boolean) {
+        rect(c, x, floor - 14, 56, 10, PX.K); rect(c, x + 1, floor - 13, 54, 8, col); rect(c, x + 1, floor - 13, 54, 2, mixC(col, PX.W, 0.35f))
+        rect(c, x + 12, floor - 22, 30, 9, PX.K); rect(c, x + 13, floor - 21, 28, 8, mixC(col, PX.K, 0.3f)); rect(c, x + 15, floor - 20, 11, 6, 0xFF0B1230.toInt()); rect(c, x + 28, floor - 20, 11, 6, 0xFF0B1230.toInt())
+        for (wx in intArrayOf(x + 8, x + 40)) { rect(c, wx - 1, floor - 7, 10, 9, PX.K); rect(c, wx + 2, floor - 4, 4, 4, 0xFF4A5060.toInt()) }
+        if (left) { rect(c, x - 1, floor - 12, 3, 4, 0xFFFFF0B0.toInt()); rect(c, x - 40, floor - 12, 40, 3, a(0xFFFFF0B0.toInt(), 0x30)); rect(c, x + 55, floor - 12, 2, 4, PX.RED) }
+        rect(c, x + 2, floor + 1, 52, 3, a(col, 0x30))
+    }
+    private val moonGlow by lazy { glowBitmap(30, 0xFFE8E4D4.toInt(), 0x40) }
+    private val redDot by lazy { glowBitmap(8, PX.RED, 0x90) }
+    private val neonGlowC by lazy { glowBitmap(30, PX.MAG, 0x30) }
+    private val lampGlowC by lazy { glowBitmap(40, 0xFFFFC070.toInt(), 0x40) }
+    private val redWashC by lazy { glowBitmap(60, PX.RED, 0x30) }
     private inline fun big3(x: Int, y: Int, what: () -> Unit) { fc.save(); fc.scale(3f, 3f, x.toFloat(), y.toFloat()); what(); fc.restore() }
     private fun mixC(c1: Int, c2: Int, t: Float): Int {
         val r = (((c1 shr 16) and 0xFF) * (1 - t) + ((c2 shr 16) and 0xFF) * t).toInt(); val g = (((c1 shr 8) and 0xFF) * (1 - t) + ((c2 shr 8) and 0xFF) * t).toInt()

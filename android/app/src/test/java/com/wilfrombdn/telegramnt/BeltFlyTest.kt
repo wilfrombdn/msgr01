@@ -57,7 +57,7 @@ class BeltFlyTest {
 
     @Test fun leapingChangesBelt() {
         val w = BeltWorld(spec())
-        run(w, 3f)
+        run(w, BeltWorld.INTRO_S + 1f)
         assertEquals(BeltWorld.Phase.RIDE, w.phase)
         assertEquals(1, w.lane)
         w.leap(-1)
@@ -75,7 +75,7 @@ class BeltFlyTest {
 
     @Test fun jumpingClearsABarrierButWalkingIntoItHurts() {
         fun at(jump: Boolean): Int {
-            val w = BeltWorld(spec()); run(w, 3f); w.spec.extend(450f)
+            val w = BeltWorld(spec()); run(w, BeltWorld.INTRO_S + 1f); w.spec.extend(450f)
             val b = w.spec.obstacles.first { it.kind == BeltWorld.SMALL && it.x == w.spec.laneX[1] }
             w.s = b.s - 5f; w.x = w.spec.laneX[1]; w.lane = 1; w.invuln = 0f; w.lives = 3
             for (o in w.spec.obstacles) if (o !== b && o.s in (b.s - 8f)..(b.s + 8f)) o.curS = -999f
@@ -89,7 +89,7 @@ class BeltFlyTest {
     }
 
     @Test fun aHoleInTheBeltNeedsAJump() {
-        val w = BeltWorld(spec()); run(w, 3f); w.spec.extend(450f)
+        val w = BeltWorld(spec()); run(w, BeltWorld.INTRO_S + 1f); w.spec.extend(450f)
         val g = w.spec.obstacles.first { it.kind == BeltWorld.GAP }
         w.s = g.s - 5f; w.x = g.x; w.lane = w.spec.laneX.indexOfFirst { it == g.x }; w.invuln = 0f; w.lives = 3
         run(w, 2f)
@@ -97,7 +97,7 @@ class BeltFlyTest {
     }
 
     @Test fun coinsAreCollectedAndTheEndWaitsForHundred() {
-        val w = BeltWorld(spec()); run(w, 3f); w.spec.extend(450f)
+        val w = BeltWorld(spec()); run(w, BeltWorld.INTRO_S + 1f); w.spec.extend(450f)
         w.s = 200f; w.x = w.spec.laneX[1]; w.lane = 1
         val c = w.spec.coins.first { it.lane == 1 && !it.high && it.s > 205f }
         w.s = c.s - 0.3f; w.invuln = 99f
@@ -123,7 +123,7 @@ class BeltFlyTest {
 
     @Test fun theKickerThrowsYouToTheJetpack() {
         val w = BeltWorld(spec())
-        run(w, 3f)
+        run(w, BeltWorld.INTRO_S + 1f)
         w.coins = 100; w.s = w.endS - 0.05f; w.invuln = 99f
         run(w, 6f)
         assertEquals(BeltWorld.Phase.DONE, w.phase)

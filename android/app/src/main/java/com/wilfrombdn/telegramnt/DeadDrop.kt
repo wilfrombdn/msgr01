@@ -517,16 +517,17 @@ internal class DeadDropView(
                 }
             }
             // subtitles sit down in the dark space under the picture (wrapped if they're long)
-            cine?.caption()?.let { cap ->
+            cine?.let { cs -> val cap = cs.caption(); if (cap != null && cs.bubbleX >= 0f) speechBubble(c, w, mgOx + cs.bubbleX * mgSc, mgOy + cs.bubbleY * mgSc, cap, 999) }
+            cine?.caption()?.takeIf { cine?.bubbleX ?: -1f < 0f }?.let { cap ->
                 val room = h - botInset - bt
                 val y0 = if (room > 70f * d) bt + room * 0.38f else hb - 16f * d
                 p.typeface = monoBold; p.textSize = 13f * d; p.textAlign = Paint.Align.CENTER; p.letterSpacing = 0.05f; p.color = a(Color.WHITE, 0xEE)
                 wrap(c, cap, w / 2f, y0, w - 48f * d, 19f * d); p.letterSpacing = 0f
             }
             shoot?.let { sw ->
-                if (sw.msgT > 0f) mgText(c, sw.msg, w / 2f, hy - 10f * d, 11f, if (sw.msgGood) 0xFF3BFF9A.toInt() else 0xFFFF6A6A.toInt())
-                if (sw.phase == ShootWorld.Phase.PLAY) { mgText(c, "AREAS ${sw.roomsClear()}/7", w / 2f - 96f * d, hy - 28f * d, 10f, a(Color.WHITE, 0xCC)); if (sw.innocents > 0) mgText(c, "CLERKS LOST ${sw.innocents}", w / 2f + 96f * d, hy - 28f * d, 10f, a(0xFFFF6A6A.toInt(), 0xDD)) }
-                if (sw.phase == ShootWorld.Phase.PLAY && sw.phaseT < 8f) mgText(c, "HOLD GUN TO SHOOT THE CLOSEST. GRENADE HITS THE BIGGEST GROUP. SWIPE WITH A 2ND FINGER TO ROLL.", w / 2f, hb + 14f * d, 8.5f, a(Color.WHITE, 0xAA), false)
+                if (sw.msgT > 0f) mgText(c, sw.msg, w / 2f, hy + 26f * d, 11f, if (sw.msgGood) 0xFF3BFF9A.toInt() else 0xFFFF6A6A.toInt())
+                if (sw.phase == ShootWorld.Phase.PLAY) { mgText(c, "AREAS ${sw.roomsClear()}/7", w / 2f - 96f * d, hy + 8f * d, 10f, a(Color.WHITE, 0xCC)); if (sw.innocents > 0) mgText(c, "CLERKS LOST ${sw.innocents}", w / 2f + 96f * d, hy + 8f * d, 10f, a(0xFFFF6A6A.toInt(), 0xDD)) }
+                if (sw.phase == ShootWorld.Phase.PLAY && sw.phaseT < 8f) mgText(c, "HOLD GUN: SHOOT THE CLOSEST. DRAG FROM GRENADE TO AIM A THROW. 2ND-FINGER SWIPE: ROLL. AGAINST A WALL, NOT FIRING: HIDDEN.", w / 2f, hb + 14f * d, 8.5f, a(Color.WHITE, 0xAA), false)
                 if (sw.phase == ShootWorld.Phase.FINALE && sw.fade > 0f) { p.style = Paint.Style.FILL; p.color = a(Color.BLACK, (sw.fade * 255).toInt()); c.drawRect(0f, 0f, w, h, p) }
                 if (sw.phase == ShootWorld.Phase.DEAD) {
                     p.style = Paint.Style.FILL; p.color = a(0xFFB01020.toInt(), (min(1f, deadT * 2f) * 0x88).toInt()); c.drawRect(0f, 0f, w, h, p)

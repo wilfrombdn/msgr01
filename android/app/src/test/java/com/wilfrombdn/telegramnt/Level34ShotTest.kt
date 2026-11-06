@@ -1,6 +1,7 @@
 package com.wilfrombdn.telegramnt
 
 import android.graphics.Bitmap
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -23,9 +24,10 @@ class Level34ShotTest {
         val w = BeltWorld(BeltLevel.warehouse); val s = BeltScene(w)
         var t = 0f
         fun step(until: Float) { while (t < until) { w.update(0.01f); t += 0.01f; if (w.phase == BeltWorld.Phase.RIDE) w.invuln = 5f } }
-        step(1.2f); save(s.render(1.2f), "l3-belt-intro")
-        step(6f); save(s.render(6f), "l3-belt-a")
-        w.leap(1); step(6.15f); save(s.render(6.15f), "l3-belt-leap")
+        for (at in listOf(0.8f, 1.4f, 2.2f, 3.1f, 3.9f, 4.6f)) { step(at); save(s.render(at), "l3-wayin-${(at * 10).toInt()}") }
+        step(6f); assertTrue("the belts start after the way in", w.phase == BeltWorld.Phase.RIDE)
+        step(9f); save(s.render(9f), "l3-belt-a")
+        w.leap(1); step(9.15f); save(s.render(9.15f), "l3-belt-leap")
         w.s = 100f; step(t + 0.1f); save(s.render(7f), "l3-belt-fast")
         w.coins = 100; w.s = w.endS - 0.3f; step(t + 0.3f); save(s.render(8f), "l3-belt-kicker")
         step(t + 0.5f); save(s.render(8.5f), "l3-belt-launch")
@@ -94,6 +96,6 @@ class Level34ShotTest {
 
     @Test fun cine() {
         val c = CineScene(0)
-        for (tt in listOf(0.2f, 1.2f, 2.6f, 4.2f, 5.8f, 7.6f, 8.4f)) { c.t = tt; save(c.render(tt), "l3-cine-${(tt * 10).toInt()}") }
+        for (tt in listOf(0.2f, 1.2f, 2.6f, 4.2f, 5.8f, 7.6f, 8.4f, 12.0f, 16.0f, 19.0f)) { c.t = tt; save(c.render(tt), "l3-cine-${(tt * 10).toInt()}") }
     }
 }

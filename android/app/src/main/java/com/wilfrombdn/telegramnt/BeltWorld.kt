@@ -33,7 +33,7 @@ internal class BeltWorld(val spec: BeltSpec) {
     var phase = Phase.INTRO
     var t = 0f; var phaseT = 0f
     var lane = 1; var x = spec.laneX[1]
-    var s = -5f
+    var s = MAN_S
     var air = 0f                     // 0..1: how high up in a leap sideways
     var jumpAir = 0f                 // 0..1: how high up in a jump
     var lives = 3
@@ -51,7 +51,26 @@ internal class BeltWorld(val spec: BeltSpec) {
     val jumping get() = jumpK >= 0f
     var hits = 0
 
-    init { spec.extend(60f) }
+    init { spec.extend(60f); x = MAN_X }
+
+    /** 0..1: how far the manhole cover has slid aside. */
+    val coverOff get() = if (phase != Phase.INTRO) 1f else ((phaseT - 0.3f) / 0.8f).coerceIn(0f, 1f)
+    /** 0..1: how far up out of the hole you are (0 = out of sight below). */
+    val outOfHole get() = if (phase != Phase.INTRO) 1f else ((phaseT - 1.0f) / 0.7f).coerceIn(0f, 1f)
+    /** 0..1: how high up the scaffold you are. */
+    var climb = 0f; private set
+    private fun intro() {
+        val t0 = phaseT
+        speedNow = 0f
+        when {
+            t0 < 1.7f -> { x = MAN_X; s = MAN_S; moving = false }
+            t0 < 2.6f -> { val k = (t0 - 1.7f) / 0.9f; x = MAN_X + (SCAF_X - MAN_X) * k; s = MAN_S + (SCAF_S - MAN_S) * k; moving = true }   // run to the scaffold
+            t0 < 3.6f -> { x = SCAF_X; climb = (t0 - 2.6f) / 1.0f; s = SCAF_S + climb * 0.6f; moving = true }                       // up the ladder
+            t0 < 4.3f -> { val k = (t0 - 3.6f) / 0.7f; x = SCAF_X + (spec.laneX[0] - SCAF_X) * k; s = SCAF_S + 0.6f + (0.4f - SCAF_S - 0.6f) * k; air = sin(k * PI.toFloat()); climb = 1f; moving = false; lane = 0 }   // the jump onto the first belt
+            t0 < INTRO_S -> { val k = (t0 - 4.3f) / 0.7f; x = spec.laneX[0] + (spec.laneX[1] - spec.laneX[0]) * k; s = 0.4f; air = sin(k * PI.toFloat()); lane = 1 }      // and across to the middle one
+            else -> { x = spec.laneX[1]; lane = 1; s = 0.4f; air = 0f; phase = Phase.RIDE; phaseT = 0f; moving = true }
+        }
+    }
 
     fun speedAt(ss: Float) = 5.2f + 5.2f * (ss.coerceIn(0f, spec.endS) / spec.endS)
 
@@ -86,7 +105,7 @@ internal class BeltWorld(val spec: BeltSpec) {
         t += dt; phaseT += dt
         invuln = max(0f, invuln - dt); hitFlash = max(0f, hitFlash - dt); shake = max(0f, shake - dt); coinFlash = max(0f, coinFlash - dt)
         when (phase) {
-            Phase.INTRO -> { s += 2.6f * dt; moving = true; speedNow = 2.6f; if (s >= 0.4f) { phase = Phase.RIDE; phaseT = 0f } }
+            Phase.INTRO -> intro()
             Phase.RIDE -> ride(dt)
             Phase.FALL -> { if (phaseT > 1.4f) fell = true }
             Phase.LAUNCH -> {
@@ -149,6 +168,10 @@ internal class BeltWorld(val spec: BeltSpec) {
     }
 
     companion object {
+        // the way in, watched: up out of a manhole in the warehouse floor, across to a scaffold, up it, and a jump onto the belts
+        const val MAN_X = 3.0f; const val MAN_S = -2.6f          // the manhole
+        const val SCAF_X = 1.0f; const val SCAF_S = -1.0f        // the foot of the scaffold tower
+        const val INTRO_S = 5.0f
         const val BOX = 0; const val TOOL = 1; const val CABLE = 2; const val PRESS = 3; const val ARC = 4; const val HOOK = 5; const val BARREL = 6; const val FLYER = 7
         const val SMALL = 8; const val GAP = 9; const val TRUCK = 10; const val SAWB = 11; const val DROP = 12
     }

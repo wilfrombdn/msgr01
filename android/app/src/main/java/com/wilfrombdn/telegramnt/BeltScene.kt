@@ -131,6 +131,7 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
         feedEnd(c)
         kicker(c, endS)
         landing(c, endS)
+        if (world.s < 8f) wayIn(c)
         // 4. lamps' glow on everything below them
         for (r in r0..r1) if (r % 12 == 5) {
             val y = sy(r.toFloat() + 0.5f)
@@ -401,9 +402,49 @@ internal class BeltScene(private val world: BeltWorld) : PixelSprites() {
         }
     }
 
+    /** The manhole you come up through and the scaffold tower you climb to reach the belts. */
+    private fun wayIn(c: Canvas) {
+        // the manhole in the floor, its cover slid aside
+        val mx = sx(BeltWorld.MAN_X); val my = sy(BeltWorld.MAN_S)
+        rect(c, mx - 9, my - 5, 19, 11, 0xFF2A2E34.toInt()); rect(c, mx - 7, my - 4, 15, 9, 0xFF020304.toInt()); rect(c, mx - 6, my - 3, 13, 1, 0xFF0C0E12.toInt())
+        for (k in 0 until 3) rect(c, mx - 3, my - 2 + k * 3, 7, 1, 0xFF3A3E46.toInt())                                                    // the top rungs of the ladder below
+        val cx = mx + (world.coverOff * 16f).toInt(); val cy = my + (world.coverOff * 3f).toInt()
+        rect(c, cx - 7, cy - 4, 15, 9, PX.K); rect(c, cx - 6, cy - 3, 13, 7, 0xFF4A4E56.toInt()); for (k in 0 until 3) rect(c, cx - 4, cy - 2 + k * 2, 9, 1, 0xFF5E626C.toInt()); px(c, cx, cy, 0xFF2A2E34.toInt())
+        // the scaffold: four poles, cross braces, planks on top, a ladder up the side, its shadow thrown down and to the right
+        val bx = sx(BeltWorld.SCAF_X); val by = sy(BeltWorld.SCAF_S + 0.3f)
+        rect(c, bx - 8, by - 10, 26, 30, a(PX.K, 0x60))
+        val pole = 0xFF8A929E.toInt(); val poleD = 0xFF4A525E.toInt()
+        for ((qx, qy) in listOf(-11 to -14, 11 to -14, -11 to 14, 11 to 14)) { rect(c, bx + qx - 1, by + qy - 1, 3, 3, poleD); px(c, bx + qx, by + qy, PX.W) }
+        for (i in 0..22) { px(c, bx - 11 + i, by - 14 + (i * 28 / 22), pole); px(c, bx + 11 - i, by - 14 + (i * 28 / 22), poleD) }
+        rect(c, bx - 11, by - 14, 23, 1, pole); rect(c, bx - 11, by + 14, 23, 1, poleD); rect(c, bx - 11, by - 14, 1, 29, pole); rect(c, bx + 11, by - 14, 1, 29, poleD)
+        for (k in 0 until 4) { rect(c, bx - 10, by - 13 + k * 4, 21, 3, 0xFF8A6A3A.toInt()); rect(c, bx - 10, by - 13 + k * 4, 21, 1, 0xFFB08A50.toInt()) }   // planks on the top deck
+        for (k in 0 until 7) rect(c, bx + 12, by - 12 + k * 4, 4, 1, pole); rect(c, bx + 12, by - 13, 1, 28, poleD); rect(c, bx + 16, by - 13, 1, 28, poleD)  // the ladder
+    }
+
     // ---------------- me ----------------
     private fun player(c: Canvas, clock: Float) {
         val py = sy(world.s); val px0 = sx(world.x)
+        if (world.phase == BeltWorld.Phase.INTRO) {
+            val t = world.phaseT
+            val run = 1 + ((clock * 10f).toInt() % 2)
+            when {
+                t < 1.7f -> {   // up out of the hole: clipped by its rim
+                    val mx = sx(BeltWorld.MAN_X); val my = sy(BeltWorld.MAN_S)
+                    c.save(); c.clipRect(mx - 14, my - 40, mx + 14, my + 1)
+                    folk(c, mx, my + 2 + ((1f - world.outOfHole) * 26f).toInt(), 2, if (world.outOfHole in 0.05f..0.95f) run else 0, clerk, false, true); c.restore()
+                }
+                t < 2.6f -> { rect(c, px0 - 6, py + 5, 13, 3, a(PX.K, 0x80)); folk(c, px0, py + 6, 3, run, clerk, false, true) }
+                else -> {       // up the ladder (higher = a touch bigger, the shadow falling away), then the jump
+                    val h = if (t < 3.6f) world.climb else 1f - ((t - 3.6f) / 0.7f).coerceIn(0f, 1f)
+                    val sc = 1f + 0.22f * h
+                    rect(c, px0 - 6 + (h * 8).toInt(), py + 5 + (h * 6).toInt(), 13, 3, a(PX.K, 0x70))
+                    c.save(); c.scale(sc, sc, px0.toFloat(), (py + 6).toFloat())
+                    folk(c, px0, py + 6 - (world.air * 14).toInt(), if (t < 3.6f) 0 else 1, if (t < 3.6f) run else 1, clerk, false, true)
+                    c.restore()
+                }
+            }
+            return
+        }
         when (world.phase) {
             BeltWorld.Phase.LAUNCH -> {
                 val k = world.launchK
