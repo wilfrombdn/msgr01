@@ -148,29 +148,48 @@ internal open class PixelSprites {
             if (torch && dir == 2) { rect(c, fx + 5, fy - 7, 2, 3, PX.K); px(c, fx + 5, fy - 4, PX.W); px(c, fx + 6, fy - 4, PX.LAMP) }
             if (pose == 2 && dir == 2) cigarette(c, fx, fy)
         } else {
-            val step = frame == 1
-            // legs, striding
-            if (step) { rect(c, fx - 4, fy - 6, 3, 5, o.pants); rect(c, fx + 1, fy - 6, 3, 5, o.pants); rect(c, fx - 5, fy - 1, 3, 1, o.shoes); rect(c, fx + 2, fy - 1, 3, 1, o.shoes) }
-            else { rect(c, fx - 2, fy - 6, 5, 5, o.pants); rect(c, fx - 2, fy - 1, 6, 1, o.shoes) }
-            // torso
-            rect(c, fx - 3, fy - 12, 7, 6 + coatBottom, o.coat ?: o.shirt)
-            if (o.coat != null) rect(c, fx - 3, fy - 8, 1, 2 + coatBottom, o.coat - 0x00202020)
-            if (o.apron != null) rect(c, fx - 1, fy - 10, 5, 6, o.apron)
-            if (o.belt != null) rect(c, fx - 3, fy - 7, 7, 1, o.belt)
-            if (o.radio) { rect(c, fx - 3, fy - 12, 2, 3, PX.K); px(c, fx - 3, fy - 12, PX.RED) }
-            // the near arm, forward
-            rect(c, fx - 1, fy - 12, 2, 6, (o.coat ?: o.shirt) - 0x00101010); rect(c, fx - 1, fy - 6, 2, 1, o.skin)
+            // legs: standing (0), striding (1), passing with the back foot lifting (2). Small feet pointing forward, no flippers.
+            val shoe = o.shoes; val leg = o.pants; val legD = lite0(o.pants, -18)
+            when (frame) {
+                1 -> {   // the near leg forward, the far leg back
+                    rect(c, fx - 2, fy - 6, 2, 3, legD); rect(c, fx - 3, fy - 3, 2, 2, legD); rect(c, fx - 4, fy - 1, 3, 1, shoe)
+                    rect(c, fx, fy - 6, 2, 3, leg); rect(c, fx + 1, fy - 3, 2, 2, leg); rect(c, fx + 1, fy - 1, 3, 1, shoe)
+                }
+                2 -> {   // legs passing: one planted, the other's heel coming up behind
+                    rect(c, fx - 1, fy - 6, 2, 5, legD); rect(c, fx - 2, fy - 3, 2, 1, legD); rect(c, fx - 3, fy - 2, 2, 1, shoe)
+                    rect(c, fx, fy - 6, 2, 5, leg); rect(c, fx, fy - 1, 3, 1, shoe)
+                }
+                else -> { rect(c, fx - 1, fy - 6, 3, 5, leg); rect(c, fx - 1, fy - 6, 1, 5, legD); rect(c, fx - 1, fy - 1, 4, 1, shoe) }
+            }
+            // the far arm swings behind the body
+            val sleeve = o.coat ?: o.shirt
+            val swingF = when (frame) { 1 -> -1; 2 -> 1; else -> 0 }
+            rect(c, fx - 1 + swingF, fy - 12, 2, 5, lite0(sleeve, -26)); px(c, fx - 1 + swingF, fy - 7, lite0(o.skin, -30))
+            // torso: a little chest in front, the back straight
+            rect(c, fx - 3, fy - 12, 6, 6 + coatBottom, sleeve); rect(c, fx + 2, fy - 11, 1, 4, sleeve)
+            rect(c, fx - 3, fy - 12, 1, 6 + coatBottom, lite0(sleeve, -22))
+            if (o.coat != null) { rect(c, fx - 3, fy - 8, 1, 2 + coatBottom, o.coat - 0x00202020); rect(c, fx + 1, fy - 12, 2, 2, o.shirt) }
+            if (o.apron != null) rect(c, fx, fy - 10, 3, 6, o.apron)
+            if (o.belt != null) rect(c, fx - 3, fy - 7, 6, 1, o.belt)
+            if (o.radio) { rect(c, fx - 3, fy - 12, 1, 3, PX.K); px(c, fx - 3, fy - 12, PX.RED) }
+            if (o.badge) px(c, fx + 1, fy - 10, PX.GOLD)
+            // the near arm swings the other way, in front
+            val swingN = -swingF
+            rect(c, fx + swingN, fy - 12, 2, 6, lite0(sleeve, -10)); rect(c, fx + swingN, fy - 6, 2, 1, o.skin)
             if (torch) { rect(c, fx + 1, fy - 8, 4, 2, PX.K); rect(c, fx + 4, fy - 8, 2, 2, PX.W); px(c, fx + 6, fy - 8, PX.LAMP) }
             if (letter) { rect(c, fx + 1, fy - 9, 5, 4, PX.K); rect(c, fx + 2, fy - 8, 3, 2, PX.W); px(c, fx + 3, fy - 8, PX.RED) }
-            // head, in profile
-            rect(c, fx - 2, fy - 18 + hd, 7, 7, o.skin)
-            rect(c, fx - 3, fy - 18 + hd, 5, 7, o.hair); rect(c, fx - 2, fy - 18 + hd, 7, 2, o.hair)
-            px(c, fx + 3, fy - 15 + hd, PX.K); px(c, fx + 5, fy - 14 + hd, o.skin - 0x00301818)
-            if (o.glasses) { px(c, fx + 4, fy - 15 + hd, PX.ICE); px(c, fx + 5, fy - 15 + hd, PX.ICE) }
-            if (o.hat != null) {
-                rect(c, fx - 3, fy - 20 + hd, 8, 3, o.hat); rect(c, fx - 3, fy - 20 + hd, 8, 1, o.hat + 0x00101820)
-                if (o.brim != null) rect(c, fx + 2, fy - 17 + hd, 5, 1, o.brim)
-                if (o.badge) px(c, fx + 3, fy - 19 + hd, PX.GOLD)
+            // head, in profile: a neck, the back of the head with hair, the face with an eye, a small nose and a chin
+            val bow = if (sorrow) 1 else 0
+            rect(c, fx - 1, fy - 13, 3, 2, lite0(o.skin, -24))
+            rect(c, fx - 2, fy - 18 + hd + bow, 6, 7, o.skin)
+            rect(c, fx - 3, fy - 18 + hd + bow, 3, 6, o.hair); rect(c, fx - 2, fy - 18 + hd + bow, 6, 2, o.hair)
+            px(c, fx + 2, fy - 15 + hd + bow * 2, PX.K); px(c, fx + 4, fy - 14 + hd + bow, lite0(o.skin, -40))
+            rect(c, fx + 1, fy - 12 + hd + bow, 2, 1, lite0(o.skin, -20))
+            if (o.glasses) { px(c, fx + 2, fy - 15 + hd + bow, PX.ICE); px(c, fx + 3, fy - 15 + hd + bow, PX.ICE) }
+            if (o.hat != null) {   // a cap that sits on the head, its peak just over the brow (not a beak)
+                rect(c, fx - 3, fy - 20 + hd + bow, 7, 3, o.hat); rect(c, fx - 3, fy - 20 + hd + bow, 7, 1, o.hat + 0x00101820)
+                if (o.brim != null) rect(c, fx + 3, fy - 17 + hd + bow, 2, 1, o.brim)
+                if (o.badge) px(c, fx + 1, fy - 19 + hd + bow, PX.GOLD)
             }
         }
         c.restore()

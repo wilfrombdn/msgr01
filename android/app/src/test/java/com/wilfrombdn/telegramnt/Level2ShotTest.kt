@@ -44,8 +44,9 @@ class Level2ShotTest {
         v.debugAdvance(2.6f); shot(v, "l2-farewell")
         v.debugAdvance(2.2f)
         assertTrue("the contact reached the manhole and spoke", w().leadStage >= 2)
-        w().px = 8.5f; w().py = 9.5f; v.debugAdvance(0.2f)
-        assertTrue(w().enteredManhole)
+        w().px = 8.5f; w().py = 9.5f; v.debugAdvance(1.0f); shot(v, "l2-sinking")
+        v.debugAdvance(1.2f)
+        assertTrue("stepped in and sank out of sight", w().enteredManhole)
     }
 
     @Test fun maze() {
@@ -87,7 +88,7 @@ class Level2FlowTest {
         val w = v.debugWorld()
         var guard = 0
         while (!w.enteredManhole && guard++ < 600) {
-            when (w.leadStage) { 3 -> { w.px = 8.5f; w.py = 9.5f }; 2, 5 -> {}; else -> { w.px = w.contactX; w.py = w.contactY + 1.2f } }   // the goodbye walks you up itself
+            when (w.leadStage) { 3 -> { w.px = 8.5f; w.py = 9.5f }; 2, 5, 6 -> {}; else -> { w.px = w.contactX; w.py = w.contactY + 1.2f } }   // the goodbye walks you up itself
             v.debugAdvance(0.25f)
         }
         assertTrue("walked down the manhole", w.enteredManhole)

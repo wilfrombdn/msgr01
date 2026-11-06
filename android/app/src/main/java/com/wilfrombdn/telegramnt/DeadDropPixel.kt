@@ -485,12 +485,16 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
         // everything standing in the scene, sorted so people pass in front of and behind things
         val list = ArrayList<Item>(items)
         val pxx = (world.px * S).roundToInt(); val pyy = (world.py * S).roundToInt() + 6
-        val walkFrame = if (world.speed > 0.05f) ((clock * (3f + world.speed * 2.2f)).toInt() % 2) else if (world.autoWalk) ((clock * 7f).toInt() % 2) else 0
+        val walkFrame = if (world.speed > 0.05f) 1 + ((clock * (3f + world.speed * 2.2f)).toInt() % 2) else if (world.autoWalk) 1 + ((clock * 6f).toInt() % 2) else 0
         val climbing = world.state == StealthWorld.State.WON && spec.worker != null
         val rise = if (climbing) min(30, (world.stateT * 18f).toInt()) else 0
         val vx = (world.contactX * S).roundToInt(); val vy = (world.contactY * S).roundToInt() + 6
         val carrying = if (spec.worker != null || spec.scene != null) world.hasEnvelope else !world.letterGiven
-        list += Item(pyy.toFloat() + (if (climbing) 40f else 0f)) { cv -> folk(cv, pxx, pyy - rise, if (climbing) 0 else dirOf(world.face), if (climbing) ((world.stateT * 6f).toInt() % 2) else walkFrame, clerk, false, carrying) }
+        list += Item(pyy.toFloat() + (if (climbing) 40f else 0f)) { cv ->
+            if (world.sink > 0f) {   // stepping down into the manhole: you sink out of sight below its rim
+                val rimY = pyy - 3; cv.save(); cv.clipRect(pxx - 12, rimY - 40, pxx + 12, rimY)
+                folk(cv, pxx, pyy + (world.sink * 26f).roundToInt(), 2, 0, clerk, false, carrying); cv.restore()
+            } else folk(cv, pxx, pyy - rise, if (climbing) 0 else dirOf(world.face), if (climbing) ((world.stateT * 6f).toInt() % 2) else walkFrame, clerk, false, carrying) }
         // the clerk ID and the envelope passing between you, drawn over both of you
         if (world.showingId || world.givingEnvelope) list += Item(maxOf(pyy, vy) + 1f) { cv ->
             val hx = pxx + (if (vx < pxx) -7 else 7); val hy = pyy - 13          // your hand
@@ -505,8 +509,8 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
                 if (m < 1f) { rect(cv, ex - 1, ey - 1, 10, 7, PX.K); rect(cv, ex, ey, 8, 5, 0xFFD8C8A0.toInt()); px(cv, ex + 2, ey + 1, 0xFFA89870.toInt()); px(cv, ex + 5, ey + 1, 0xFFA89870.toInt()); px(cv, ex + 3, ey + 2, 0xFFA89870.toInt()); px(cv, ex + 4, ey + 2, 0xFFA89870.toInt()); rect(cv, ex + 3, ey + 3, 2, 1, PX.RED) }
             }
         }
-        val vFrame = if (world.contactWalking) ((clock * 5f).toInt() % 2) else 0
-        val outfit = if (spec.worker != null) worker else if (spec.scene != null) stranger else vendor
+        val vFrame = if (world.contactWalking) 1 + ((clock * 4.5f).toInt() % 2) else 0
+        val outfit = if (spec.worker != null) worker else stranger            // the man in the trenchcoat meets you in the alley and walks you to the manhole
         val wp = if (spec.worker != null) world.workerPose else 0
         list += Item(vy.toFloat()) { cv ->
             // level 1: a figure steps out of the dark; he stays a silhouette until he has come a few steps into the light
@@ -518,7 +522,7 @@ internal class PixelScene(private val spec: LevelSpec, private val world: Stealt
         world.cop?.let { cop ->
             if (cop.visible) {
                 val fx = (cop.x * S).roundToInt(); val fy = (cop.y * S).roundToInt() + 6
-                list += Item(fy.toFloat()) { cv -> folk(cv, fx, fy, dirOf(cop.face), if (cop.walking) ((clock * 2.2f).toInt() % 2) else 0, police, cop.torch, false, sorrow = cop.headDown) }
+                list += Item(fy.toFloat()) { cv -> folk(cv, fx, fy, dirOf(cop.face), if (cop.walking) 1 + ((clock * 3.2f).toInt() % 2) else 0, police, cop.torch, false, sorrow = cop.headDown) }
             }
         }
         for (g in world.guards) if (!g.dead) {

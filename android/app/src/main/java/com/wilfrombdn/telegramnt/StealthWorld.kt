@@ -62,7 +62,7 @@ internal const val SHOW_ID = "<ID>"
 /** In a contact's lines: they hand you an envelope (information to broadcast). */
 internal const val GIVE_ENVELOPE = "<ENV>"
 
-internal class LeadSpec(val path: List<Pair<Float, Float>>, val manholeX: Float, val manholeY: Float, val farewell: String, val speaker: String = "NEWSPAPER VENDOR")
+internal class LeadSpec(val path: List<Pair<Float, Float>>, val manholeX: Float, val manholeY: Float, val farewell: String, val speaker: String = "STRANGER")
 
 /** A worker wrenching on a pipe: he turns, lights a cigarette, takes your letter, says [line] and points to the ladder. */
 internal class WorkerSpec(val ladderX: Float, val ladderY: Float, val line: String, val speaker: String = "MAINTENANCE WORKER")
@@ -427,7 +427,13 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
                 else { px = tx; py = ty; face = -PI.toFloat() / 2; autoWalk = false; leadStage = 2; leadT = 0f; say(l.farewell) }
             }
             2 -> { turnContact(PI.toFloat() / 2, dt, 6f); face = -PI.toFloat() / 2; if (sayT > 5.4f) { leadStage = 3; leadT = 0f } }
-            3 -> { turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (hypot(px - l.manholeX, py - l.manholeY) < 0.75f) { enteredManhole = true; sayText = null } }
+            3 -> { turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (hypot(px - l.manholeX, py - l.manholeY) < 0.75f) { leadStage = 6; leadT = 0f; sayText = null } }
+            6 -> {   // onto the open hole, then down out of sight
+                turnContact(atan2(py - contactY, px - contactX), dt, 3f)
+                val dx = l.manholeX - px; val dy = l.manholeY - py; val d = hypot(dx, dy)
+                if (d > 0.04f) { val mv = min(1.6f * dt, d); px += dx / d * mv; py += dy / d * mv; autoWalk = true }
+                else { px = l.manholeX; py = l.manholeY; autoWalk = false; face = PI.toFloat() / 2; sink = (sink + dt / 1.4f).coerceAtMost(1f); if (sink >= 1f && leadT > 1.6f) enteredManhole = true }
+            }
         }
     }
 
@@ -448,9 +454,10 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
             2 -> { workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (workerT > 2.6f) { workerStage = 3; workerT = 0f } }
             3 -> {
                 workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f)
-                if (hypot(px - contactX, py - contactY) < 2.0f) { say(wk.line); workerStage = 4; workerT = 0f }
+                if (hypot(px - contactX, py - contactY) < 2.8f) { workerStage = 6; workerT = 0f }
             }
-            4 -> { workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f); if (scriptDone && workerT > 2.4f) { workerStage = 5; workerT = 0f } }
+            6 -> { workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 6f); if (walkUpTo(1.5f, dt)) { say(wk.line); workerStage = 4; workerT = 0f } }
+            4 -> { workerPose = 2; turnContact(atan2(py - contactY, px - contactX), dt, 3f); face = atan2(contactY - py, contactX - px); if (scriptDone && workerT > 2.4f) { workerStage = 5; workerT = 0f; sayText = null } }
             5 -> {
                 workerPose = 3; workerPointDir = if (wk.ladderX >= contactX) PacWorld.RIGHT else PacWorld.LEFT
                 contactFace = PI.toFloat() / 2
@@ -466,6 +473,22 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         a.face += diff.coerceIn(-m, m)
         return abs(diff) <= m
     }
+
+    /** Walks you (no stick) to stand [dist] tiles in front of the contact, on your side of him; true once you're there, facing him. */
+    private fun walkUpTo(dist: Float, dt: Float): Boolean {
+        var ux = px - contactX; var uy = py - contactY; val l = hypot(ux, uy).coerceAtLeast(0.001f); ux /= l; uy /= l
+        if (abs(uy) > abs(ux)) { ux = 0f; uy = if (uy > 0) 1f else -1f } else { uy = 0f; ux = if (ux > 0) 1f else -1f }   // square on to him
+        val tx = contactX + ux * dist; val ty = contactY + uy * dist
+        val dx = tx - px; val dy = ty - py; val d = hypot(dx, dy)
+        if (d > 0.04f) { val mv = min(2.0f * dt, d); px += dx / d * mv; py += dy / d * mv; face = atan2(dy, dx); autoWalk = true; return false }
+        px = tx; py = ty; autoWalk = false; face = atan2(contactY - py, contactX - px); return true
+    }
+    /** Level 1, after the talk: the contact walks back into the dark and you follow him (the view fades out). */
+    var leaveT = -1f; private set
+    private var homeX = Float.NaN; private var homeY = 0f
+    private val followPath = ArrayDeque<Pair<Int, Int>>()
+    /** Level 2: you step onto the open manhole and sink out of sight (0..1). */
+    var sink = 0f; private set
 
     private fun turnContact(target: Float, dt: Float, rate: Float) {
         var diff = target - contactFace
@@ -484,6 +507,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         spec.worker?.let { workerUpdate(dt, it); return }
         val s = spec.scene ?: return
         val a = cop ?: return
+        if (homeX.isNaN()) { homeX = contactX; homeY = contactY }
         sceneT += dt
         talk(dt)
         when (sceneStage) {
@@ -524,9 +548,26 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
                     } else contactWalking = false
                 } else { contactWalking = false; sceneStage = 7; sceneT = 0f }
             }
-            7 -> {   // he waits for me, watching me come, and speaks when I am near
+            7 -> {   // he waits for me, watching me come; when I'm close I'm walked the last step and he talks
                 contactWalking = false
-                if (sayText == null && hypot(px - contactX, py - contactY) < 6.5f) say(s.contactLine)
+                if (hypot(px - contactX, py - contactY) < 2.8f) { sceneStage = 8; sceneT = 0f }
+            }
+            8 -> { contactWalking = false; turnContact(atan2(py - contactY, px - contactX), dt, 6f); if (walkUpTo(1.4f, dt)) { say(s.contactLine); sceneStage = 9; sceneT = 0f } }
+            9 -> { contactWalking = false; turnContact(atan2(py - contactY, px - contactX), dt, 6f); face = atan2(contactY - py, contactX - px); if (scriptDone && sceneT > 1f) { sceneStage = 10; sceneT = 0f; leaveT = 0f; contactPath.clear(); contactPath.addAll(route(floor(contactX).toInt() to floor(contactY).toInt(), floor(homeX).toInt() to floor(homeY).toInt())) } }
+            10 -> {   // he turns and walks back into the dark; you follow a step behind; the screen fades
+                leaveT += dt; sayText = null
+                val tgt = contactPath.firstOrNull()
+                if (tgt != null) {
+                    val dx = tgt.first + 0.5f - contactX; val dy = tgt.second + 0.5f - contactY; val d = hypot(dx, dy)
+                    turnContact(atan2(dy, dx), dt, 8f); val mv = min(1.7f * dt, d)
+                    if (d > 0.001f) { contactX += dx / d * mv; contactY += dy / d * mv }
+                    if (d - mv < 0.02f) contactPath.removeFirst()
+                    contactWalking = true
+                } else contactWalking = false
+                val fx = contactX - cos(contactFace) * 1.2f; val fy = contactY - sin(contactFace) * 1.2f
+                val dx = fx - px; val dy = fy - py; val d = hypot(dx, dy)
+                if (d > 0.05f) { val mv = min(1.8f * dt, d); px += dx / d * mv; py += dy / d * mv; face = atan2(dy, dx); autoWalk = true } else autoWalk = false
+                if (leaveT > 3.0f) { state = State.WON; stateT = 0f; wonDelay = 0f }
             }
         }
         // while the cop leaves, the contact watches him; after that, he watches me
@@ -640,8 +681,8 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
         bodyFoundT = max(0f, bodyFoundT - dt)
 
         // my feet: a gentle drag is a quiet sneak, a full drag is a loud run
-        val frozen = (spec.scene != null && (sceneStage in 1..6 || (sceneStage == 7 && sayText != null && !scriptDone))) || (spec.lead != null && leadStage in setOf(2, 5)) ||
-            (spec.worker != null && workerStage == 4)   // stand and talk   // scripted moments: I can't walk
+        val frozen = (spec.scene != null && (sceneStage in 1..6 || sceneStage >= 8)) || (spec.lead != null && leadStage in setOf(2, 5, 6)) ||
+            (spec.worker != null && workerStage in setOf(4, 6))   // scripted moments and talking: you stand still   // scripted moments: I can't walk
         speed = if (frozen) 0f else if (mag < 0.5f) SNEAK * (mag / 0.5f) else SNEAK + (mag - 0.5f) / 0.5f * (RUN - SNEAK)
         noise = if (speed > QUIET) (speed - QUIET) / (RUN - QUIET) * NOISE_MAX else 0f
         if (speed > 0.01f && mag > 0.02f) {
@@ -667,7 +708,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
 
         if (spec.walk) {   // a walking story: nobody can catch you
             sceneUpdate(dt)
-            if (spec.lead == null && spec.worker == null && hypot(px - contactX, py - contactY) < 0.85f) { state = State.WON; stateT = 0f; wonDelay = 0f }
+            if (spec.lead == null && spec.worker == null && spec.scene == null && hypot(px - contactX, py - contactY) < 0.85f) { state = State.WON; stateT = 0f; wonDelay = 0f }
             return
         }
 

@@ -62,6 +62,8 @@ class SkipTest {
         val bmp = Bitmap.createBitmap(1080, 1900, Bitmap.Config.ARGB_8888); v.draw(Canvas(bmp))
         File("build/shots").mkdirs(); FileOutputStream(File("build/shots/deadletter-banner.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         v.debugAdvance(3.0f)
+        assertTrue("long enough to read", v.debugBannerUp())
+        v.debugAdvance(12.0f)
         assertFalse(v.debugBannerUp())
     }
 

@@ -586,6 +586,7 @@ internal class DeadDropView(
                 mgText(c, pr, (lx + rx) / 2f, ly + 15f * d, 10f, a(Color.WHITE, 0xEE))
             }
         }
+        if (mgIdx == 0 && arcadeId == null && attempt == 1) drawTitleCard(c, w, h, spec.pal)
         drawFade(c, w, h)
     }
 
@@ -672,7 +673,12 @@ internal class DeadDropView(
     private fun overlayUp(): Boolean = world.state != StealthWorld.State.PLAY || pac?.phase == PacWorld.Phase.CAUGHT || pac?.phase == PacWorld.Phase.WON
 
     /** The level's title banner is showing (you can't move until it's gone). */
-    private val bannerUp get() = mgIdx < 0 && stage == 0 && sinceLoad < 4.2f && attempt == 1 && world.state == StealthWorld.State.PLAY
+    private val bannerUp get() = mgIdx < 0 && stage == 0 && sinceLoad < cardS && attempt == 1 && world.state == StealthWorld.State.PLAY
+    /** How long each level's title card stays up (long enough to read it all; a tap skips it), and the how-to-play line after it. */
+    private val cardS get() = 3f + (spec.objective.length + spec.situation.length) / 19f
+    private val tipS get() = 4f + spec.tip.length / 18f
+    /** The title card is up at the start of a mini-game level (the game waits behind it). */
+    private val mgCardUp get() = mgIdx == 0 && arcadeId == null && attempt == 1 && sinceLoad < cardS
 
     /** On to the next level. */
     internal fun skipLevel() { if (levelIdx < levels.size - 1) { levelIdx++; saveLevel(levelIdx); load(false) } }
@@ -738,7 +744,7 @@ internal class DeadDropView(
                 val raw = ((now - last) / 1e9f).coerceAtMost(0.05f)
                 var dt = raw
                 clock += dt; sinceLoad += dt
-                if (mgIdx >= 0) mgUpdate(raw) else stageTick(raw)
+                if (mgIdx >= 0) { if (!mgCardUp) mgUpdate(raw) } else stageTick(raw)
                 var left = dt
                 while (mgIdx < 0 && left > 0f) {
                     val s = min(left, 0.025f)
@@ -803,7 +809,12 @@ internal class DeadDropView(
         if (arcadeId == "maze") { arcadePacTick(dt); return }
         if (fadeDir > 0) { fade += dt / 0.8f; if (fade >= 1f) { fade = 1f; switchStage(); fadeDir = -1 } }
         else if (fadeDir < 0) { fade -= dt / 0.8f; if (fade <= 0f) { fade = 0f; fadeDir = 0 } }
-        else if (stage == 0 && world.enteredManhole && spec.pac != null) { world.sayText = null; descent = DescentScene(); descentT = 0f }
+        else if (stage == 0 && world.enteredManhole && spec.pac != null) { world.sayText = null; pendingStage = 1; fadeDir = 1 }   // down the manhole: fade into the maze
+        else if (spec.pixel && !lastLevel && world.state == StealthWorld.State.WON && (stage == 0 || stage == 2) && fadeDir == 0) {
+            // the alley and the maintenance room end without a card: a fade, then the next part of the story
+            if (world.spec.scene != null) { carryFade = true; levelIdx++; saveLevel(levelIdx); load(false) }
+            else if (wt > 1.4f) { carryFade = true; levelIdx++; saveLevel(levelIdx); load(false) }
+        }
         else if (stage == 1) {
             val pw = pac
             if (pw != null) {
@@ -859,6 +870,7 @@ internal class DeadDropView(
             }
             return true
         }
+        if (e.actionMasked == MotionEvent.ACTION_DOWN && (mgCardUp || bannerUp) && e.y > barH + 46f * d) { sinceLoad = cardS; return true }   // tap: skip the title card
         if (mgIdx >= 0) return mgTouch(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -1539,13 +1551,34 @@ internal class DeadDropView(
         panel(c, w, h, pal, t, clueAlpha, (clueT * 70f).toInt())
     }
 
-    /** What the contact says as you walk up to him. */
+    /** What the contact says: a speech bubble over his head (what you do, like showing your ID, is told in the box at the bottom). */
     private fun drawSay(c: Canvas, w: Float, h: Float, pal: Palette) {
+        // level 1's last moment and the climb out of the maintenance room fade to black
+        val blk = if (world.leaveT >= 0f) ((world.leaveT - 0.6f) / 2.2f).coerceIn(0f, 1f) else if (world.state == StealthWorld.State.WON && spec.pixel && !lastLevel) (wt / 1.3f).coerceIn(0f, 1f) else 0f
+        if (blk > 0f) { p.style = Paint.Style.FILL; p.color = a(Color.BLACK, (blk * 255).toInt()); c.drawRect(0f, 0f, w, h, p) }
         val t = world.sayText ?: return
         if (world.state != StealthWorld.State.PLAY) return
+        if (pixelScene != null && !world.showingId && !world.givingEnvelope) { speechBubble(c, w, offX + world.contactX * T, offY + (world.contactY - 1.15f - scrollY) * T, t, (world.lineT * 40f).toInt()); return }
         if (world.showingId) { val look = world.lineT >= 1.0f; panel(c, w, h, pal, if (look) "THEY LOOK IT OVER." else "YOU SHOW YOUR CLERK ID.", 1f, ((if (look) world.lineT - 1.0f else world.lineT) * 45f).toInt()); return }
         if (world.givingEnvelope) { panel(c, w, h, pal, "THEY HAND YOU A SEALED ENVELOPE. INFORMATION TO BROADCAST.", 1f, (world.lineT * 45f).toInt()); return }
         panel(c, w, h, pal, (world.spec.lead?.speaker ?: world.spec.worker?.speaker ?: world.spec.scene?.speaker?.ifEmpty { null } ?: spec.contact.uppercase()) + ": “" + t + "”", 1f, (world.lineT * 45f).toInt())
+    }
+
+    /** A white speech bubble with its tail on (sx, sy), the speaker's head; the words type in. */
+    private fun speechBubble(c: Canvas, w: Float, sx: Float, sy: Float, text: String, typed: Int) {
+        p.typeface = monoBold; p.textSize = 12.5f * d; p.letterSpacing = 0f; p.textAlign = Paint.Align.LEFT
+        val maxW = min(w * 0.72f, 300f * d)
+        val lines = ArrayList<String>(); var cur = ""
+        for (wd in text.split(' ')) { val s = if (cur.isEmpty()) wd else "$cur $wd"; if (p.measureText(s) > maxW && cur.isNotEmpty()) { lines += cur; cur = wd } else cur = s }
+        if (cur.isNotEmpty()) lines += cur
+        val lh = 16f * d; val pad = 9f * d
+        val bw = lines.maxOf { p.measureText(it) } + pad * 2; val bh = lines.size * lh + pad * 2 - 4f * d
+        val bx = (sx - bw / 2).coerceIn(10f * d, w - 10f * d - bw); val by = sy - 12f * d - bh
+        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x70); rect.set(bx + 2f * d, by + 3f * d, bx + bw + 2f * d, by + bh + 3f * d); c.drawRoundRect(rect, 7f * d, 7f * d, p)
+        p.color = 0xFFF6F2E8.toInt(); rect.set(bx, by, bx + bw, by + bh); c.drawRoundRect(rect, 7f * d, 7f * d, p)
+        val tail = android.graphics.Path(); val tx = sx.coerceIn(bx + 12f * d, bx + bw - 12f * d); tail.moveTo(tx - 6f * d, by + bh - 1f); tail.lineTo(tx + 6f * d, by + bh - 1f); tail.lineTo(sx, sy - 2f * d); tail.close(); c.drawPath(tail, p)
+        p.color = 0xFF14161C.toInt(); var left = typed; var y = by + pad + 11f * d
+        for (ln in lines) { if (left <= 0) break; c.drawText(ln.take(left), bx + pad, y, p); left -= ln.length + 1; y += lh }
     }
 
     private fun panel(c: Canvas, w: Float, h: Float, pal: Palette, t: String, f: Float, typed: Int) {
@@ -1627,10 +1660,11 @@ internal class DeadDropView(
         p.typeface = monoBold; p.textAlign = Paint.Align.CENTER; p.textSize = 10f * d; p.letterSpacing = 0f; p.color = a(Color.WHITE, (alpha * 255).toInt()); c.drawText(roman[n], cx, cy + 5.5f * d, p)
     }
 
-    private fun drawOverlays(c: Canvas, w: Float, h: Float, pal: Palette) {
+    /** The level's title card (place, what to do, the situation), then the how-to-play line. */
+    private fun drawTitleCard(c: Canvas, w: Float, h: Float, pal: Palette) {
         p.textAlign = Paint.Align.CENTER
-        if (sinceLoad < 4.2f && attempt == 1 && world.state == StealthWorld.State.PLAY) {
-            val f = if (sinceLoad < 0.3f) sinceLoad / 0.3f else if (sinceLoad > 3.4f) (4.2f - sinceLoad) / 0.8f else 1f
+        if (sinceLoad < cardS) {
+            val f = if (sinceLoad < 0.3f) sinceLoad / 0.3f else if (sinceLoad > cardS - 0.8f) (cardS - sinceLoad) / 0.8f else 1f
             // measure the words first so the dark band only reaches a little above and below them, then centre it on the screen
             p.typeface = mono; p.letterSpacing = 0f; p.textSize = 13f * d; val n1 = wrapLines(spec.objective, w - 56f * d)
             p.textSize = 12f * d; val n2 = wrapLines(spec.situation, w - 56f * d)
@@ -1640,20 +1674,30 @@ internal class DeadDropView(
             p.style = Paint.Style.FILL; p.color = a(0xFF04060A.toInt(), (f * 0xE0).toInt()); c.drawRect(0f, y0, w, y0 + bandH, p)
             p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(pal.accent, (f * 0x80).toInt()); c.drawLine(24f * d, y0 + 1f, w - 24f * d, y0 + 1f, p); c.drawLine(24f * d, y0 + bandH - 1f, w - 24f * d, y0 + bandH - 1f, p)
             drawBigLetter(c, w / 2, top + 21f * d, levelIdx, f)
-            p.style = Paint.Style.FILL; p.typeface = monoBold; p.letterSpacing = 0.2f; p.textSize = 11f * d; p.color = a(pal.accent, (f * 255).toInt()); c.drawText("LETTER ${roman[levelIdx]} OF VI", w / 2, top + 69f * d, p)
+            p.style = Paint.Style.FILL; p.typeface = monoBold; p.letterSpacing = 0.2f; p.textSize = 11f * d; p.color = a(pal.accent, (f * 255).toInt()); c.drawText("PART ${roman[levelIdx]} OF VI", w / 2, top + 69f * d, p)
             p.letterSpacing = 0.04f; p.textSize = 25f * d; p.color = a(Color.WHITE, (f * 255).toInt()); c.drawText(spec.building.uppercase(), w / 2, top + 101f * d, p)
             p.typeface = mono; p.letterSpacing = 0f; p.textSize = 13f * d; p.color = a(Color.WHITE, (f * 0xE0).toInt())
             val yy = wrap(c, spec.objective, w / 2, top + 129f * d, w - 56f * d, 18f * d)
             p.color = a(Color.WHITE, (f * 0x80).toInt()); p.textSize = 12f * d
             wrap(c, spec.situation, w / 2, yy + 10f * d, w - 56f * d, 17f * d)
-        } else if (sinceLoad in 4.2f..9f && attempt == 1 && world.state == StealthWorld.State.PLAY) {
+            p.textSize = 10f * d; p.color = a(Color.WHITE, (f * 0x60).toInt()); c.drawText("tap to skip", w / 2, y0 + bandH + 18f * d, p)
+        } else if (sinceLoad < cardS + tipS) {
             // the how-to-play line, once, after the title card
-            val f = if (sinceLoad < 4.8f) (sinceLoad - 4.2f) / 0.6f else if (sinceLoad > 8.2f) (9f - sinceLoad) / 0.8f else 1f
-            if (clueAlpha < 0.05f) {
-                p.style = Paint.Style.FILL; p.typeface = mono; p.textSize = 12.5f * d; p.color = a(Color.WHITE, (f * 0xD0).toInt())
-                wrap(c, spec.tip, w / 2, h - 80f * d, w - 56f * d, 17f * d)
+            val t1 = cardS + tipS
+            val f = if (sinceLoad < cardS + 0.6f) (sinceLoad - cardS) / 0.6f else if (sinceLoad > t1 - 0.8f) (t1 - sinceLoad) / 0.8f else 1f
+            if (clueAlpha < 0.05f || mgIdx >= 0) {
+                p.style = Paint.Style.FILL; p.typeface = mono; p.textSize = 12.5f * d
+                val n = wrapLines(spec.tip, w - 56f * d); val ty = h * 0.30f
+                p.color = a(Color.BLACK, (f * 0xB0).toInt()); c.drawRect(0f, ty - 22f * d, w, ty + n * 17f * d, p)
+                p.color = a(Color.WHITE, (f * 0xE0).toInt())
+                wrap(c, spec.tip, w / 2, ty, w - 56f * d, 17f * d)
             }
         }
+    }
+
+    private fun drawOverlays(c: Canvas, w: Float, h: Float, pal: Palette) {
+        p.textAlign = Paint.Align.CENTER
+        if (attempt == 1 && world.state == StealthWorld.State.PLAY) drawTitleCard(c, w, h, pal)
         when (world.state) {
             StealthWorld.State.CAUGHT -> {
                 val f = (world.stateT / 0.25f).coerceIn(0f, 1f)

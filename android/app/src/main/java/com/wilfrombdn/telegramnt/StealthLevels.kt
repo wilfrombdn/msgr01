@@ -79,9 +79,9 @@ internal object StealthLevels {
         // A walking story, not a puzzle: you walk a long, zig-zag alley behind a police cordon. Radios blare from open windows,
         // red and blue light flashes off the walls, torch beams sweep. At the corner the fog clears and a cop stands at the fork.
         LevelSpec(
-            "The Backstreets", "Deliver letter I to the newspaper vendor.",
-            "You are newly wanted: \"Mr. Tellem\", terrorist. The police have the streets, and every window has a radio.",
-            "Use the joystick at the bottom left to walk. A light push walks slowly and quietly. Listen as you pass the windows.",
+            "The Backstreets", "Find your contact somewhere in the alleys. Show him you're a clerk.",
+            "The radio calls you \"Mr. Tellem\", terrorist. The other clerks are being rounded up one by one. Someone out here is still on your side.",
+            "Walk with the stick at the bottom left. A light push is slow and quiet. Listen at the windows as you pass.",
             "Newspaper vendor", "I thought you were dead.", "Someone inside the government helped you escape.", 0,
             pal(0xFF0B1230, 0xFF121D47, 0xFF03050A, 0xFF1B2B66, 0xFF29F0FF, 0xFFDCEBFF, 0xFFFF3B55),
             backstreetsMap(),
@@ -115,9 +115,9 @@ internal object StealthLevels {
         // Three parts: a walk (your contact leads you to a manhole and sends you down), the sewer maze played like Pac-Man, and
         // a maintenance room where a worker takes your letter and points you to a ladder.
         LevelSpec(
-            "The Underground", "Deliver letter II to the maintenance worker.",
-            "Transit security has your description and every station is being searched. Your contact knows another way down.",
-            "Use the joystick at the bottom left to walk. Follow your contact.",
+            "The Underground", "Follow the man in the trenchcoat under the streets. Chen left something down there for you.",
+            "Every station is being searched. The only way across the city now is underneath it.",
+            "Follow him to the manhole. In the tunnels: collect every key piece and reach the door. Don't let the police catch you.",
             "Maintenance worker", "You shouldn't have come here.", "The government has been erasing people from its records.", 1,
             pal(0xFF0B1B24, 0xFF12303A, 0xFF03080C, 0xFF1B4A5A, 0xFF5EE6A8, 0xFFD8FFE6, 0xFFFF9F43),
             undergroundMap(),
@@ -149,8 +149,8 @@ internal object StealthLevels {
         ),
         // ------------------------------------------------------------------ 3
         LevelSpec(
-            "The Industrial District", "Deliver letter III to the former detective.", "The police have set up checkpoints. The detective is hiding in an abandoned factory.",
-            "Floodlights sweep back and forth. Wait for them to turn away. Machines block their view.",
+            "The Industrial District", "Get out through the factory, and keep the envelopes safe.", "The sewers behind you are crawling with police. The factory above is the only way out.",
+            "Swipe left or right to change belts, swipe up to jump. Collect 100 coins. Then hold to fly.",
             "Former detective", "They took the others.", "The detective investigated the disappearances and found that you were next.", 2,
             pal(0xFF15110E, 0xFF211A15, 0xFF0A0807, 0xFF4A3426, 0xFFFF9A52, 0xFFFFD2A0, 0xFFFF7A45),
             listOf(
@@ -184,8 +184,8 @@ internal object StealthLevels {
         ),
         // ------------------------------------------------------------------ 4
         LevelSpec(
-            "The Administration", "Deliver letter IV to the archivist inside City Hall.", "The government knows you are trying to expose them. Security is everywhere.",
-            "Lasers blink on and off. Cross while they are dark. Touching one raises the alarm.",
+            "The Administration", "Get to the mayor.", "The cop knows what the mayor did. With his own gun at his back, the doors of town hall open for you.",
+            "Stick to move. GUN shoots the nearest officer. Hold GRENADE and drag to throw. Swipe with a second finger to roll. Hug the walls.",
             "City archivist", "Give me the letter.", "You were declared dead before the manhunt even began.", 3,
             pal(0xFF0E1218, 0xFF171D26, 0xFF07090D, 0xFF2E3B52, 0xFF9DB8FF, 0xFFE8F0FF, 0xFFFF5A4F),
             listOf(
@@ -221,8 +221,8 @@ internal object StealthLevels {
         // ------------------------------------------------------------------ 5
         LevelSpec(
             // the prison (PrisonLevel/PrisonWorld/PrisonScene): the map below is the old walk, kept for the stealth tests only
-            "The Rock", "Escape the prison.", "The mayor had you locked away on the island. Nobody outside knows you are alive.",
-            "Walk with the stick. Look around: the yard, the dining hall, the blocks. There is always a way out.",
+            "The Rock", "Escape the island prison.", "The mayor had you locked away. Nobody outside knows you're still alive, and the envelopes are gone.",
+            "Keep to the daily routine. Steal what you need when nobody's looking. Swipe up to see your things. There's always a way out.",
             "Priest", "I know what happened to your father.", "Your family was part of the original operation. Your discovery was expected.", 4,
             pal(0xFF17120C, 0xFF241B12, 0xFF0B0805, 0xFF4F3A24, 0xFFFFC25A, 0xFFFFC27A, 0xFFFF5A4F),
             listOf(
@@ -261,8 +261,8 @@ internal object StealthLevels {
         // ------------------------------------------------------------------ 6
         LevelSpec(
             // the finale (FinaleWorld/FinaleScene): the map below is the old walk, kept for the stealth tests only
-            "The Broadcast", "Get the evidence on the air.", "The city is burning. The radio tower is the last way to reach everyone.",
-            "Climb. Jump the spools. Then the uplink: repeat the lights.",
+            "The Broadcast", "Get to the radio tower. Tell everyone.", "The city is burning. The tower is the last way left to reach them all.",
+            "Climb and jump the spools. Then repeat the lights to open the uplink.",
             "Radio operator", "It's already too late.", "The evidence is being broadcast to the entire city. The conspiracy is exposed.", 5,
             pal(0xFF120A0F, 0xFF1E1018, 0xFF070306, 0xFF4A1F33, 0xFFFF4D6D, 0xFFFFF0D0, 0xFFFF2D55),
             listOf(
