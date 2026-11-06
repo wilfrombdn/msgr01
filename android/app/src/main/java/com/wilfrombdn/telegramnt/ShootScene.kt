@@ -6,6 +6,7 @@ import android.graphics.PorterDuff
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -452,6 +453,17 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
         for (it in items) it.draw()
 
         // grenades, bullets, blasts and sparks
+        // aiming a grenade: a dotted lob from you to where it lands, and the blast ring there
+        world.aimAt?.let { (ax, ay) ->
+            val x0 = world.px * S; val y0 = world.py * S; val x1 = ax * S; val y1 = ay * S; val d = hypot(x1 - x0, y1 - y0)
+            val n = (d / 6f).toInt().coerceAtLeast(2)
+            for (i in 1 until n) { val k = i / n.toFloat(); val hx = x0 + (x1 - x0) * k; val hy = y0 + (y1 - y0) * k - sin(k * PI.toFloat()) * d * 0.25f; if ((i + (clock * 8f).toInt()) % 2 == 0) rect(c, hx.roundToInt() - 1, hy.roundToInt() - 1, 2, 2, a(PX.W, 0xC0)) }
+            val rr = ShootWorld.BLAST * S
+            for (i in 0 until 40) { val an = i * PI.toFloat() * 2f / 40f; px(c, (x1 + cos(an) * rr).roundToInt(), (y1 + sin(an) * rr * 0.8f).roundToInt(), a(PX.RED, 0xC0)) }
+            rect(c, x1.roundToInt() - 2, y1.roundToInt(), 5, 1, PX.RED); rect(c, x1.roundToInt(), y1.roundToInt() - 2, 1, 5, PX.RED)
+        }
+        // you, pressed to the wall: out of sight
+        if (world.hidden) { val x = (world.px * S).roundToInt(); val y = (world.py * S).roundToInt() - 22; rect(c, x - 9, y, 19, 7, a(PX.K, 0xA0)); for (k in 0 until 3) rect(c, x - 6 + k * 5, y + 3, 3, 1, a(PX.W, 0xC0)) }
         for (g in world.grenadesAir) { val (gx, gy, h) = world.grenadePos(g); val x = (gx * S).roundToInt(); val y = (gy * S).roundToInt(); rect(c, x - 2, y, 5, 2, a(PX.K, 0x90)); val up = (h * 22f).roundToInt(); rect(c, x - 2, y - up - 4, 5, 5, PX.K); rect(c, x - 1, y - up - 3, 3, 3, K(0xFF3E7A4A)); px(c, x, y - up - 5, PX.RED) }
         for (b in world.bullets) {
             val x = (b.x * S).roundToInt(); val y = (b.y * S).roundToInt()
@@ -593,6 +605,8 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
                 else { folk(c, x, y, dir, if (running) 1 + ((clock * 10f).toInt() % 2) else 0, police, false, false); pistol(c, x, y - 8, ang, false) }
             }
         }
+        // the paper he'll pick up, lying on the floor until he does
+        if (w.playerDown && w.ft < ShootWorld.PAPER_UP) { val (qx, qy) = w.paperSpot; val ppx = (qx * S).roundToInt(); val ppy = (qy * S).roundToInt(); list += DItem(qy - 0.3f) { rect(c, ppx - 4, ppy - 3, 9, 6, a(PX.K, 0x90)); rect(c, ppx - 3, ppy - 2, 7, 4, K(0xFFF0ECE0)); px(c, ppx, ppy - 1, PX.RED) } }
         // the mayor
         val mx = (w.mayorX * S).roundToInt(); val my = (w.mayorY * S).roundToInt() + 6
         list += DItem(w.mayorY) {
@@ -600,9 +614,11 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
             val pacing = w.ft < 5.0f
             val toward = atan2(w.py - w.mayorY, w.px - w.mayorX)
             val dir = if (pacing) (if (cos(w.ft * 1.25f + 0.8f) > 0) 1 else 3) else dirOf(toward)
-            folk(c, mx, my, dir, if (pacing) 1 + ((clock * 9f).toInt() % 2) else 0, mayorOutfit, false, false, if (w.mayorLaughing) -2 else 0)
+            folk(c, mx, my, dir, if (pacing || w.mayorWalking) 1 + ((clock * (if (pacing) 9f else 3.5f)).toInt() % 2) else 0, mayorOutfit, false, false, if (w.mayorBending) 3 else 0)
+            if (w.mayorBending) { rect(c, mx + 3, my - 6, 2, 5, mayorOutfit.coat ?: mayorOutfit.shirt); rect(c, mx + 3, my - 2, 2, 1, mayorOutfit.skin) }                       // reaching down
+            if (w.mayorReading) { rect(c, mx - 4, my - 16, 9, 6, K(0xFFF0ECE0)); rect(c, mx - 3, my - 15, 7, 1, K(0xFF8A8678)); rect(c, mx - 3, my - 13, 5, 1, K(0xFF8A8678)); px(c, mx + 3, my - 12, PX.RED) }   // your paper, held up to read
             if (w.mayorKicking) { rect(c, mx - 2, my - 8, 6, 3, PX.K); rect(c, mx - 2, my - 9, 6, 1, K(0xFF6A6A7A)) }
-            if (w.ft < 12.4f) {
+            if (w.ft < ShootWorld.PAPER_AT) {
                 // his gun, waving about
                 val ga = w.mayorGun
                 rect(c, mx + (cos(ga) * 6f).roundToInt() - 2, my - 9 + (sin(ga) * 6f).roundToInt() - 1, 5, 3, PX.K)

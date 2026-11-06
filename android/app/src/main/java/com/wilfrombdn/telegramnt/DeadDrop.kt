@@ -251,12 +251,13 @@ internal class DeadDropView(
     private val aimCx get() = width - joyCx
     private var gunId = -1; private var rollId = -1; private var rollX = 0f; private var rollY = 0f; private var rolled = false
     private var grMsg = ""; private var grMsgT = 0f
+    private var grId = -1; private var grX0 = 0f; private var grY0 = 0f
     private val gunR get() = 46f * d; private val gunCx get() = width - 22f * d - gunR
     private val grR get() = 32f * d; private val grCx get() = gunCx - gunR - grR - 8f * d; private val grCy get() = joyCy + 14f * d
 
     private fun startMg(i: Int) {
         mgIdx = i; belt = null; beltScene = null; fly = null; flyScene = null; shoot = null; shootScene = null; cine = null; prison = null; prisonScene = null; finale = null; finaleScene = null
-        bPid = -1; joyId = -1; aimId = -1; thrustId = -1; gunId = -1; rollId = -1; grMsgT = 0f; joyActive = false; mag = 0f; aimMag = 0f; knobX = 0f; knobY = 0f; aimKX = 0f; aimKY = 0f; deadT = 0f; mgPending = -9
+        bPid = -1; joyId = -1; aimId = -1; thrustId = -1; gunId = -1; rollId = -1; grId = -1; grMsgT = 0f; joyActive = false; mag = 0f; aimMag = 0f; knobX = 0f; knobY = 0f; aimKX = 0f; aimKY = 0f; deadT = 0f; mgPending = -9
         when (mgName) {
             "belt" -> { belt = BeltWorld(BeltLevel.warehouse); beltScene = BeltScene(belt!!); music.setHeat(3) }
             "fly" -> { fly = FlyWorld(FlySpec()); flyScene = FlyScene(fly!!); music.setHeat(4) }
@@ -288,7 +289,7 @@ internal class DeadDropView(
             b.update(dt, ix, iy, mag)
             if (b.fell) mgGo(-3) else if (b.phase == BeltWorld.Phase.DONE && b.phaseT > 0.8f) mgGo(mgIdx + 1)
         }
-        fly?.let { f -> f.thrust = thrustId >= 0; f.update(dt); if (f.finished) mgGo(mgIdx + 1) }
+        fly?.let { f -> f.thrust = thrustId >= 0; f.update(dt); if (soundOn) for (e in f.events) DeadLetterSfx.play(e); f.events.clear(); if (f.finished) mgGo(mgIdx + 1) }
         cine?.let { cn -> cn.t += dt; if (cn.t >= cn.fadeStart) mgGo(mgIdx + 1) }
         prison?.let { pw -> pw.update(dt, ix, iy, mag); if (soundOn) for (e in pw.events) DeadLetterSfx.play(e); pw.events.clear(); if (pw.done) mgGo(mgIdx + 1) }
         finale?.let { fw -> fw.update(dt, ix, iy, mag); if (soundOn) for (e in fw.events) DeadLetterSfx.play(e); fw.events.clear() }
@@ -333,7 +334,7 @@ internal class DeadDropView(
                 else if (m == "prison" && hypot(x - gunCx, y - joyCy) < gunR * 1.25f) prison?.act()
                 else if (m == "prison") { if (invOpen) invOpen = false else { invPid = id; invX = x; invY = y } }   // swipe up anywhere else: your things
                 else if (m == "shoot" && hypot(x - gunCx, y - joyCy) < gunR * 1.25f) gunId = id
-                else if (m == "shoot" && hypot(x - grCx, y - grCy) < grR * 1.4f) { val why = shoot?.throwGrenade(); if (why != null) { grMsg = why; grMsgT = 1.3f } }
+                else if (m == "shoot" && hypot(x - grCx, y - grCy) < grR * 1.4f) { grId = id; grX0 = x; grY0 = y }   // drag from the grenade button to aim it
                 else if (m == "shoot" && joyId >= 0) { rollId = id; rollX = x; rollY = y; rolled = false }
                 else if (m == "fly") thrustId = id
             }
@@ -342,6 +343,7 @@ internal class DeadDropView(
                 for (i in 0 until e.pointerCount) {
                     val pid = e.getPointerId(i)
                     if (pid == joyId) readJoystick(e.getX(i), e.getY(i)) else if (pid == aimId) readAim(e.getX(i), e.getY(i))
+                    if (pid == grId) { val dx = e.getX(i) - grX0; val dy = e.getY(i) - grY0; val l = hypot(dx, dy); if (l > 14f * d) shoot?.aimGrenade(dx, dy, ((l - 14f * d) / (150f * d)).coerceIn(0f, 1f)) else shoot?.cancelAim() }
                     if (pid == invPid && e.getY(i) - invY < -44f * d && abs(e.getX(i) - invX) < 60f * d) { invOpen = true; invPid = -1 }
                     if (pid == rollId && !rolled && hypot(e.getX(i) - rollX, e.getY(i) - rollY) > 26f * d) { shoot?.roll(e.getX(i) - rollX, e.getY(i) - rollY); rolled = true }
                     if (pid == bPid) {
@@ -362,6 +364,7 @@ internal class DeadDropView(
                 }
                 if (act == MotionEvent.ACTION_CANCEL) { joyId = -1; aimId = -1; thrustId = -1; bPid = -1; gunId = -1; rollId = -1 }
                 if (id == gunId) gunId = -1
+                if (id == grId) { grId = -1; if (act == MotionEvent.ACTION_CANCEL) shoot?.cancelAim() else { val why = shoot?.throwAimed(); if (why != null) { grMsg = why; grMsgT = 1.3f } } }
                 if (id == invPid || act == MotionEvent.ACTION_CANCEL) invPid = -1
                 if (id == rollId) rollId = -1
                 if (id == bPid) bPid = -1

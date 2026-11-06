@@ -38,6 +38,8 @@ internal class FlyWorld(val spec: FlySpec) {
     var invuln = 0f; var hitFlash = 0f
     var finished = false
     var landed = false
+    /** Sounds for the view to play. */
+    val events = ArrayList<String>()
     var rocketsSeen = 0
     val coinList = ArrayList<Coin>()
     val zaps = ArrayList<Zap>()
@@ -117,7 +119,7 @@ internal class FlyWorld(val spec: FlySpec) {
             Phase.DROP -> {
                 speed = max(0f, speed - 3f * dt); scroll += speed * dt
                 vy = min(13f, vy + 30f * dt); y += vy * dt
-                if (y >= floorY) { y = floorY; vy = 0f; phase = Phase.DONE; phaseT = 0f; landed = true }
+                if (y >= floorY) { y = floorY; vy = 0f; phase = Phase.DONE; phaseT = 0f; landed = true; events += "thrown" }
             }
             Phase.DONE -> { speed = 0f; if (phaseT > 1.7f) finished = true }
         }

@@ -84,7 +84,7 @@ class Level34ShotTest {
         fun run(secs: Float) { var t = 0f; while (t < secs) { w.update(0.016f, 0f, 0f, 0f, false); t += 0.016f } }
         run(6f); for (n in w.npcs) if (!n.civ && !n.hostage) n.dead = true          // past the opening scene, into the fight
         run(0.1f); w.px = 7.5f; w.py = 12.6f; run(0.05f)
-        for ((k, tt) in listOf(0.4f, 2.0f, 4.0f, 6.0f, 9.0f, 10.4f, 12.8f, 13.6f, 14.8f, 15.45f).withIndex()) { var g = 0; while (w.ft < tt && g++ < 3000) run(0.016f); for (i in 0..40) s.render(20f + i * 0.016f); save(s.render(21f), "l4-mayor-$k") }
+        for ((k, tt) in listOf(0.4f, 4.0f, 9.0f, 10.4f, 11.6f, 12.3f, 13.4f, 15.5f, 17.4f, 18.85f).withIndex()) { var g = 0; while (w.ft < tt && g++ < 3000) run(0.016f); for (i in 0..40) s.render(20f + i * 0.016f); save(s.render(21f), "l4-mayor-$k") }
     }
 
     @Test fun cineHall() {

@@ -5,6 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import kotlin.math.PI
 import kotlin.math.exp
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
@@ -77,6 +78,9 @@ internal object DeadLetterSfx {
         "doorbang" -> { val a = noise(0.7f, 1.6f, 5f, 0.05f, 71); val b = tone(listOf(70f, 104f, 158f, 233f), 0.7f, 0.5f, 5f, square = true); val c2 = noise(0.08f, 1.4f, 40f, 0.8f, 73); ShortArray(a.size) { (a[it] + b[it] + (if (it < c2.size) c2[it] else 0)).coerceIn(-32767, 32767).toShort() } }   // a boot on the steel door
         "breathsoft" -> { val b = breath(); ShortArray(b.size) { (b[it] * 0.45f).toInt().toShort() } }
         "creak" -> { val n = (RATE * 2.6f).toInt(); val r = Random(79); var ph = 0.0; ShortArray(n) { val tt = it / RATE.toFloat(); val f = 55f + 30f * sin(tt * 1.7f) + (r.nextFloat() - 0.5f) * 8f; ph += 2 * PI * f / RATE; val g = if (sin(ph * 0.5) > 0.6) 1f else 0.3f; (sin(ph).toFloat() * g * 0.22f * (1f - tt / 2.6f) * 32767).toInt().toShort() } }   // a heavy door on dry hinges
+        "stomp1", "stomp2", "stomp3", "stomp4" -> { val g = name.last().digitToInt() / 4f; val a = noise(0.16f, 0.55f + 0.9f * g, 22f, 0.08f, 83 + name.last().code); val b = tone(listOf(58f, 74f), 0.16f, 0.25f * g, 20f); ShortArray(a.size) { (a[it] + b[it]).coerceIn(-32767, 32767).toShort() } }   // boots on the floor, closer and closer
+        "thrown" -> { val a = noise(0.7f, 1.7f, 6f, 0.04f, 89); val b = noise(0.35f, 0.9f, 12f, 0.5f, 97); val lo = tone(listOf(48f, 66f), 0.7f, 0.8f, 6f); ShortArray(a.size) { (a[it] + (if (it < b.size) b[it] else 0) + lo[it]).coerceIn(-32767, 32767).toShort() } }   // a body slammed into the floor
+        "chuckle" -> chuckle()
         "pump" -> { val a = noise(0.08f, 0.7f, 40f, 0.7f, 43); val gap = (RATE * 0.16f).toInt(); val b = noise(0.08f, 0.8f, 40f, 0.7f, 47); ShortArray(a.size + gap + b.size) { when { it < a.size -> a[it]; it < a.size + gap -> 0; else -> b[it - a.size - gap] } } }   // shk-shk
         "shotgun" -> { val a = noise(3.0f, 1.6f, 1.7f, 0.1f, 53); val b = noise(0.2f, 1.6f, 18f, 0.9f, 59); val lo = tone(listOf(42f, 55f), 3.0f, 0.9f, 1.4f); ShortArray(a.size) { (a[it] + (if (it < b.size) b[it] else 0) + lo[it]).coerceIn(-32767, 32767).toShort() } }   // a crack, a deep boom, the room ringing
         "keys" -> tone(listOf(2100f, 2900f, 3600f), 0.25f, 0.12f, 14f, square = true)
@@ -157,6 +161,19 @@ internal object DeadLetterSfx {
             res[k] = ((driven * 0.62f + hiss) * 0.75f * 32767).toInt().coerceIn(-32767, 32767).toShort()
         }
         return res
+    }
+
+    /** A low, satisfied "heh... heh heh": three breathy bursts of a deep voice. */
+    private fun chuckle(): ShortArray {
+        val n = (RATE * 1.5f).toInt(); val out = ShortArray(n); val r = Random(101); var ph = 0.0; var lp = 0f
+        val bursts = floatArrayOf(0.0f, 0.55f, 0.82f); val lens = floatArrayOf(0.22f, 0.16f, 0.2f)
+        for (i in 0 until n) { val t = i / RATE.toFloat(); var env = 0f
+            for (k in bursts.indices) { val u = (t - bursts[k]) / lens[k]; if (u in 0f..1f) env = max(env, sin(PI * u).toFloat()) }
+            val f = 108f - 14f * t; ph += 2 * PI * f / RATE
+            val buzz = ((ph / (2 * PI)) % 1.0).toFloat() * 2f - 1f
+            lp += ((buzz * 0.6f + (r.nextFloat() * 2f - 1f) * 0.5f) - lp) * 0.18f
+            out[i] = (lp * env * 0.9f * 32767).toInt().coerceIn(-32767, 32767).toShort() }
+        return out
     }
 
     /** One heavy, ragged breath: in, then out. */

@@ -108,10 +108,10 @@ class ShootWorldTest {
             w.px = 7.5f; w.py = 56.4f
             w.bullets += ShootWorld.Bullet(7.5f, 52f, 0f, 12f, false)
             var i = 0
-            while (w.bullets.isNotEmpty() && i++ < 100) w.update(0.016f, 0f, 0f, 0f, false)
+            while (w.bullets.isNotEmpty() && i++ < 100) w.update(0.016f, 0f, 0f, 0f, true)    // peeking out to shoot
             if (w.phase == ShootWorld.Phase.DEAD) hits++ else soaked++
         }
-        assertTrue("cover stopped most ($soaked saved, $hits hit)", soaked in 35..58)
+        assertTrue("peeking from cover, about 9 in 10 miss ($soaked saved, $hits hit)", soaked in 48..60 && hits > 0)
     }
 
     @Test fun clearingEverythingAndKickingTheDoorRunsTheEnding() {
@@ -125,6 +125,35 @@ class ShootWorldTest {
         while (w.phase != ShootWorld.Phase.DONE && i++ < 3000) w.update(0.016f, 0f, 0f, 0f, false)
         assertEquals(ShootWorld.Phase.DONE, w.phase)
         assertFalse(w.doorClosed(7, 11))
+    }
+
+    @Test fun pressedToAWallWithoutShootingYouCantBeHit() {
+        val w = fresh(); intoPlay(w)
+        w.px = 1.4f; w.py = 45.5f                         // against the west wall of the lobby
+        assertTrue("against the wall", w.nearWall)
+        var i = 0
+        while (i++ < 600) w.update(0.016f, 0f, 0f, 0f, false)
+        assertTrue("hidden", w.hidden); assertEquals(ShootWorld.Phase.PLAY, w.phase)
+        w.update(0.016f, 0f, 0f, 0f, true); assertFalse("firing gives you away", w.hidden)
+    }
+
+    @Test fun aGrenadeGoesWhereYouDragIt() {
+        val w = fresh(); intoPlay(w)
+        w.px = 5.5f; w.py = 60.5f
+        w.aimGrenade(0f, -1f, 0.5f)
+        val at = w.aimAt!!
+        assertEquals(5.5f, at.first, 0.05f); assertEquals(60.5f - (ShootWorld.THROW_MIN + (ShootWorld.THROW_MAX - ShootWorld.THROW_MIN) * 0.5f), at.second, 0.3f)
+        assertNull(w.throwAimed()); assertEquals(4, w.grenades); assertNull(w.aimAt)
+    }
+
+    @Test fun mostOfficersHoldTheirGround() {
+        val w = fresh(); intoPlay(w)
+        w.px = 7.5f; w.py = 45.5f; w.face = 0f
+        val campers = w.npcs.filter { !it.civ && !it.hostage && it.camper }
+        assertTrue("most of them", campers.size * 10 >= w.npcs.count { !it.civ && !it.hostage } * 6)
+        var i = 0
+        while (i++ < 400 && w.phase == ShootWorld.Phase.PLAY) w.update(0.016f, 0f, 0f, 0f, false)
+        for (n in campers) if (!n.dead) assertTrue("${n.id} stayed near his post", kotlin.math.hypot(n.x - n.homeX, n.y - n.homeY) < 5f)
     }
 
     @Test fun officersKillYouIfYouStandInTheOpen() {

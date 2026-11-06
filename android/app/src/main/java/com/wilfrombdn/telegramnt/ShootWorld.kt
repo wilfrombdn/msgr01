@@ -57,6 +57,9 @@ internal class ShootWorld(val spec: ShootSpec) {
         var burst = 0
         val path = ArrayDeque<Pair<Int, Int>>()
         val crouched get() = (civ && state == COWER) || (!civ && crouch)
+        val homeX = x; val homeY = y
+        /** Most of them hold their ground: they take cover near where they were posted and wait for you to come to them. */
+        val camper = id % 10 < 7
     }
     class Bullet(var x: Float, var y: Float, val vx: Float, val vy: Float, val mine: Boolean, val harmless: Boolean = false) {
         var life = 1.6f
@@ -97,6 +100,22 @@ internal class ShootWorld(val spec: ShootSpec) {
     var grenades = 5
     var grenCd = 0f
     fun grCd() = grenCd
+    /** Seconds since you last fired or threw: pressed to a wall without doing either, you're out of sight. */
+    var sinceFire = 9f; private set
+    /** Right up against a wall or something solid. */
+    val nearWall: Boolean get() {
+        val c0 = floor(px).toInt(); val r0 = floor(py).toInt()
+        for (r in r0 - 1..r0 + 1) for (c in c0 - 1..c0 + 1) {
+            if (!solid(c, r)) continue
+            val nx = px.coerceIn(c.toFloat(), c + 1f); val ny = py.coerceIn(r.toFloat(), r + 1f)
+            if (hypot(px - nx, py - ny) < 0.62f) return true
+        }
+        return false
+    }
+    /** Hiding: against a wall, not shooting or throwing. Nothing can hit you. */
+    val hidden get() = phase == Phase.PLAY && nearWall && sinceFire > 0.6f
+    /** Where a grenade would land while you're dragging from the grenade button (null when you aren't). */
+    var aimAt: Pair<Float, Float>? = null; private set
     var rollT = 0f; var rollCd = 0f; private var rdx = 0f; private var rdy = 0f
     var diving = false
     var msg = ""; var msgT = 0f; var msgGood = true
@@ -274,6 +293,8 @@ internal class ShootWorld(val spec: ShootSpec) {
     }
 
     private fun play(dt: Float, ix: Float, iy: Float, mag: Float, fireHeld: Boolean) {
+        sinceFire += dt
+        if (fireHeld) sinceFire = 0f
         // walking, or rolling
         if (rollT > 0f) {
             rollT = max(0f, rollT - dt); moving = true
@@ -330,7 +351,7 @@ internal class ShootWorld(val spec: ShootSpec) {
         val l = hypot(dx, dy); if (l < 0.01f) return
         rdx = dx / l; rdy = dy / l; rollT = 0.42f; rollCd = 0.95f; face = atan2(rdy, rdx)
     }
-    private val rolling get() = rollT in 0.05f..0.37f
+    private val rolling get() = rollT > 0f
     val invulnerable get() = rolling || diving
 
     // ----- grenades -----
@@ -339,11 +360,40 @@ internal class ShootWorld(val spec: ShootSpec) {
         const val HOSTAGE_LINE = "PLEASE HELP ME, HE'S CRAZY! PLEASE HELP ME-"
         val CIV_LINES = listOf("OH MY GOD!", "IT'S HIM!", "HE'S GOT A GUN!", "OH GOD...", "GET DOWN!", "NO, NO, NO!", "SOMEBODY HELP!")
         // the mayor's end: the song plays from the door until he's looked at you; a second of silence; the kick
-        const val MUSIC_CUT = 14.4f
-        const val KICK = 15.4f
+        const val MUSIC_CUT = 17.8f
+        const val KICK = 18.8f
+        const val PAPER_AT = 12.0f      // he stops at one of your papers on the floor
+        const val PAPER_UP = 12.6f      // ...has it in his hand, reads it, chuckles
+        const val PAPER_AWAY = 14.6f    // ...folds it into his jacket and comes on
         const val IDLE = 0; const val ALERT = 1; const val ENGAGE = 2; const val SEARCH = 3; const val FLEE = 4; const val COWER = 5; const val AIMED = 6; const val EVAC = 7
         val D4 = listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)
         const val THROW_MAX = 10.5f; const val THROW_MIN = 3.0f; const val BLAST = 2.5f
+    }
+
+    /** While dragging from the grenade button: [k] is how far you've dragged (0..1), (dx, dy) which way. Shows where it would land. */
+    fun aimGrenade(dx: Float, dy: Float, k: Float) {
+        if (phase != Phase.PLAY) { aimAt = null; return }
+        val l = hypot(dx, dy); if (l < 0.01f) { aimAt = null; return }
+        val dist = THROW_MIN + (THROW_MAX - THROW_MIN) * k.coerceIn(0f, 1f)
+        aimAt = landing(px + dx / l * dist, py + dy / l * dist)
+    }
+    fun cancelAim() { aimAt = null }
+    /** Let go: the grenade is lobbed where you aimed. Returns why not, or null if it was thrown. */
+    fun throwAimed(): String? {
+        val at = aimAt ?: return "DRAG TO AIM"; aimAt = null
+        if (phase != Phase.PLAY) return "NOT NOW"
+        if (grenades <= 0) return "NO GRENADES"
+        if (grenCd > 0f) return "WAIT"
+        val dist = hypot(at.first - px, at.second - py)
+        grenades--; grenCd = 1.1f; face = atan2(at.second - py, at.first - px); muzzle = 0.1f; sinceFire = 0f
+        grenadesAir += Grenade(px, py, at.first, at.second, 0.35f + dist * 0.045f)
+        return null
+    }
+    /** The lob comes down short of a wall in its way. */
+    private fun landing(tx: Float, ty: Float): Pair<Float, Float> {
+        val d = hypot(tx - px, ty - py); var s = 0.4f; var lx = px; var ly = py
+        while (s <= d) { val x = px + (tx - px) / d * s; val y = py + (ty - py) / d * s; if (blocksSight(floor(x).toInt(), floor(y).toInt())) break; lx = x; ly = y; s += 0.2f }
+        return lx to ly
     }
 
     /** Throw at the biggest group of officers you can see that is in range. Returns why not, or null if it was thrown. */
@@ -460,13 +510,14 @@ internal class ShootWorld(val spec: ShootSpec) {
 
     /** A spot next to low furniture or a pillar, between the officer and you, from which he can still see you. */
     private fun pickCover(n: Npc): Pair<Int, Int>? {
-        val nc = floor(n.x).toInt(); val nr = floor(n.y).toInt()
+        val nc = floor(if (n.camper) n.homeX else n.x).toInt(); val nr = floor(if (n.camper) n.homeY else n.y).toInt()
+        val reach = if (n.camper) 3 else 6
         var best: Pair<Int, Int>? = null; var bs = 1e9f
-        for (r in nr - 6..nr + 6) for (c in nc - 6..nc + 6) {
+        for (r in nr - reach..nr + reach) for (c in nc - reach..nc + reach) {
             if (solid(c, r)) continue
             val sx = c + 0.5f; val sy = r + 0.5f
             val dp = hypot(px - sx, py - sy)
-            if (dp < 2.8f || dp > 13f) continue
+            if ((dp < 2.8f && !n.camper) || dp > 13f) continue
             var ok = false
             for ((dx, dy) in D4) {
                 val cc = c + dx; val rr = r + dy
@@ -524,17 +575,17 @@ internal class ShootWorld(val spec: ShootSpec) {
             val spot = n.spot
             val atSpot = spot != null && hypot(spot.first + 0.5f - n.x, spot.second + 0.5f - n.y) < 0.35f
             if (spot != null && !atSpot && n.path.isNotEmpty()) { n.crouch = false; follow(n, dt, if (n.swat) 3.6f else 3.1f, false) }
-            else if (spot == null && dist > 6.5f) {
+            else if (spot == null && dist > 6.5f && !n.camper) {
                 n.repath -= dt
                 if (n.repath <= 0f || n.path.isEmpty()) { n.repath = 0.5f; n.path.clear(); n.path.addAll(route(floor(n.x).toInt() to floor(n.y).toInt(), floor(px).toInt() to floor(py).toInt())) }
                 follow(n, dt, 2.5f, false)
             }
-            if (atSpot) {                      // duck behind the furniture, pop up, fire, duck again
+            if (atSpot || (n.camper && n.path.isEmpty())) {                      // duck behind the furniture, pop up, fire, duck again
                 n.crouchT -= dt
                 if (n.crouchT <= 0f) { n.crouch = !n.crouch; n.crouchT = if (n.crouch) 0.7f + rnd.nextFloat() * 0.9f else 1.0f + rnd.nextFloat() * 0.8f }
             } else n.crouch = false
             if (!n.crouch && n.cd <= 0f && abs(angleDiff(n.face, atan2(py - n.y, px - n.x))) < 0.22f && phase == Phase.PLAY) {
-                val spread = (if (n.swat) 0.1f else 0.15f)
+                val spread = (if (n.swat) 0.17f else 0.26f)
                 val ang = atan2(py - n.y, px - n.x) + (rnd.nextFloat() - 0.5f) * spread
                 val sp = if (n.swat) 13.5f else 12f
                 bullets += Bullet(n.x + cos(ang) * 0.5f, n.y + sin(ang) * 0.5f, cos(ang) * sp, sin(ang) * sp, false)
@@ -544,6 +595,12 @@ internal class ShootWorld(val spec: ShootSpec) {
         } else {
             n.lostT += dt
             if (n.crouch && n.crouchT > 0.2f) n.crouchT = 0.2f
+            if (n.camper) {   // he holds his spot, low, watching where you were
+                n.face = turnToward(n.face, atan2(n.lastY - n.y, n.lastX - n.x), 5f * dt)
+                if (n.path.isNotEmpty()) follow(n, dt, 3f, false) else { n.crouch = true }
+                if (n.lostT > 4f) { n.state = IDLE; n.baseFace = n.face; n.crouch = false }
+                return
+            }
             if (n.lostT > 0.6f) { n.state = SEARCH; n.crouch = false; n.path.clear(); n.path.addAll(route(floor(n.x).toInt() to floor(n.y).toInt(), floor(n.lastX).toInt() to floor(n.lastY).toInt())); n.searchT = 0f }
         }
     }
@@ -578,7 +635,8 @@ internal class ShootWorld(val spec: ShootSpec) {
                         kill(n); gone = true; break
                     }
                     if (!gone && phase == Phase.PLAY && !invulnerable && hypot(px - b.x, py - b.y) < 0.34f) {
-                        if (soaked(b, false)) { sparks += Spark(b.x, b.y); gone = true } else { die(); gone = true }
+                        val miss = when { hidden -> 1f; b.cover > 0f -> 0.9f; nearWall -> 0.4f; else -> 0f }
+                        if (rnd.nextFloat() < miss) { sparks += Spark(b.x, b.y); gone = true } else { die(); gone = true }
                     }
                 }
             }
@@ -632,6 +690,11 @@ internal class ShootWorld(val spec: ShootSpec) {
         return x to y
     }
     val kicking get() = ft in 0.2f..0.6f
+    /** The one paper he picks up off the floor, between him and you. */
+    val paperSpot get() = (finaleX - 1.1f) to (finaleY - 1.2f)
+    val mayorBending get() = ft in PAPER_AT..PAPER_UP
+    val mayorReading get() = ft in PAPER_UP..PAPER_AWAY
+    val mayorWalking get() = (ft in 10.6f..PAPER_AT) || (ft in PAPER_AWAY + 0.3f..17.0f)
     val playerDown get() = ft >= 9.8f
     val mayorKicking get() = ft in KICK - 0.25f..KICK + 0.15f
     val mayorLaughing get() = false
@@ -644,6 +707,7 @@ internal class ShootWorld(val spec: ShootSpec) {
         ft in 1.0f..3.0f -> "NO! NO! NO!"
         ft in 5.2f..7.2f -> "WHO LET YOU IN?!"
         ft in 7.3f..8.9f -> "GET HIM! GET HIM NOW!"
+        ft in PAPER_UP + 0.3f..PAPER_AWAY -> "Heh... heh heh."
         else -> null
     }
 
@@ -666,10 +730,16 @@ internal class ShootWorld(val spec: ShootSpec) {
                 mayorGun = (sin(ft * 9f) * 1.4f + sin(ft * 5.3f) * 0.9f)
             }
             ft < 10.6f -> { mayorX += (7.5f - mayorX) * min(1f, 6f * dt); mayorY += (6.4f - mayorY) * min(1f, 6f * dt); mayorGun = atan2(py - mayorY, px - mayorX) + 0.12f * sin(ft * 21f) }
-            ft < 13.4f -> { val tx = finaleX - 0.2f; val ty = finaleY - 1.0f; val dx = tx - mayorX; val dy = ty - mayorY; val d = kotlin.math.hypot(dx, dy); val mv = min(1.15f * dt, d); if (d > 0.01f) { mayorX += dx / d * mv; mayorY += dy / d * mv }; mayorGun = atan2(py - mayorY, px - mayorX) }
+            ft < PAPER_AT -> { val (tx, ty) = paperSpot; val dx = tx - mayorX; val dy = ty - 0.6f - mayorY; val d = kotlin.math.hypot(dx, dy); val mv = min(1.1f * dt, d); if (d > 0.01f) { mayorX += dx / d * mv; mayorY += dy / d * mv }; mayorGun = atan2(py - mayorY, px - mayorX) }
+            ft < PAPER_AWAY + 0.3f -> {}
+            ft < 17.0f -> { val tx = finaleX - 0.2f; val ty = finaleY - 1.0f; val dx = tx - mayorX; val dy = ty - mayorY; val d = kotlin.math.hypot(dx, dy); val mv = min(1.0f * dt, d); if (d > 0.01f) { mayorX += dx / d * mv; mayorY += dy / d * mv }; mayorGun = atan2(py - mayorY, px - mayorX) }
             else -> mayorGun = atan2(py - mayorY, px - mayorX)
         }
         if (before < 0.5f && ft >= 0.5f) events += "kick"
+        // boots: the squad coming down the hall, louder and louder, then they pile on and throw you down
+        if (ft in 6.6f..10.2f && (ft * 7.5f).toInt() != (before * 7.5f).toInt()) events += "stomp" + (1 + ((ft - 6.6f) / 0.95f).toInt()).coerceAtMost(4)
+        if (before < 9.8f && ft >= 9.8f) { events += "thrown"; shake = 0.5f }
+        if (before < PAPER_UP + 0.3f && ft >= PAPER_UP + 0.3f) events += "chuckle"
         if (before < KICK && ft >= KICK) { flash = 0.3f; shake = 0.7f; events += "dome" }
         if (finaleDone) phase = Phase.DONE
     }
