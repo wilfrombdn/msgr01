@@ -273,7 +273,7 @@ internal class FlyScene(private val world: FlyWorld) : PixelSprites() {
                 if (tumble) c.rotate((world.phaseT * 340f) % 360f, fx.toFloat(), (bodyY - 8).toFloat())
                 if (world.flipped) c.scale(1f, -1f, fx.toFloat(), (bodyY - 2).toFloat())   // the flipper: upside down on the ceiling
                 val packC = JetPacks.COLOR[world.spec.pack.coerceIn(0, 4)]
-                rect(c, fx - 10, bodyY - 12, 6, 13, PX.K); rect(c, fx - 9, bodyY - 11, 4, 11, packC); rect(c, fx - 9, bodyY - 11, 4, 2, lite0(packC, 70))
+                rect(c, fx - 10, bodyY - 12, 6, 13, PX.K); rect(c, fx - 9, bodyY - 11, 4, 11, packC); rect(c, fx - 9, bodyY - 11, 4, 2, if (world.spec.pack == 0) 0xFFFF7070.toInt() else lite0(packC, 70))
                 if (world.spec.pack == 4) { rect(c, fx - 12, bodyY - 9, 2, 6, 0xFFC03030.toInt()); rect(c, fx - 12, bodyY - 9, 2, 2, 0xFFE8EEF8.toInt()) }   // the magnet
                 rect(c, fx - 9, bodyY, 4, 2, steel)
                 folk(c, fx, bodyY + 8, 1, if (world.phase == FlyWorld.Phase.FLY && world.thrust) 1 else 0, clerk, false, true)

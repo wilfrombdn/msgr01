@@ -450,6 +450,7 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
         }
         addPlayer(items, c, clock)
         if (fin) addFinale(items, c, clock)
+        if (world.phase == ShootWorld.Phase.BOSS || (world.phase == ShootWorld.Phase.DEAD && world.bossPhase > 0)) addBoss(items, c, clock)
         items.sortBy { it.y }
         for (it in items) it.draw()
 
@@ -589,6 +590,7 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
         val w = world
         if (w.phase == ShootWorld.Phase.FINALE || w.phase == ShootWorld.Phase.DONE) return
         val fx = (w.px * S).roundToInt(); val fy = (w.py * S).roundToInt() + 6
+        if (w.hurtT > 0f && (clock * 14f).toInt() % 2 == 0 && w.phase == ShootWorld.Phase.BOSS) return      // hit: blinking
         val draw: () -> Unit = {
             rect(c, fx - 5, fy - 1, 11, 3, a(PX.K, 0x70))
             if (w.phase == ShootWorld.Phase.DEAD) lying(c, fx, fy, clerk, true, false)
@@ -604,6 +606,42 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
         items.add(DItem(w.py, draw))
     }
     private class DItem(val y: Float, val draw: () -> Unit)
+
+    /** The arcade boss: the mayor, twice as big, and the warnings for what he's about to do. */
+    private fun addBoss(items: ArrayList<DItem>, c: Canvas, clock: Float) {
+        val w = world
+        val mx = (w.mayorX * S).roundToInt(); val my = (w.mayorY * S).roundToInt() + 6
+        val warn = w.bossWarn
+        // the warnings, on the floor (drawn first, under everyone)
+        items += DItem(-99f) {
+            when (w.bossMove) {
+                "charge" -> if (warn < 1f) { val tx = w.chargeX * S; val ty = w.chargeY * S; val d = hypot(tx - mx, ty - my); val n = (d / 6f).toInt().coerceAtLeast(2)
+                    for (i in 0..n) { val k = i / n.toFloat(); if ((i + (clock * 12f).toInt()) % 2 == 0) rect(c, (mx + (tx - mx) * k).roundToInt() - 2, (my - 4 + (ty - my + 4) * k).roundToInt() - 2, 5, 5, a(PX.RED, (0x60 + warn * 0x9F).toInt())) }
+                    for (i in 0 until 24) { val an = i * PI.toFloat() / 12f; px(c, (tx + cos(an) * 10f).roundToInt(), (ty + sin(an) * 8f).roundToInt(), PX.RED) } }
+                "ring" -> if (warn < 1f) { val rr = 10f + warn * 26f; for (i in 0 until 40) { val an = i * PI.toFloat() / 20f + clock; px(c, (mx + cos(an) * rr).roundToInt(), (my - 10 + sin(an) * rr * 0.8f).roundToInt(), a(K(0xFFFFB040), 0xFF)) } }
+                "fan" -> if (warn < 1f) { for (k in 0 until 5) { val an = w.mayorGun - 0.45f + 0.9f * k / 4f; for (j in 2 until 7) px(c, (mx + cos(an) * j * 6f).roundToInt(), (my - 12 + sin(an) * j * 6f).roundToInt(), a(PX.RED, (warn * 0xFF).toInt())) } }
+            }
+            for (l in w.lobs) { val x = (l[0] * S).roundToInt(); val y = (l[1] * S).roundToInt(); val rr = ShootWorld.LOB_R * S; val k = (1f - l[2] / 1.6f).coerceIn(0f, 1f)
+                for (i in 0 until 36) { val an = i * PI.toFloat() / 18f; px(c, (x + cos(an) * rr).roundToInt(), (y + sin(an) * rr * 0.8f).roundToInt(), a(PX.RED, (0x80 + k * 0x7F).toInt())) }
+                rect(c, x - (rr * k).roundToInt(), y - 1, (2 * rr * k).roundToInt(), 2, a(PX.RED, 0x90)) }
+        }
+        items += DItem(w.mayorY) {
+            val dead = w.bossDeadT >= 0f
+            c.save(); c.scale(2f, 2f, mx.toFloat(), my.toFloat())
+            if (dead) lying(c, mx, my, mayorOutfit, true, false)
+            else {
+                val toward = atan2(w.py - w.mayorY, w.px - w.mayorX)
+                val walking = w.bossMove.isEmpty() || (w.bossMove == "charge" && w.bossWarn >= 1f)
+                folk(c, mx, my, dirOf(toward), if (walking) 1 + ((clock * (if (w.bossMove == "charge") 14f else 6f)).toInt() % 2) else 0, mayorOutfit, false, false, if (w.staggerT > 0f || w.stunT > 0f) 3 else 0)
+                if (w.bossMove == "fan" || w.bossMove.isEmpty()) pistol(c, mx, my - 8, w.mayorGun, w.muzzle > 0f)
+                if (w.bossMove == "lob" && w.bossWarn < 1f) { rect(c, mx + 3, my - 18, 2, 6, mayorOutfit.shirt); rect(c, mx + 2, my - 21, 4, 4, K(0xFF3E7A4A)) }
+            }
+            c.restore()
+            if (w.bossHitFlash > 0f && !dead) { rect(c, mx - 10, my - 44, 20, 40, a(PX.W, 0x70)) }
+            if (w.stunT > 0f) for (i in 0 until 3) { val an = clock * 6f + i * 2.09f; rect(c, (mx + cos(an) * 10f).roundToInt() - 1, (my - 46 + sin(an) * 3f).roundToInt(), 3, 3, PX.GOLD) }   // dazed
+            if (w.bossPhase == 3 && !dead) for (k in 0..2) { val ph = (clock * 2f + k * 0.33f) % 1f; px(c, mx - 8 + k * 8, my - 44 - (ph * 10f).toInt(), a(PX.RED, ((1f - ph) * 0xFF).toInt())) }   // rage
+        }
+    }
 
     private fun addFinale(items: ArrayList<DItem>, c: Canvas, clock: Float) {
         val w = world

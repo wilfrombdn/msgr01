@@ -74,7 +74,7 @@ internal class DeadDropView(
 
     // ---------- the arcade (after the game is beaten): each mini-game as an endless game with a score ----------
     private val ARCADE = listOf("maze" to "SEWER MAZE", "belt" to "CONVEYOR RUN", "fly" to "JETPACK", "hall" to "TOWN HALL", "tower" to "THE TOWER", "uplink" to "UPLINK")
-    private val ARCADE_HOW = mapOf("maze" to "ENDLESS MAZES. 3 LIVES.", "belt" to "HOW FAR CAN YOU GET?", "fly" to "BANK COINS. BUY BETTER JETPACKS.", "hall" to "CLEAR THE WHOLE HALL.", "tower" to "EVERY CLIMB GETS FASTER.", "uplink" to "HOW LONG CAN YOU REMEMBER?")
+    private val ARCADE_HOW = mapOf("maze" to "FOUR SEWERS. FLARES SCARE THE COPS.", "belt" to "FASTER AND FASTER. HOW FAR?", "fly" to "BANK COINS. BUY BETTER JETPACKS.", "hall" to "CLEAR THE HALL. THEN THE MAYOR.", "tower" to "FOUR SCREENS. FASTER EACH TIME.", "uplink" to "NEW PATTERN EVERY ROUND. ENDLESS.")
     private var arcadeId: String? = null
     private var arcLives = 3; private var arcScore = 0; private var arcOver = false; private var arcOverT = 0f; private var arcWon = false
     private var pacBank = 0; private var arcRound = 1; private var flyHit = false; private var pacCaughtT = -1f
@@ -86,12 +86,32 @@ internal class DeadDropView(
             "maze" -> { levelIdx = 1; load(false); attempt = 2; toStage(1); newArcadeMaze() }
             "belt" -> { levelIdx = 2; load(false); belt = BeltWorld(BeltLevel.warehouseArcade); beltScene = BeltScene(belt!!) }
             "fly" -> { levelIdx = 2; load(false); startMg(1); fly = FlyWorld(FlySpec((System.nanoTime() % 1000).toInt(), 1_000_000, packNow, arcade = true)); flyScene = FlyScene(fly!!) }
-            "hall" -> { levelIdx = 3; load(false); startMg(1) }
+            "hall" -> { levelIdx = 3; load(false); startMg(1); shoot?.arcade = true }
             "tower" -> { levelIdx = 5; load(false); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.CLIMB) }
             "uplink" -> { levelIdx = 5; load(false); finale = FinaleWorld((System.nanoTime() % 100000).toInt()); finaleScene = FinaleScene(finale!!); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.SIMON); finale?.let { fw -> fw.debugNewSeq() } }
         }
         fade = 0f; fadeDir = 0; cue = ""; applyCue()
     }
+    /** The arcade boss: his name and a long health bar at the bottom with the phase marks, your hearts, and what he shouts. */
+    private fun drawBossBar(c: Canvas, sw: ShootWorld) {
+        if (thumbMode) return
+        val w = width.toFloat(); val h = height.toFloat()
+        val y = barH + 66f * d
+        val l = 24f * d; val r = w - 24f * d
+        mgText(c, "THE MAYOR", w / 2f, y, 13f, 0xFFFFD84D.toInt())
+        p.style = Paint.Style.FILL; p.color = 0xFF1A0A0E.toInt(); c.drawRect(l, y + 8f * d, r, y + 22f * d, p)
+        val k = (sw.bossHp / ShootWorld.BOSS_HP).coerceIn(0f, 1f)
+        p.color = if (sw.bossPhase == 3) 0xFFFF2A3A.toInt() else if (sw.bossPhase == 2) 0xFFE04A2A.toInt() else 0xFFB82A3A.toInt(); c.drawRect(l, y + 8f * d, l + (r - l) * k, y + 22f * d, p)
+        if (sw.bossHitFlash > 0f) { p.color = a(Color.WHITE, 0x90); c.drawRect(l + (r - l) * k - 6f * d, y + 8f * d, l + (r - l) * k, y + 22f * d, p) }
+        p.color = Color.BLACK; for (m in floatArrayOf(0.33f, 0.66f)) c.drawRect(l + (r - l) * m - 1f * d, y + 6f * d, l + (r - l) * m + 1f * d, y + 24f * d, p)
+        p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f * d; p.color = a(Color.WHITE, 0x88); c.drawRect(l, y + 8f * d, r, y + 22f * d, p); p.style = Paint.Style.FILL
+        mgText(c, "♥".repeat(sw.hearts.coerceAtLeast(0)) + "♡".repeat((ShootWorld.BOSS_HEARTS - sw.hearts).coerceAtLeast(0)), w / 2f, y + 42f * d, 14f, 0xFFFF6A7A.toInt())
+        if (sw.bossLineT > 0f) mgText(c, sw.bossLine, w / 2f, y + 64f * d, 12f, if (sw.bossPhase >= 3) 0xFFFF6A6A.toInt() else Color.WHITE)
+        else if (sw.stunT > 0f) mgText(c, "HE'S DAZED! LET HIM HAVE IT!", w / 2f, y + 64f * d, 11f, 0xFFFFD84D.toInt())
+        if (sw.bossDeadT >= 0f) mgText(c, "THE MAYOR IS DOWN", w / 2f, h / 2f - 60f * d, 24f, a(0xFF3BFF9A.toInt(), (min(1f, sw.bossDeadT) * 255).toInt()))
+        if (sw.phaseT < 6f) mgText(c, "WATCH FOR HIS WARNINGS. ROLL THROUGH WHAT YOU CAN'T DODGE.", w / 2f, h - botInset - 150f * d, 9f, a(Color.WHITE, 0xAA), false)
+    }
+
     // ---------- the hangar (arcade jetpack): bank the coins you collect, buy jetpacks that fly differently ----------
     private var hangar = false
     private val hangarRows = ArrayList<RectF>()
@@ -176,7 +196,8 @@ internal class DeadDropView(
         }
         shoot?.let { sw ->
             sw.update(dt, ix, iy, mag, gunId >= 0); if (soundOn) for (e in sw.events) DeadLetterSfx.play(e); sw.events.clear()
-            arcScore = sw.npcs.count { !it.civ && !it.hostage && it.dead } * 100
+            arcScore = sw.npcs.count { !it.civ && !it.hostage && it.dead } * 100 + (if (sw.bossPhase > 0) ((ShootWorld.BOSS_HP - sw.bossHp) * 5f).toInt() else 0)
+            if (sw.bossWon) { arcScore += 5000 + sw.hearts * 500; arcadeOver(won = true) }
             if (sw.phase == ShootWorld.Phase.DEAD) { deadT += dt; if (deadT > 1f) arcadeOver() }
             if (sw.phase == ShootWorld.Phase.FINALE) { arcScore += 2000; arcadeOver(won = true) }
         }
@@ -204,6 +225,7 @@ internal class DeadDropView(
     }
     /** The arcade's score, lives and the game-over card, over whatever is on screen. */
     private fun drawArcade(c: Canvas) {
+        if (thumbMode) return
         val id = arcadeId ?: return
         val w = width.toFloat(); val h = height.toFloat()
         val y = barH + 26f * d
@@ -220,7 +242,7 @@ internal class DeadDropView(
         if (arcOver) {
             val k = (arcOverT / 0.5f).coerceIn(0f, 1f)
             p.color = a(Color.BLACK, (k * 0xC8).toInt()); c.drawRect(0f, 0f, w, h, p)
-            mgText(c, if (arcWon) "HALL CLEARED" else "GAME OVER", w / 2f, h / 2f - 30f * d, 26f, a(if (arcWon) 0xFF3BFF9A.toInt() else 0xFFFF4A5A.toInt(), (k * 255).toInt()))
+            mgText(c, if (arcWon) (if (id == "hall") "THE MAYOR IS DEAD" else "HALL CLEARED") else "GAME OVER", w / 2f, h / 2f - 30f * d, 26f, a(if (arcWon) 0xFF3BFF9A.toInt() else 0xFFFF4A5A.toInt(), (k * 255).toInt()))
             mgText(c, "SCORE  $arcScore", w / 2f, h / 2f + 4f * d, 15f, a(0xFFFFD84D.toInt(), (k * 255).toInt()))
             mgText(c, if (arcScore >= best(id) && arcScore > 0) "A NEW BEST!" else "BEST  ${best(id)}", w / 2f, h / 2f + 28f * d, 12f, a(Color.WHITE, (k * 0xCC).toInt()))
             if (id == "fly") fly?.let { f -> mgText(c, "+${f.coins} COINS TO THE BANK  (${bank})", w / 2f, h / 2f + 46f * d, 11f, a(0xFFFFD84D.toInt(), (k * 0xDD).toInt())) }
@@ -229,6 +251,9 @@ internal class DeadDropView(
     }
     internal fun isChoosing() = choosing
     internal fun debugArcade(id: String) = startArcade(id)
+    internal fun debugShoot() = shoot
+    internal fun debugFly() = fly
+    internal fun debugThrust(on: Boolean) { thrustId = if (on) 99 else -1 }
     internal fun debugArcadeOver() = arcOver
     internal fun debugArcadeScore() = arcScore
     private val d = resources.displayMetrics.density
@@ -279,6 +304,7 @@ internal class DeadDropView(
                     // the mayor's door: silence, then "meeting the mayor" from the kick on the door until he kicks you in the head
                     ShootWorld.Phase.FINALE -> if (sw.mayorMusic) Cue("mayor", 1f) else Cue("", cut = 0.05f)
                     ShootWorld.Phase.DONE -> Cue("")
+                    ShootWorld.Phase.BOSS -> if (sw.bossDeadT >= 0f) Cue("", cut = 0.4f) else Cue("mayor", 1f)
                 }
             }
             "prison" -> return Cue("synth")
@@ -503,7 +529,10 @@ internal class DeadDropView(
         mgText(c, "TAP ANYWHERE TO CLOSE", w / 2f, bot - 12f * d, 9f, a(Color.WHITE, 0x66), false)
     }
 
+    /** Taking the menu's action shots: no words or buttons over the game. */
+    internal var thumbMode = false
     private fun mgText(c: Canvas, text: String, x: Float, y: Float, size: Float, color: Int, bold: Boolean = true) {
+        if (thumbMode) return
         p.style = Paint.Style.FILL; p.typeface = if (bold) monoBold else mono; p.textAlign = Paint.Align.CENTER; p.textSize = size * d; p.color = color; p.letterSpacing = 0.05f
         c.drawText(text, x, y, p); p.letterSpacing = 0f
     }
@@ -657,11 +686,12 @@ internal class DeadDropView(
             p.style = Paint.Style.STROKE; p.strokeWidth = 2f * d; p.color = a(gold, 0xCC); c.drawCircle(gunCx, joyCy, gunR, p); p.style = Paint.Style.FILL
             mgText(c, "JUMP", gunCx, joyCy + 4f * d, 12f, a(Color.WHITE, 0xEE))
         }
-        if (mgName == "shoot" && shoot?.phase == ShootWorld.Phase.PLAY) {
+        if (mgName == "shoot" && shoot?.phase == ShootWorld.Phase.BOSS) drawBossBar(c, shoot!!)
+        if (mgName == "shoot" && (shoot?.phase == ShootWorld.Phase.PLAY || shoot?.phase == ShootWorld.Phase.BOSS)) {
             val sw = shoot!!
             val cy = joyCy
             // GUN: hold to shoot the closest officer you can see
-            val hasT = sw.nearestTarget() != null
+            val hasT = sw.nearestTarget() != null || sw.phase == ShootWorld.Phase.BOSS
             val red = 0xFFFF6A6A.toInt()
             p.style = Paint.Style.FILL; p.color = a(Color.BLACK, 0x55); c.drawCircle(gunCx, cy, gunR + 4f * d, p)
             p.color = a(red, if (gunId >= 0) 0xAA else if (hasT) 0x66 else 0x2A); c.drawCircle(gunCx, cy, gunR - 4f * d, p)
@@ -748,6 +778,14 @@ internal class DeadDropView(
         const val GUN_HANDED = 14.6f              // in the cruiser: "Here. Take my gun."
     }
 
+    private val thumbs = HashMap<String, android.graphics.Bitmap?>()
+    private val thumbPaint = Paint().apply { isFilterBitmap = true }
+    /** The action shot for a game on the menu (made by ArcadeThumbsTest). */
+    private fun thumb(id: String): android.graphics.Bitmap? = thumbs.getOrPut(id) {
+        val res = when (id) { "maze" -> R.drawable.dl_thumb_maze; "belt" -> R.drawable.dl_thumb_belt; "fly" -> R.drawable.dl_thumb_fly; "hall" -> R.drawable.dl_thumb_hall; "tower" -> R.drawable.dl_thumb_tower; else -> R.drawable.dl_thumb_uplink }
+        runCatching { android.graphics.BitmapFactory.decodeResource(resources, res) }.getOrNull()
+    }
+
     /** After the game is beaten: pick any of the six letters to play. */
     private fun drawChooser(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
@@ -759,25 +797,33 @@ internal class DeadDropView(
         p.typeface = mono; p.letterSpacing = 0.15f; p.textSize = 12f * d; p.color = a(Color.WHITE, 0x99)
         c.drawText("THE ARCADE", w / 2, top + 46f * d, p)
         chooserRows.clear()
-        val rowH = min(84f * d, (h - top - 80f * d - botInset - 20f * d) / (ARCADE.size + 1))
+        // one row per game, each with an action shot from the game on the left so you can see what you're picking
+        val rowH = min(118f * d, (h - top - 70f * d - botInset - 20f * d) / (ARCADE.size + 0.6f))
         for ((i, g) in ARCADE.withIndex()) {
-            val y0 = top + 70f * d + i * rowH
-            val r = RectF(20f * d, y0, w - 20f * d, y0 + rowH - 8f * d); chooserRows += r
+            val y0 = top + 64f * d + i * rowH
+            val r = RectF(16f * d, y0, w - 16f * d, y0 + rowH - 8f * d); chooserRows += r
             val accent = levels[when (g.first) { "maze" -> 1; "belt", "fly" -> 2; "hall" -> 3; else -> 5 }].pal.accent
             p.style = Paint.Style.FILL; p.color = 0xFF0A0E16.toInt(); c.drawRoundRect(r, 6f * d, 6f * d, p)
-            p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(accent, 0x88); c.drawRoundRect(r, 6f * d, 6f * d, p)
+            val th = r.height() - 12f * d; val tw = th * 4f / 3f
+            val tr = RectF(r.left + 6f * d, r.top + 6f * d, r.left + 6f * d + tw, r.top + 6f * d + th)
+            thumb(g.first)?.let { bm -> c.save(); val clip = Path().apply { addRoundRect(tr, 4f * d, 4f * d, Path.Direction.CW) }; c.clipPath(clip); c.drawBitmap(bm, null, tr, thumbPaint); c.restore() }
+            p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(accent, 0x88); c.drawRoundRect(r, 6f * d, 6f * d, p); p.color = a(accent, 0x55); c.drawRoundRect(tr, 4f * d, 4f * d, p)
             p.style = Paint.Style.FILL; p.textAlign = Paint.Align.LEFT
-            p.typeface = monoBold; p.letterSpacing = 0.04f; p.textSize = 16f * d; p.color = Color.WHITE
-            c.drawText(g.second, r.left + 18f * d, r.centerY() - 2f * d, p)
-            p.typeface = mono; p.letterSpacing = 0.1f; p.textSize = 10f * d; p.color = a(accent, 0xDD)
-            c.drawText(ARCADE_HOW[g.first] ?: "", r.left + 18f * d, r.centerY() + 16f * d, p)
-            p.textAlign = Paint.Align.RIGHT; p.typeface = monoBold; p.textSize = 11f * d; p.color = 0xFFFFD84D.toInt()
-            c.drawText("BEST ${best(g.first)}", r.right - 16f * d, r.centerY() + 4f * d, p)
+            val tx = tr.right + 12f * d; val room = r.right - tx - 8f * d
+            p.typeface = monoBold; p.letterSpacing = 0.04f; p.textSize = 15f * d; p.color = Color.WHITE
+            while (p.measureText(g.second) > room && p.textSize > 10f * d) p.textSize -= 0.5f * d
+            c.drawText(g.second, tx, r.centerY() - 10f * d, p)
+            p.typeface = mono; p.letterSpacing = 0.06f; p.textSize = 9.5f * d; p.color = a(accent, 0xDD)
+            val how = ARCADE_HOW[g.first] ?: ""
+            while (p.measureText(how) > room && p.textSize > 7f * d) p.textSize -= 0.5f * d
+            c.drawText(how, tx, r.centerY() + 8f * d, p)
+            p.typeface = monoBold; p.textSize = 11f * d; p.color = 0xFFFFD84D.toInt()
+            c.drawText("BEST ${best(g.first)}", tx, r.centerY() + 26f * d, p)
             p.textAlign = Paint.Align.CENTER
         }
         run {
-            val y0 = top + 70f * d + ARCADE.size * rowH
-            val r = RectF(20f * d, y0, w - 20f * d, y0 + rowH - 8f * d); chooserRows += r
+            val y0 = top + 64f * d + ARCADE.size * rowH
+            val r = RectF(16f * d, y0, w - 16f * d, y0 + max(44f * d, rowH * 0.55f)); chooserRows += r
             p.style = Paint.Style.STROKE; p.strokeWidth = 1f * d; p.color = a(Color.WHITE, 0x44); c.drawRoundRect(r, 6f * d, 6f * d, p)
             p.style = Paint.Style.FILL; p.typeface = mono; p.letterSpacing = 0.15f; p.textSize = 12f * d; p.color = a(Color.WHITE, 0xAA)
             c.drawText("THE STORY, FROM THE START", w / 2, r.centerY() + 4f * d, p)

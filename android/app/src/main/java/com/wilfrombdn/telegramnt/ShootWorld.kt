@@ -36,7 +36,7 @@ internal class ShootSpec(
 )
 
 internal class ShootWorld(val spec: ShootSpec) {
-    enum class Phase { INTRO, PLAY, FINALE, DEAD, DONE }
+    enum class Phase { INTRO, PLAY, FINALE, DEAD, DONE, BOSS }
 
 
     class Npc(val id: Int, var x: Float, var y: Float, var face: Float, val civ: Boolean, val room: Int, val swat: Boolean) {
@@ -113,7 +113,7 @@ internal class ShootWorld(val spec: ShootSpec) {
         return false
     }
     /** Hiding: against a wall, not shooting or throwing. Nothing can hit you. */
-    val hidden get() = phase == Phase.PLAY && nearWall && sinceFire > 0.6f
+    val hidden get() = phase == Phase.PLAY && nearWall && sinceFire > 0.6f      // (not in the boss fight: he doesn't care where you hide)
     /** Where a grenade would land while you're dragging from the grenade button (null when you aren't). */
     var aimAt: Pair<Float, Float>? = null; private set
     var rollT = 0f; var rollCd = 0f; private var rdx = 0f; private var rdy = 0f
@@ -217,10 +217,11 @@ internal class ShootWorld(val spec: ShootSpec) {
         when (phase) {
             Phase.INTRO -> intro(dt)
             Phase.PLAY -> play(dt, ix, iy, mag, fireHeld)
+            Phase.BOSS -> { play(dt, ix, iy, mag, fireHeld); bossTick(dt) }
             Phase.FINALE -> finale(dt)
             else -> {}
         }
-        if (phase == Phase.PLAY || phase == Phase.INTRO) npcsUpdate(dt)
+        if (phase == Phase.PLAY || phase == Phase.INTRO || phase == Phase.BOSS) npcsUpdate(dt)
         if (phase != Phase.FINALE && phase != Phase.DONE) { bulletsUpdate(dt); grenadesUpdate(dt) }
         sparks.removeAll { it.life -= dt; it.life <= 0f }
         blasts.removeAll { it.life -= dt; it.life <= 0f }
@@ -353,13 +354,16 @@ internal class ShootWorld(val spec: ShootSpec) {
                 if (!blockedAt(px, ny, 0.3f)) py = ny
             }
             val tgt = nearestTarget()
-            if (fireHeld && tgt != null) {
+            val boss = phase == Phase.BOSS && bossHp > 0f && clearLine(px, py, mayorX, mayorY) && (tgt == null || hypot(mayorX - px, mayorY - py) < hypot(tgt.x - px, tgt.y - py) + 2f)
+            if (fireHeld && boss) { face = atan2(mayorY - py, mayorX - px); if (fireCd <= 0f) shoot(face) }
+            else if (fireHeld && tgt != null) {
                 face = atan2(tgt.y - py, tgt.x - px)
                 if (fireCd <= 0f) shoot(face)
             } else if (moving) face = atan2(iy, ix)
         }
+        if (phase != Phase.PLAY) return
         checkClears()
-        if (mayorUnlocked && px in 6.0f..10.0f && py < 12.7f) { startFinale() }
+        if (mayorUnlocked && px in 6.0f..10.0f && py < 12.7f) { if (arcade) startBoss() else startFinale() }
     }
 
     /** The officer the gun button would shoot at: the closest one you can see. */
@@ -389,7 +393,7 @@ internal class ShootWorld(val spec: ShootSpec) {
 
     /** Swipe with a second finger while you move: a quick roll that bullets pass over. */
     fun roll(dx: Float, dy: Float) {
-        if (phase != Phase.PLAY || rollT > 0f || rollCd > 0f) return
+        if ((phase != Phase.PLAY && phase != Phase.BOSS) || rollT > 0f || rollCd > 0f) return
         val l = hypot(dx, dy); if (l < 0.01f) return
         rdx = dx / l; rdy = dy / l; rollT = 0.42f; rollCd = 0.95f; face = atan2(rdy, rdx)
     }
@@ -412,11 +416,12 @@ internal class ShootWorld(val spec: ShootSpec) {
         const val IDLE = 0; const val ALERT = 1; const val ENGAGE = 2; const val SEARCH = 3; const val FLEE = 4; const val COWER = 5; const val AIMED = 6; const val EVAC = 7
         val D4 = listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)
         const val THROW_MAX = 10.5f; const val THROW_MIN = 3.0f; const val BLAST = 2.5f
+        const val BOSS_HP = 600f; const val GUN_DMG = 6f; const val GRENADE_DMG = 45f; const val BOSS_HEARTS = 5; const val LOB_R = 1.5f
     }
 
     /** While dragging from the grenade button: [k] is how far you've dragged (0..1), (dx, dy) which way. Shows where it would land. */
     fun aimGrenade(dx: Float, dy: Float, k: Float) {
-        if (phase != Phase.PLAY) { aimAt = null; return }
+        if (phase != Phase.PLAY && phase != Phase.BOSS) { aimAt = null; return }
         val l = hypot(dx, dy); if (l < 0.01f) { aimAt = null; return }
         val dist = THROW_MIN + (THROW_MAX - THROW_MIN) * k.coerceIn(0f, 1f)
         aimAt = landing(px + dx / l * dist, py + dy / l * dist)
@@ -425,7 +430,7 @@ internal class ShootWorld(val spec: ShootSpec) {
     /** Let go: the grenade is lobbed where you aimed. Returns why not, or null if it was thrown. */
     fun throwAimed(): String? {
         val at = aimAt ?: return "DRAG TO AIM"; aimAt = null
-        if (phase != Phase.PLAY) return "NOT NOW"
+        if (phase != Phase.PLAY && phase != Phase.BOSS) return "NOT NOW"
         if (grenades <= 0) return "NO GRENADES"
         if (grenCd > 0f) return "WAIT"
         val dist = hypot(at.first - px, at.second - py)
@@ -442,6 +447,7 @@ internal class ShootWorld(val spec: ShootSpec) {
 
     /** Throw at the biggest group of officers you can see that is in range. Returns why not, or null if it was thrown. */
     fun throwGrenade(): String? {
+        if (phase == Phase.BOSS) { if (grenades <= 0) return "NO GRENADES"; if (grenCd > 0f) return "WAIT"; val d = hypot(mayorX - px, mayorY - py).coerceIn(THROW_MIN, THROW_MAX); aimGrenade(mayorX - px, mayorY - py, (d - THROW_MIN) / (THROW_MAX - THROW_MIN)); return throwAimed() }
         if (phase != Phase.PLAY) return "NOT NOW"
         if (grenades <= 0) return "NO GRENADES"
         if (grenCd > 0f) return "WAIT"
@@ -500,6 +506,7 @@ internal class ShootWorld(val spec: ShootSpec) {
             kill(n)
         }
         if (phase == Phase.PLAY && !invulnerable && hypot(px - x, py - y) < BLAST && clearLine(x, y, px, py) && rnd.nextFloat() >= shelteredFrom(x, y, px, py) * 0.6f) die()
+        if (phase == Phase.BOSS && bossHp > 0f && hypot(mayorX - x, mayorY - y) < BLAST + 0.6f) hurtBoss(GRENADE_DMG)
         alertNear(x, y, 13f)
         for (n in npcs) if (!n.civ && !n.dead && !n.hostage && n.state != ENGAGE) { if (hypot(n.x - x, n.y - y) < 13f) { n.state = ALERT; n.react = 0.2f; n.lastX = px; n.lastY = py } }
     }
@@ -628,7 +635,7 @@ internal class ShootWorld(val spec: ShootSpec) {
                 n.crouchT -= dt
                 if (n.crouchT <= 0f) { n.crouch = !n.crouch; n.crouchT = if (n.crouch) 0.7f + rnd.nextFloat() * 0.9f else 1.0f + rnd.nextFloat() * 0.8f }
             } else n.crouch = false
-            if (!n.crouch && n.cd <= 0f && abs(angleDiff(n.face, atan2(py - n.y, px - n.x))) < 0.22f && phase == Phase.PLAY) {
+            if (!n.crouch && n.cd <= 0f && abs(angleDiff(n.face, atan2(py - n.y, px - n.x))) < 0.22f && (phase == Phase.PLAY || phase == Phase.BOSS)) {
                 val spread = (if (n.swat) 0.17f else 0.26f)
                 val ang = atan2(py - n.y, px - n.x) + (rnd.nextFloat() - 0.5f) * spread
                 val sp = if (n.swat) 13.5f else 12f
@@ -665,6 +672,7 @@ internal class ShootWorld(val spec: ShootSpec) {
                 val cv = coverOf(tc, tr)
                 if (cv > 0f && b.travel > 0.9f) { b.cover = 1.5f; b.coverP = max(b.coverP, cv) } else if (b.cover > 0f) b.cover = max(0f, b.cover - sl)
                 if (b.harmless) { val h = hostage!!; if (hypot(h.x - b.x, h.y - b.y) < 0.5f) { gone = true; break } else continue }
+                if (b.mine && phase == Phase.BOSS && bossHp > 0f && hypot(mayorX - b.x, mayorY - b.y) < 0.85f) { sparks += Spark(b.x, b.y); hurtBoss(GUN_DMG); gone = true; break }
                 if (b.mine) {
                     for (n in npcs) if (!n.dead && !n.hostage && !n.gone && hypot(n.x - b.x, n.y - b.y) < 0.4f) {
                         if (soaked(b, n.crouched)) { sparks += Spark(b.x, b.y); gone = true; break }
@@ -677,6 +685,9 @@ internal class ShootWorld(val spec: ShootSpec) {
                     for (n in npcs) if (n.civ && !n.dead && !n.gone && hypot(n.x - b.x, n.y - b.y) < 0.35f) {
                         if (soaked(b, n.crouched)) { sparks += Spark(b.x, b.y); gone = true; break }
                         kill(n); gone = true; break
+                    }
+                    if (!gone && phase == Phase.BOSS && !invulnerable && hurtT <= 0f && hypot(px - b.x, py - b.y) < 0.34f) {
+                        if (b.cover > 0f && rnd.nextFloat() < 0.5f) { sparks += Spark(b.x, b.y); gone = true } else { hurtMe(); gone = true }
                     }
                     if (!gone && phase == Phase.PLAY && !invulnerable && hypot(px - b.x, py - b.y) < 0.34f) {
                         val miss = when { hidden -> 1f; b.cover > 0f -> 0.9f; nearWall -> 0.4f; else -> 0f }
@@ -695,6 +706,137 @@ internal class ShootWorld(val spec: ShootSpec) {
         val p = if (crouched) max(b.coverP, 0.9f) else b.coverP
         return rnd.nextFloat() < p
     }
+
+    // ---------- the arcade's boss fight: the mayor ----------
+    // After the hall is cleared, the mayor's door opens on a fight instead of the story's ending. He has a long health bar and three
+    // phases. Every attack is shown before it lands (that's how you predict it): a red line where he'll charge, gun barrels raised
+    // and a fan of red ticks before he fires, a glowing ring before the shockwave of bullets, red circles where his grenades will
+    // land. A roll passes through anything. You have hearts here (one bullet doesn't end it), and your grenades come back slowly.
+    var arcade = false
+    var bossHp = 0f; private set
+    var bossPhase = 0; private set          // 1, 2, 3 (0 = not started)
+    var bossMove = ""; private set          // the attack he's doing: fan, charge, ring, lob ("" between)
+    var bossMoveT = 0f; private set
+    var bossWind = 0f; private set          // how long the warning lasts for this attack
+    var chargeX = 0f; var chargeY = 0f      // where he'll charge to
+    var staggerT = 0f; private set          // between phases: he reels and shouts (can't be hurt)
+    var stunT = 0f; private set             // he charged into a wall: dazed, takes double damage
+    var bossDeadT = -1f; private set
+    var bossLine = ""; var bossLineT = 0f
+    var hearts = 0; private set
+    var hurtT = 0f; private set
+    var bossHitFlash = 0f; private set
+    private var bossNext = 1.5f
+    private var grenRegen = 0f
+    private var moveIdx = 0
+    private var fanShots = 0; private var fanT = 0f
+    val lobs = ArrayList<FloatArray>()      // x, y, time left
+    val bossWon get() = bossDeadT > 2.8f
+
+    private fun startBoss() {
+        phase = Phase.BOSS; phaseT = 0f; bullets.clear(); grenadesAir.clear()
+        for (d in spec.mayorDoors) closed.remove(d)
+        bossHp = BOSS_HP; bossPhase = 1; hearts = BOSS_HEARTS; grenades = max(grenades, 3)
+        mayorX = 7.5f; mayorY = 6.2f; px = 7.5f; py = 10.2f; bossNext = 2.2f; bossMove = ""
+        sayBoss("SO. THE CLERK WHO WON'T STAY DEAD.")
+        events += "kick"; shake = 0.6f
+    }
+    /** For tests and the skip arrow in the arcade: straight into the fight. */
+    internal fun debugBoss() { mayorUnlocked = true; startBoss() }
+    internal fun debugHurtBoss(dmg: Float) { staggerT = 0f; hurtBoss(dmg) }
+    internal fun debugShootMe() { bullets += Bullet(px - 0.5f, py, 12f, 0f, false) }
+    private fun sayBoss(l: String) { bossLine = l; bossLineT = readTime(l, 30f) }
+    private fun hurtBoss(dmg: Float) {
+        if (staggerT > 0f || bossHp <= 0f) return
+        bossHp -= dmg * (if (stunT > 0f) 2f else 1f); bossHitFlash = 0.12f
+        val next = when { bossPhase == 1 && bossHp <= BOSS_HP * 0.66f -> 2; bossPhase == 2 && bossHp <= BOSS_HP * 0.33f -> 3; else -> bossPhase }
+        if (bossHp <= 0f) { bossHp = 0f; bossDeadT = 0f; bossMove = ""; lobs.clear(); sayBoss("NO... THIS IS MY... CITY..."); events += "dome"; shake = 0.8f; flash = 0.3f; for (n in npcs) if (!n.civ && !n.dead && !n.hostage) n.state = FLEE; return }
+        if (next != bossPhase) {
+            bossPhase = next; staggerT = 1.8f; bossMove = ""; stunT = 0f; shake = 0.7f; events += "thrown"
+            sayBoss(if (next == 2) "GUARDS! GET IN HERE AND KILL HIM!" else "ENOUGH! I'LL DO IT MYSELF!")
+            // reinforcements come through the door
+            val n = if (next == 2) 2 else 3
+            var id = npcs.maxOf { it.id } + 1
+            for (k in 0 until n) npcs += Npc(id++, 6.6f + k * 0.9f, 12.4f, -PI.toFloat() / 2, false, 0, next == 3).also { it.state = ENGAGE; it.lastX = px; it.lastY = py; it.cd = 1.2f + k * 0.4f; it.baseFace = it.face }
+        }
+    }
+    private fun hurtMe() {
+        if (hurtT > 0f || invulnerable) return
+        hearts--; hurtT = 1.1f; shake = 0.35f; events += "hit"
+        if (hearts <= 0) die()
+    }
+    private fun bossTick(dt: Float) {
+        bossHitFlash = max(0f, bossHitFlash - dt); hurtT = max(0f, hurtT - dt); bossLineT = max(0f, bossLineT - dt)
+        // grenades come back, one every few seconds
+        if (grenades < 5) { grenRegen += dt; if (grenRegen > 7f) { grenRegen = 0f; grenades++ } }
+        // grenades of his that land
+        val li = lobs.iterator(); while (li.hasNext()) { val l = li.next(); l[2] -= dt; if (l[2] <= 0f) { blasts += Blast(l[0], l[1]); scorch += l[0] to l[1]; shake = 0.4f; events += "boom"; if (hypot(px - l[0], py - l[1]) < LOB_R) hurtMe(); li.remove() } }
+        if (bossDeadT >= 0f) { bossDeadT += dt; return }
+        if (staggerT > 0f) { staggerT -= dt; return }
+        if (stunT > 0f) { stunT -= dt; return }
+        val rage = when (bossPhase) { 1 -> 1f; 2 -> 1.25f; else -> 1.55f }
+        // touching him hurts
+        if (hypot(px - mayorX, py - mayorY) < 0.9f) hurtMe()
+        if (bossMove.isEmpty()) {
+            // between attacks he walks round you, keeping his distance
+            val a = atan2(py - mayorY, px - mayorX); val d = hypot(px - mayorX, py - mayorY)
+            val want = if (d > 4.5f) 1f else if (d < 3f) -1f else 0f
+            val sx = cos(a) * want * 1.6f * rage * dt + cos(a + PI.toFloat() / 2) * 0.9f * dt
+            val sy = sin(a) * want * 1.6f * rage * dt + sin(a + PI.toFloat() / 2) * 0.9f * dt
+            if (!blockedAt(mayorX + sx, mayorY, 0.45f)) mayorX += sx; if (!blockedAt(mayorX, mayorY + sy, 0.45f)) mayorY += sy
+            mayorGun = a
+            bossNext -= dt
+            if (bossNext <= 0f) {
+                val moves = when (bossPhase) { 1 -> listOf("fan", "charge", "fan"); 2 -> listOf("fan", "ring", "charge", "ring"); else -> listOf("lob", "charge", "ring", "fan", "lob") }
+                bossMove = moves[moveIdx++ % moves.size]; bossMoveT = 0f
+                bossWind = when (bossMove) { "charge" -> 0.9f; "ring" -> 1.0f; "lob" -> 0.6f; else -> 0.75f } / (if (bossPhase == 3) 1.2f else 1f)
+                fanShots = 0; fanT = 0f
+                if (bossMove == "charge") { chargeX = px; chargeY = py; events += "stomp3" }
+                if (bossMove == "lob") { for (k in 0 until (if (bossPhase == 3) 3 else 2)) { val ox = if (k == 0) 0f else (rnd.nextFloat() - 0.5f) * 3.5f; val oy = if (k == 0) 0f else (rnd.nextFloat() - 0.5f) * 3.5f
+                    var lx = px + ox; var ly = py + oy; if (solid(floor(lx).toInt(), floor(ly).toInt())) { lx = px; ly = py }; lobs += floatArrayOf(lx, ly, 1.6f + k * 0.25f) }; events += "throw" }
+            }
+            return
+        }
+        bossMoveT += dt
+        val tt = bossMoveT - bossWind          // < 0: the warning; >= 0: it happens
+        when (bossMove) {
+            "fan" -> {
+                if (tt < 0f) { mayorGun = atan2(py - mayorY, px - mayorX); return }
+                val volleys = if (bossPhase == 1) 2 else 3
+                fanT -= dt
+                if (fanT <= 0f && fanShots < volleys) {
+                    fanT = 0.35f; fanShots++
+                    val n = if (bossPhase == 1) 5 else 7; val spread = 0.9f
+                    for (k in 0 until n) { val a = mayorGun - spread / 2 + spread * k / (n - 1); bullets += Bullet(mayorX + cos(a) * 0.8f, mayorY + sin(a) * 0.8f, cos(a) * 9f * rage, sin(a) * 9f * rage, false) }
+                    events += "shot"; muzzle = 0.08f
+                }
+                if (fanShots >= volleys && fanT <= 0f) endMove(rage)
+            }
+            "charge" -> {
+                if (tt < 0f) return
+                val dx = chargeX - mayorX; val dy = chargeY - mayorY; val d = hypot(dx, dy)
+                val step = 10f * rage * dt
+                val nx = mayorX + dx / max(d, 0.01f) * step; val ny = mayorY + dy / max(d, 0.01f) * step
+                if (blockedAt(nx, ny, 0.45f)) { stunT = 1.6f; shake = 0.6f; events += "thrown"; endMove(rage); return }      // into a wall: dazed
+                mayorX = nx; mayorY = ny
+                if (d <= step + 0.05f) { // overshoots past the mark, then stops
+                    endMove(rage)
+                }
+                if (tt > 1.2f) endMove(rage)
+            }
+            "ring" -> {
+                if (tt < 0f) return
+                val n = if (bossPhase == 3) 18 else 14
+                val off = rnd.nextFloat()
+                for (k in 0 until n) { val a = (k + off) * 2f * PI.toFloat() / n; bullets += Bullet(mayorX + cos(a) * 0.9f, mayorY + sin(a) * 0.9f, cos(a) * 6.5f * rage, sin(a) * 6.5f * rage, false) }
+                events += "boom"; shake = 0.4f; endMove(rage)
+            }
+            "lob" -> if (tt >= 0f && lobs.isEmpty()) endMove(rage)
+        }
+    }
+    private fun endMove(rage: Float) { bossMove = ""; bossNext = (if (bossPhase == 1) 1.6f else 1.1f) / rage + rnd.nextFloat() * 0.6f }
+    /** 0..1 how far through the warning of the current attack he is (for the markers). */
+    val bossWarn get() = if (bossMove.isEmpty() || bossWind <= 0f) 0f else (bossMoveT / bossWind).coerceIn(0f, 1f)
 
     // ---------- the mayor's office ----------
     var ft = 0f

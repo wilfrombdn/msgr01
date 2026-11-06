@@ -297,6 +297,7 @@ internal class FinaleWorld(seed: Int = 6) {
 
     /** Skip straight to a stage (for tests and the skip arrow). */
     /** The arcade uplink: start from a fresh random pattern (the world's seed is new every game). */
+    internal fun debugScreen(i: Int) { arcadeRound = i; flipped.clear(); resetClimb() }
     internal fun debugNewSeq() { seq.clear(); repeat(SIMON_GOAL) { seq += rnd.nextInt(4) } }
     internal fun debugEnter(s: Stage) { next = null; fade = 0f; enter(s) }
 
