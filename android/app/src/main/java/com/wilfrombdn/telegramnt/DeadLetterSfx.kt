@@ -72,6 +72,7 @@ internal object DeadLetterSfx {
     }
     private fun makeMore(name: String): ShortArray? = when (name) {
         "breath" -> breath()
+        "cry" -> voice(41, 2.6f, 3).let { v -> ShortArray(v.size) { (v[it] * 0.55f).toInt().toShort() } }     // "PLEASE HELP ME!": a low, shouting man, cut off by the shot
         "cough" -> { val a = noise(0.18f, 0.5f, 10f, 0.25f, 29); val b = noise(0.2f, 0.4f, 12f, 0.25f, 31); ShortArray(a.size + 2400 + b.size) { when { it < a.size -> a[it]; it < a.size + 2400 -> 0; else -> b[it - a.size - 2400] } } }
         "doorfall" -> { val k = noise(0.3f, 1.6f, 10f, 0.35f, 37); val f = noise(1.8f, 1.6f, 2.2f, 0.06f, 41); val ring = tone(listOf(118f, 177f, 266f), 1.8f, 0.5f, 2.6f, square = true); val off = (RATE * 0.32f).toInt()
             ShortArray(off + f.size) { val i2 = it - off; ((if (it < k.size) k[it] else 0) + (if (i2 >= 0) f[i2] + ring[i2] else 0)).coerceIn(-32767, 32767).toShort() } }   // the kick, then the door crashing down
@@ -117,7 +118,7 @@ internal object DeadLetterSfx {
             fun step(x: Float): Float { val w = (2 * PI * f / RATE).toFloat(); val rr = 1f - w / (2f * q); val c = 2f * rr * kotlin.math.cos(w); val y = (1f - rr) * x + c * y1 - rr * rr * y2; y2 = y1; y1 = y; return y } }
         val f1 = Res(700f, 5f); val f2 = Res(1500f, 7f)
         var i = 0; var phase = 0f; var noiseL = 0f
-        val base = when (mood) { 0 -> 230f; 1 -> 285f; else -> 340f }
+        val base = when (mood) { 0 -> 230f; 1 -> 285f; 3 -> 150f; else -> 340f }
         while (i < n) {
             // a burst of syllables, then a gasp or a sob
             val burst = if (mood == 0) 1 + r.nextInt(3) else 3 + r.nextInt(6)
@@ -125,7 +126,7 @@ internal object DeadLetterSfx {
                 if (i >= n) break
                 val len = (RATE * (if (mood == 0) 0.14f + r.nextFloat() * 0.18f else 0.07f + r.nextFloat() * 0.11f)).toInt()
                 val va = vowels[r.nextInt(vowels.size)]; val vb = vowels[r.nextInt(vowels.size)]
-                val crack = r.nextFloat() < (if (mood == 2) 0.35f else 0.15f)                 // the voice breaks up high
+                val crack = r.nextFloat() < (if (mood >= 2) 0.35f else 0.15f)                 // the voice breaks up high
                 val p0 = base * (0.9f + r.nextFloat() * 0.25f) * (if (crack) 1.6f else 1f); val p1 = p0 * (if (mood == 0) 0.8f else 0.92f + r.nextFloat() * 0.2f)
                 val cons = r.nextInt(3)                                                       // a consonant at the start: none, hiss, pop
                 for (k in 0 until len) { if (i >= n) break
@@ -140,7 +141,7 @@ internal object DeadLetterSfx {
                     if (cons == 1 && k < cl) v = v * (k / cl.toFloat()) + (r.nextFloat() * 2f - 1f) * 0.5f * (1f - k / cl.toFloat())
                     if (cons == 2 && k < cl / 3) v += (r.nextFloat() * 2f - 1f) * 0.9f
                     val env = min(1f, k / (RATE * 0.012f)) * min(1f, (len - k) / (RATE * 0.025f))
-                    out[i] = v * env * (if (b == burst - 1 && mood == 2) 1.25f else 1f); i++ }
+                    out[i] = v * env * (if (b == burst - 1 && mood >= 2) 1.25f else 1f); i++ }
                 i += (RATE * (0.01f + r.nextFloat() * 0.04f)).toInt()
             }
             // between bursts: a sharp gasp, or (broken) a shaky sob
@@ -156,7 +157,7 @@ internal object DeadLetterSfx {
         for (k in 0 until n) {
             hp = 0.93f * (hp + out[k] - lastIn); lastIn = out[k]
             lp += (hp - lp) * 0.55f
-            val driven = kotlin.math.tanh(lp * (if (mood == 2) 4.5f else 3.2f))
+            val driven = kotlin.math.tanh(lp * (if (mood >= 2) 4.5f else 3.2f))
             val hiss = (r.nextFloat() * 2f - 1f) * 0.05f
             res[k] = ((driven * 0.62f + hiss) * 0.75f * 32767).toInt().coerceIn(-32767, 32767).toShort()
         }
@@ -187,8 +188,8 @@ internal object DeadLetterSfx {
     /** The samples of a sound (22050 Hz mono), for tests. */
     internal fun pcm(name: String): ShortArray? = synchronized(cache) { cache.getOrPut(name) { make(name) ?: return null } }
     internal const val SAMPLE_RATE = RATE
-    /** The voice on the call: 0.8, then 30% quieter again. */
-    internal const val VOICE_GAIN = 0.56f
+    /** The voice on the call: 0.8, then 30% quieter, then quieter again (it was far too loud). */
+    internal const val VOICE_GAIN = 0.3f
 
     fun play(name: String) {
         val pcm = synchronized(cache) { cache.getOrPut(name) { make(name) ?: return } }

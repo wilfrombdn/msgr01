@@ -1112,6 +1112,12 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
             big(YX + 14, FLOOR, PS) {
                 lying(c, YX + 14, FLOOR, you, false, false)
                 rect(c, YX + 18, FLOOR - 7, 7, 6, you.hair)                                                   // face down: the back of your head
+                val bl = K(0xFF7A0E1A); val bd = K(0xFF4A0810); val bh = K(0xFFB02232); val lx = YX + 14
+                rect(c, lx - 4, FLOOR - 7, 9, 6, a(bl, 0xE0)); rect(c, lx - 4, FLOOR - 4, 6, 3, a(bd, 0xE0)); rect(c, lx + 1, FLOOR - 6, 4, 3, a(bh, 0xC0))   // the shirt soaked through
+                rect(c, lx - 13, FLOOR - 5, 8, 4, a(bl, 0xC0)); rect(c, lx - 9, FLOOR - 5, 3, 4, a(bd, 0xE0))                                              // the trousers
+                rect(c, lx + 5, FLOOR - 7, 7, 3, a(bd, 0xF0)); rect(c, lx + 8, FLOOR - 4, 4, 2, a(bl, 0xE0)); rect(c, lx + 4, FLOOR - 2, 10, 2, a(bd, 0xE0))   // head wound and the blood under his face
+                for ((wx, wy) in listOf(-2 to -6, 1 to -4, 3 to -6, -6 to -4, 6 to -6)) { rect(c, lx + wx, FLOOR + wy, 2, 2, K(0xFF2A0509)); px(c, lx + wx, FLOOR + wy, K(0xFF000000)) }
+                px(c, lx - 1, FLOOR, bh); px(c, lx + 3, FLOOR, bh)
                 if (((t - FinaleWorld.DOWN) * 0.6f) % 1f < 0.3f && t < FinaleWorld.BLAM) rect(c, YX + 9, FLOOR - 8, 8, 1, lite0(you.shirt, 20))   // a shallow breath
             }
         }

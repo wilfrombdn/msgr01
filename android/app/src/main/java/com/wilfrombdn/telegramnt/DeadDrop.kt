@@ -660,9 +660,9 @@ internal class DeadDropView(
     }
 
     private companion object {
-        const val VOICE_VOL = 0.56f               // the voice on the call (DeadLetterSfx.VOICE_GAIN)
-        const val MUSIC_VOL = 0.624f              // the song under it: was 0.48, now 30% louder
-        const val CELL_FADE = 40f                 // the call-for-help song creeps in over this long
+        const val VOICE_VOL = 0.3f                // the voice on the call (DeadLetterSfx.VOICE_GAIN)
+        const val MUSIC_VOL = 1.0f                // the song under it: full
+        const val CELL_FADE = 16f                 // the call-for-help song creeps in over this long
         const val GUN_HANDED = 14.6f              // in the cruiser: "Here. Take my gun."
     }
 

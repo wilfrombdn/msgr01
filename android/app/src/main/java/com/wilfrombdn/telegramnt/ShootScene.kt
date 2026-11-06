@@ -429,7 +429,8 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
 
         // doors, tables thrown on their side, scorch marks and blood
         for (d in world.spec.hallDoors + world.spec.mayorDoors) if (d.first % 2 == 1 && world.doorClosed(d.first, d.second)) doorArt(c, d.first, d.second)
-        for ((tc, tr) in world.tipped) tippedTable(c, tc * S, tr * S)
+        for (f in world.flipped) flippedDesk(c, f)
+        for (dd in world.debris) debris(c, dd)
         for ((bx, by) in world.scorch) { val x = (bx * S).roundToInt(); val y = (by * S).roundToInt(); rect(c, x - 14, y - 9, 28, 18, a(PX.K, 0x70)); rect(c, x - 9, y - 12, 18, 24, a(PX.K, 0x50)) }
         for ((bx, by) in world.decals) { val x = (bx * S).roundToInt(); val y = (by * S).roundToInt(); rect(c, x - 5, y - 2, 11, 6, K(0xFF7A0F1E)); rect(c, x - 2, y - 4, 6, 3, K(0xFF7A0F1E)); rect(c, x + 5, y + 1, 3, 2, K(0xFF7A0F1E)) }
 
@@ -484,6 +485,43 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
         c.restore()
         if (world.flash > 0f) { p.color = a(PX.W, (world.flash * 600f).toInt().coerceAtMost(0xC0)); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
         return frame
+    }
+
+    /** A whole desk thrown on its side: the underside and legs face the officers, the edge you hide behind faces you. */
+    private fun flippedDesk(c: Canvas, f: ShootWorld.Flipped) {
+        val x0 = f.c0 * S; val y0 = f.r0 * S; val w = (f.c1 - f.c0 + 1) * S; val h = (f.r1 - f.r0 + 1) * S
+        val under = K(0xFF2E1E12); val edge = K(0xFF6A4528); val face = K(0xFF3E2616); val leg = K(0xFF2A1C14)
+        rect(c, x0, y0, w, h, K(0xFF2A2E38))
+        val horiz = f.side == 0 || f.side == 2
+        if (horiz) {
+            val sy = if (f.side == 2) y0 + h - 8 else y0
+            val uy = if (f.side == 2) y0 + 3 else y0 + 8
+            rect(c, x0 + 1, uy, w - 2, h - 11, under); rect(c, x0 + 1, sy, w - 2, 8, face); rect(c, x0 + 1, if (f.side == 2) sy else sy + 6, w - 2, 2, edge)
+            rect(c, x0 + 1, sy + (if (f.side == 2) 8 else -1), w - 2, 2, a(PX.K, 0xA0))
+            var lx = x0 + 3; while (lx < x0 + w - 4) { val ly = if (f.side == 2) y0 - 3 else y0 + h - 2; rect(c, lx, ly, 2, 5, leg); lx += 24 }
+            rect(c, x0 + w - 5, if (f.side == 2) y0 - 3 else y0 + h - 2, 2, 5, leg)
+            for (k in 1 until (f.c1 - f.c0 + 1)) rect(c, x0 + k * S, uy, 1, h - 11, a(PX.K, 0x50))
+        } else {
+            val sx = if (f.side == 1) x0 + w - 8 else x0
+            val ux = if (f.side == 1) x0 + 3 else x0 + 8
+            rect(c, ux, y0 + 1, w - 11, h - 2, under); rect(c, sx, y0 + 1, 8, h - 2, face); rect(c, if (f.side == 1) sx else sx + 6, y0 + 1, 2, h - 2, edge)
+            rect(c, sx + (if (f.side == 1) 8 else -1), y0 + 1, 2, h - 2, a(PX.K, 0xA0))
+            var ly = y0 + 3; while (ly < y0 + h - 4) { val lx = if (f.side == 1) x0 - 3 else x0 + w - 2; rect(c, lx, ly, 5, 2, leg); ly += 24 }
+            rect(c, if (f.side == 1) x0 - 3 else x0 + w - 2, y0 + h - 5, 5, 2, leg)
+            for (k in 1 until (f.r1 - f.r0 + 1)) rect(c, ux, y0 + k * S, w - 11, 1, a(PX.K, 0x50))
+        }
+    }
+    /** Something that was on the desk, thrown to the floor (it flies for a third of a second, then lies there). */
+    private fun debris(c: Canvas, d: ShootWorld.Debris) {
+        val k = ((world.t - world.flipT) / 0.35f).coerceIn(0f, 1f)
+        val x = ((d.x0 + (d.x1 - d.x0) * k) * S).roundToInt(); val y = ((d.y0 + (d.y1 - d.y0) * k) * S).roundToInt() - (sin(k * PI.toFloat()) * 8f).roundToInt()
+        when (d.kind) {
+            0 -> { rect(c, x, y, 6, 4, PX.W); rect(c, x + 1, y + 1, 4, 1, K(0xFF9AA4B5)); px(c, x + 1, y + 2, K(0xFF9AA4B5)) }                       // a sheet of paper
+            1 -> { rect(c, x, y, 4, 4, K(0xFFB8B0A0)); rect(c, x + 1, y + 1, 2, 2, K(0xFF3A2010)); rect(c, x + 4, y + 1, 1, 2, K(0xFFB8B0A0)) }       // a mug and its coffee
+            2 -> { rect(c, x, y, 8, 5, K(0xFF2A2E38)); rect(c, x + 1, y + 1, 6, 3, K(0xFF4C7DFF)); rect(c, x, y + 4, 8, 1, K(0xFF8A929A)) }          // a laptop
+            3 -> { rect(c, x, y, 1, 5, K(0xFF2A4CC0)); rect(c, x + 2, y + 1, 3, 5, K(0xFF14141A)); px(c, x + 3, y + 2, K(0xFF4C7DFF)) }               // a pen and a phone
+            else -> { rect(c, x, y, 5, 2, K(0xFFC03030)); rect(c, x, y + 2, 5, 1, K(0xFF14141A)); rect(c, x + 6, y, 3, 4, PX.W) }                    // a stapler and a note
+        }
     }
 
     private fun tippedTable(c: Canvas, x: Int, y: Int) {
@@ -556,7 +594,7 @@ internal class ShootScene(private val world: ShootWorld) : PixelSprites() {
             if (w.phase == ShootWorld.Phase.DEAD) lying(c, fx, fy, clerk, true, false)
             else if (w.diving) folk(c, fx, fy + 2, dirOf(w.face), 0, clerk, false, false, 4)                                    // crouched behind the table
             else if (w.kickingTable) { folk(c, fx, fy, dirOf(w.face), 0, clerk, false, false); val kx = fx + (cos(w.face) * 7f).roundToInt(); val ky = fy - 4 + (sin(w.face) * 5f).roundToInt(); rect(c, kx - 2, ky - 1, 5, 3, clerk.pants); rect(c, kx - 1, ky, 3, 2, clerk.shoes) }   // the kick
-            else if (w.rollT > 0.04f) {
+            else if (w.rollT > 0.04f || w.introRoll) {
                 c.save(); c.rotate((clock * 1100f) % 360f, fx.toFloat(), (fy - 6).toFloat()); folk(c, fx, fy, 2, 1, clerk, false, false, 5); c.restore()
             } else {
                 folk(c, fx, fy, dirOf(w.face), if (w.moving) 1 + ((clock * 9f).toInt() % 2) else 0, clerk, false, true)

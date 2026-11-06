@@ -235,7 +235,7 @@ internal class ShootWorld(val spec: ShootSpec) {
         if (!shotTheHostage) { py = startY - walk; h.y = startY - 1.6f - walk }
         moving = t < 1.3f
         if (t >= HELP_T && !aimedAll) {
-            aimedAll = true
+            aimedAll = true; events += "cry"            // the hostage screams for help
             for (n in npcs) if (!n.dead && !n.hostage) { if (n.civ) n.state = COWER else { n.state = AIMED; n.lastX = px; n.lastY = py } }
         }
         if (t >= HELP_T) for (n in npcs) if (!n.civ && !n.dead && !n.hostage) n.face = turnToward(n.face, atan2(py - n.y, px - n.x), 6f * dt)
@@ -264,16 +264,17 @@ internal class ShootWorld(val spec: ShootSpec) {
             val k = ((t - D - 0.2f) / 0.55f).coerceIn(0f, 1f)
             px = diveFromX + (diveToX - diveFromX) * k; py = diveFromY + (diveToY - diveFromY) * k
             moving = k in 0.01f..0.99f
+            introRoll = k in 0.02f..0.98f
             // you throw his body aside as you go past
             val bx = bodyX0 + bodySide * 1.4f * min(1f, k * 1.5f)
             if (!solid(floor(bx).toInt(), floor(h.y).toInt())) h.x = bx
             val tb = tableHit
             if (tb != null) face = atan2(tb.second + 0.5f - py, tb.first + 0.5f - px)
-            if (t >= D + 0.8f && tb != null && tb !in tipped) { tipped += tb; shake = 0.3f; events += "kick" }
+            if (t >= D + 0.8f && tb != null && tb !in tipped) { flipTable(tb); shake = 0.3f; events += "kick" }
             kickingTable = t in D + 0.75f..D + 1.05f
             diving = t >= D + 1.05f
             if (t >= D + 1.6f) {
-                diving = false; kickingTable = false; phase = Phase.PLAY; phaseT = 0f; moving = false
+                diving = false; kickingTable = false; introRoll = false; phase = Phase.PLAY; phaseT = 0f; moving = false
                 for (n in npcs) if (!n.civ && !n.dead && !n.hostage) { n.state = ENGAGE; n.react = 0f; n.cd = 0.25f + rnd.nextFloat() * 0.7f; n.lastX = px; n.lastY = py; n.spotT = 0f }
             }
         }
@@ -284,6 +285,41 @@ internal class ShootWorld(val spec: ShootSpec) {
     /** The clerks, as you walk in. */
     fun civLine(n: Npc): String? = if (phase == Phase.INTRO && n.civ && t in 0.3f + (n.id % 4) * 0.25f..2.9f) CIV_LINES[n.id % CIV_LINES.size] else null
     var kickingTable = false; private set
+    /** The intro's roll to the table (the same tumble as the roll button). */
+    var introRoll = false; private set
+    class Flipped(val c0: Int, val r0: Int, val c1: Int, val r1: Int, val side: Int)     // a whole desk thrown over; [side] is the edge you are hiding behind (0 up, 1 right, 2 down, 3 left)
+    class Debris(val kind: Int, val x0: Float, val y0: Float, val x1: Float, val y1: Float)
+    val flipped = ArrayList<Flipped>()
+    val debris = ArrayList<Debris>()
+    var flipT = -9f; private set
+
+    /** Every table tile joined to [tb]. */
+    private fun tableGroup(tb: Pair<Int, Int>): List<Pair<Int, Int>> {
+        val out = ArrayList<Pair<Int, Int>>(); val todo = ArrayDeque<Pair<Int, Int>>(); todo += tb
+        while (todo.isNotEmpty() && out.size < 14) {
+            val q = todo.removeFirst(); if (q in out) continue
+            val ch = tile(q.first, q.second); if (ch != 't' && ch != 'd') continue
+            out += q; for ((dx, dy) in D4) todo += (q.first + dx) to (q.second + dy)
+        }
+        return out
+    }
+    /** You throw the whole desk over and everything on it spills across the floor. */
+    private fun flipTable(tb: Pair<Int, Int>) {
+        val g = tableGroup(tb)
+        for (q in g) tipped += q
+        val c0 = g.minOf { it.first }; val c1 = g.maxOf { it.first }; val r0 = g.minOf { it.second }; val r1 = g.maxOf { it.second }
+        val side = when { diveToY >= r1 + 1f -> 2; diveToY <= r0 -> 0; diveToX >= c1 + 1f -> 1; else -> 3 }
+        flipped += Flipped(c0, r0, c1, r1, side); flipT = t
+        // away from you, toward the officers
+        val ox = when (side) { 1 -> -1f; 3 -> 1f; else -> 0f }; val oy = when (side) { 2 -> -1f; 0 -> 1f; else -> 0f }
+        for ((i, q) in g.withIndex()) for (k in 0 until 3) {
+            val x0 = q.first + 0.2f + rnd.nextFloat() * 0.6f; val y0 = q.second + 0.2f + rnd.nextFloat() * 0.6f
+            var x1 = x0 + ox * (0.7f + rnd.nextFloat() * 1.3f) + (if (ox == 0f) (rnd.nextFloat() - 0.5f) * 2.2f else (rnd.nextFloat() - 0.5f) * 0.8f)
+            var y1 = y0 + oy * (0.7f + rnd.nextFloat() * 1.3f) + (if (oy == 0f) (rnd.nextFloat() - 0.5f) * 2.2f else (rnd.nextFloat() - 0.5f) * 0.8f)
+            if (solid(floor(x1).toInt(), floor(y1).toInt()) && (floor(x1).toInt() to floor(y1).toInt()) !in tipped) { x1 = x0 + (rnd.nextFloat() - 0.5f) * 0.6f; y1 = y0 + (rnd.nextFloat() - 0.5f) * 0.6f }
+            debris += Debris((i + k) % 5, x0, y0, x1, y1)
+        }
+    }
     /** Sounds for the view to play. */
     val events = ArrayList<String>()
 
