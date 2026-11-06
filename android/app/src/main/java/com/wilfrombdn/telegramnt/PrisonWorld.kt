@@ -89,7 +89,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     var msg = ""; private set
     var msgT = 0f; private set
     var msgBad = false; private set
-    private fun say(m: String, bad: Boolean = false) { msg = m; msgT = 3.2f; msgBad = bad }
+    private fun say(m: String, bad: Boolean = false) { msg = m; msgT = max(3.2f, readTime(m, 999f)); msgBad = bad }
 
     // ---------- the laundry ----------
     var carry = Carry.NONE; private set

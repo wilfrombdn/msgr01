@@ -3,6 +3,7 @@ package com.wilfrombdn.telegramnt
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.PorterDuff
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -26,15 +27,23 @@ internal class CineScene(val kind: Int) : PixelSprites() {
     val done get() = t >= duration
 
     /** The line shown under the picture right now (or null). */
-    fun caption(): String? = if (kind == 0) when {   // he finds you and reads the letter in the factory, then the plan in the car
-        t in 0.5f..2.3f -> "You again. What the fuck is going on?"
-        t in 2.6f..4.9f -> "Things are getting out of hand. Looks like you've got a plan."
-        t in 5.1f..7.0f -> "I've been on the wrong side long enough. Get in."
-        t in 14.6f..16.2f -> "Here. Take my gun."
-        t in 16.4f..18.4f -> "Use me as a hostage. It's the only way they let you in close."
-        t in 18.6f..20.4f -> "Nobody else gets through those doors."
-        else -> null }
-        else null
+    fun caption(): String? = if (kind == 0) lineNow()?.third else null
+
+    // he finds you and reads the letter in the factory, then the plan in the car
+    private val lines0 = listOf(
+        Triple(0.5f, 2.3f, "You again. What the fuck is going on?"),
+        Triple(2.6f, 4.9f, "Things are getting out of hand. Looks like you've got a plan."),
+        Triple(5.1f, 7.0f, "I've been on the wrong side long enough. Get in."),
+        Triple(14.6f, 16.2f, "Here. Take my gun."),
+        Triple(16.4f, 18.4f, "Use me as a hostage. It's the only way they let you in close."),
+        Triple(18.6f, 20.4f, "Nobody else gets through those doors."))
+    // the town hall front: SWAT shout, then the cop
+    private val lines1 = listOf(
+        Triple(4.0f, 6.4f, "HOLD YOUR FIRE! HE'S GOT AN OFFICER!"),
+        Triple(9.8f, 11.4f, "Easy... nobody move."))
+    private fun lineNow() = (if (kind == 0) lines0 else lines1).firstOrNull { t in it.first..it.second }
+    /** How fast the scene's clock runs: slower while someone is talking, so every line stays up long enough to read. */
+    val pace: Float get() = lineNow()?.let { min(1f, (it.second - it.first) / readTime(it.third, if (kind == 0) 999f else 24f)) } ?: 1f
 
     private fun ease(a: Float, b: Float, k: Float) = a + (b - a) * k.coerceIn(0f, 1f)
     private fun seg(t0: Float, t1: Float) = ((t - t0) / (t1 - t0)).coerceIn(0f, 1f)
@@ -598,11 +607,7 @@ internal class CineScene(val kind: Int) : PixelSprites() {
                 folk(c, plX, plY, 0, stepF, clerk, false, false)
                 rect(c, plX - 2, plY - 16, 4, 3, PX.K); rect(c, plX - 1, plY - 19, 2, 4, 0xFF9AA4B5.toInt())                          // the gun, on the cop's back
             }
-            val line = when {
-                t in 4.0f..6.4f -> "HOLD YOUR FIRE! HE'S GOT AN OFFICER!" to (t - 4.0f)
-                t in 9.8f..11.4f -> "Easy... nobody move." to (t - 9.8f)
-                else -> null
-            }
+            val line = lineNow()?.let { it.third to (t - it.first) }
             if (line != null) { val (bx, by) = if (t < 9f) 92 to 84 else cx0 to cy0 - 24; bubble(c, line.first, bx, by, (line.second * 24f).toInt(), W) }
         }
     }

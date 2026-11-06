@@ -61,6 +61,11 @@ internal class LevelSpec(
 internal const val SHOW_ID = "<ID>"
 /** In a contact's lines: they hand you an envelope (information to broadcast). */
 internal const val GIVE_ENVELOPE = "<ENV>"
+/** The words handed over with the envelope (shown in the box at the bottom). */
+internal const val ENVELOPE_TEXT = "THEY HAND YOU A SEALED ENVELOPE. INFORMATION TO BROADCAST."
+
+/** How long a line must stay up to be read: the typing (at [cps] letters a second), then a slow reading pace. */
+internal fun readTime(text: String, cps: Float = 40f): Float = text.length / cps + 1.2f + text.length / 16f
 
 internal class LeadSpec(val path: List<Pair<Float, Float>>, val manholeX: Float, val manholeY: Float, val farewell: String, val speaker: String = "STRANGER")
 
@@ -360,7 +365,7 @@ internal class StealthWorld(val spec: LevelSpec, private val speedMul: Float = 1
     var hasEnvelope = false
     /** How far the level 1 stranger has come out of the dark. */
     val contactOut get() = contactTravel
-    private fun holdFor(l: String) = when (l) { SHOW_ID -> 2.8f; GIVE_ENVELOPE -> 1.6f; else -> 1.3f + l.length * 0.05f }
+    private fun holdFor(l: String) = when (l) { SHOW_ID -> 3.4f; GIVE_ENVELOPE -> readTime(ENVELOPE_TEXT, 45f); else -> readTime(l, 40f) }
     /** The whole conversation has been said. */
     val scriptDone get() = sayText != null && lineIdx >= script.size - 1 && lineT > holdFor(sayText ?: "")
     fun say(lines: String) { script = lines.split('|'); lineIdx = 0; lineT = 0f; sayT = 0f; sayText = script[0] }

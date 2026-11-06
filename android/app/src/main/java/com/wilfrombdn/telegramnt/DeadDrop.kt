@@ -281,6 +281,9 @@ internal class DeadDropView(
         }
     }
 
+    /** While a mini-game level's title card is up the game waits, but the fade in from the last level still runs (it used to stay black). */
+    private fun mgCardFade(dt: Float) { if (fadeDir < 0) { fade -= dt / 0.7f; if (fade <= 0f) { fade = 0f; fadeDir = 0 } } }
+
     private fun mgUpdate(dt: Float) {
         if (arcadeId != null) { arcadeUpdate(dt); return }
         if (fadeDir > 0) { fade += dt / 0.7f; if (fade >= 1f) { mgApply(); fade = 1f; fadeDir = -1 }; return }
@@ -290,7 +293,7 @@ internal class DeadDropView(
             if (b.fell) mgGo(-3) else if (b.phase == BeltWorld.Phase.DONE && b.phaseT > 0.8f) mgGo(mgIdx + 1)
         }
         fly?.let { f -> f.thrust = thrustId >= 0; f.update(dt); if (soundOn) for (e in f.events) DeadLetterSfx.play(e); f.events.clear(); if (f.finished) mgGo(mgIdx + 1) }
-        cine?.let { cn -> cn.t += dt; if (cn.t >= cn.fadeStart) mgGo(mgIdx + 1) }
+        cine?.let { cn -> cn.t += dt * cn.pace; if (cn.t >= cn.fadeStart) mgGo(mgIdx + 1) }
         prison?.let { pw -> pw.update(dt, ix, iy, mag); if (soundOn) for (e in pw.events) DeadLetterSfx.play(e); pw.events.clear(); if (pw.done) mgGo(mgIdx + 1) }
         finale?.let { fw -> fw.update(dt, ix, iy, mag); if (soundOn) for (e in fw.events) DeadLetterSfx.play(e); fw.events.clear() }
         shoot?.let { sw ->
@@ -655,6 +658,11 @@ internal class DeadDropView(
     internal fun debugMg(i: Int) { startMg(i) }
     internal fun debugMgAdvance(sec: Float) { var t = sec; while (t > 0f) { val s = min(t, 0.025f); clock += s; mgUpdate(s); t -= s } }
     internal fun debugMgIdx() = mgIdx
+    /** Arrive at level [i] the way the story does (faded in from the last level), as the real clock would run it. */
+    internal fun debugArriveAt(i: Int) { carryFade = true; levelIdx = i; load(false) }
+    internal fun debugTick(sec: Float) { var t = sec; while (t > 0f) { val s = min(t, 0.025f); clock += s; sinceLoad += s; if (mgIdx >= 0) { if (!mgCardUp) mgUpdate(s) else mgCardFade(s) } else stageTick(s); t -= s } }
+    internal fun debugFade() = fade
+    internal fun debugCardUp() = mgCardUp
     internal fun debugLevelIdx() = levelIdx
     internal fun debugFinale() = finale
     internal fun debugBannerUp() = bannerUp
@@ -675,6 +683,9 @@ internal class DeadDropView(
 
     /** Is a Spotted / Delivered style screen showing (so that any tap should dismiss it)? */
     private fun overlayUp(): Boolean = world.state != StealthWorld.State.PLAY || pac?.phase == PacWorld.Phase.CAUGHT || pac?.phase == PacWorld.Phase.WON
+
+    /** The alley and the maintenance room end with a fade into the next part, no "LETTER DELIVERED" card. */
+    private val quietEnd get() = spec.pixel && !lastLevel && (stage == 0 || stage == 2)
 
     /** The level's title banner is showing (you can't move until it's gone). */
     private val bannerUp get() = mgIdx < 0 && stage == 0 && sinceLoad < cardS && attempt == 1 && world.state == StealthWorld.State.PLAY
@@ -748,7 +759,7 @@ internal class DeadDropView(
                 val raw = ((now - last) / 1e9f).coerceAtMost(0.05f)
                 var dt = raw
                 clock += dt; sinceLoad += dt
-                if (mgIdx >= 0) { if (!mgCardUp) mgUpdate(raw) } else stageTick(raw)
+                if (mgIdx >= 0) { if (!mgCardUp) mgUpdate(raw) else mgCardFade(raw) } else stageTick(raw)
                 var left = dt
                 while (mgIdx < 0 && left > 0f) {
                     val s = min(left, 0.025f)
@@ -860,7 +871,8 @@ internal class DeadDropView(
         if (best != null) {
             if (clueText != best.text) clueT = 0f
             clueText = best.text; read += bi; clueAlpha = min(1f, clueAlpha + dt * 5f)
-        } else clueAlpha = max(0f, clueAlpha - dt * 2.5f)
+        } else if (clueText != null && clueT < readTime(clueText!!, 70f) && world.state == StealthWorld.State.PLAY && pac == null) clueAlpha = min(1f, clueAlpha + dt * 5f)   // stays up long enough to read after you walk on
+        else clueAlpha = max(0f, clueAlpha - dt * 2.5f)
     }
 
     // ---------- thumb ----------
@@ -899,7 +911,7 @@ internal class DeadDropView(
                     StealthWorld.State.CAUGHT -> if (world.stateT > 0.5f) { attempt++; if (stage == 1) restartPac() else load(true) }
                     StealthWorld.State.WON -> if (lastLevel) {
                         if (wt > 12f) { saveLevel(0); beaten = true; saveBeaten(true); choosing = true; tracks.stop(); onExit() }
-                    } else if (wt > 0.8f) { levelIdx++; saveLevel(levelIdx); load(false) }
+                    } else if (wt > 0.8f && !quietEnd) { levelIdx++; saveLevel(levelIdx); load(false) }
                     else -> {}
                 }
             }
@@ -1564,7 +1576,7 @@ internal class DeadDropView(
         if (world.state != StealthWorld.State.PLAY) return
         if (pixelScene != null && !world.showingId && !world.givingEnvelope) { speechBubble(c, w, offX + world.contactX * T, offY + (world.contactY - 1.15f - scrollY) * T, t, (world.lineT * 40f).toInt()); return }
         if (world.showingId) { val look = world.lineT >= 1.0f; panel(c, w, h, pal, if (look) "THEY LOOK IT OVER." else "YOU SHOW YOUR CLERK ID.", 1f, ((if (look) world.lineT - 1.0f else world.lineT) * 45f).toInt()); return }
-        if (world.givingEnvelope) { panel(c, w, h, pal, "THEY HAND YOU A SEALED ENVELOPE. INFORMATION TO BROADCAST.", 1f, (world.lineT * 45f).toInt()); return }
+        if (world.givingEnvelope) { panel(c, w, h, pal, ENVELOPE_TEXT, 1f, (world.lineT * 45f).toInt()); return }
         panel(c, w, h, pal, (world.spec.lead?.speaker ?: world.spec.worker?.speaker ?: world.spec.scene?.speaker?.ifEmpty { null } ?: spec.contact.uppercase()) + ": “" + t + "”", 1f, (world.lineT * 45f).toInt())
     }
 
@@ -1712,7 +1724,7 @@ internal class DeadDropView(
                 c.drawText(world.spotter, w / 2, h / 2 + 20f * d, p)
                 if (world.stateT > 0.5f) { p.color = a(Color.WHITE, 0x90); c.drawText("Tap to try again", w / 2, h / 2 + 52f * d, p) }
             }
-            StealthWorld.State.WON -> if (lastLevel) drawEnding(c, w, h, pal) else {
+            StealthWorld.State.WON -> if (lastLevel) drawEnding(c, w, h, pal) else if (!quietEnd) {
                 val f = (wt / 0.5f).coerceIn(0f, 1f)
                 p.style = Paint.Style.FILL; p.color = a(0xFF04060A.toInt(), (f * 0xE0).toInt()); c.drawRect(0f, 0f, w, h, p)
                 drawBigLetter(c, w / 2, h * 0.28f, levelIdx, f)

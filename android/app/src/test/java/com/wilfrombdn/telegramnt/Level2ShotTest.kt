@@ -104,7 +104,7 @@ class Level2FlowTest {
         val r = v.debugWorld()
         assertTrue("a new world for the room", r !== w)
         r.px = 6.5f; r.py = 4.5f
-        repeat(220) { v.debugAdvance(0.1f) }
+        repeat(400) { v.debugAdvance(0.1f) }      // the talk is paced to be read
         assertTrue("the worker handed you the envelope", r.hasEnvelope)
         r.px = 12.5f; r.py = 3.6f; v.debugAdvance(0.3f)
         assertTrue("climbing the ladder finishes the level", r.state == StealthWorld.State.WON)

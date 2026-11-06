@@ -29,6 +29,17 @@ class Level34FlowTest {
         FileOutputStream(File(dir, "$name.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** Coming up the ladder from level 2 used to leave the screen black for the whole level 3 title card. */
+    @Test fun arrivingAtLevel3FadesInUnderTheCard() {
+        val v = view()
+        v.debugArriveAt(2)
+        assertEquals(1f, v.debugFade(), 0.01f)
+        v.debugTick(1.5f)
+        org.junit.Assert.assertTrue("the title card is still up", v.debugCardUp())
+        org.junit.Assert.assertTrue("the fade has cleared (was ${v.debugFade()})", v.debugFade() < 0.01f)
+        shot(v, "v3-arrive-card")
+    }
+
     @Test fun level3Stages() {
         val v = view()
         assertEquals(2, v.debugLevelIdx()); assertEquals(0, v.debugMgIdx())
@@ -36,7 +47,7 @@ class Level34FlowTest {
         v.debugMg(1); v.debugMgAdvance(2f); shot(v, "v3-fly")
         v.debugMg(2); v.debugMgAdvance(4f); shot(v, "v3-cine-a")
         v.debugMgAdvance(6f); shot(v, "v3-cine-car")
-        v.debugMgAdvance(14f)
+        v.debugMgAdvance(30f)                 // the cutscene runs slower while they talk, so the lines can be read
         assertEquals(3, v.debugLevelIdx()); assertEquals(0, v.debugMgIdx())
         v.debugMgAdvance(8f); shot(v, "v4-arrive")
         v.debugMgAdvance(12f)

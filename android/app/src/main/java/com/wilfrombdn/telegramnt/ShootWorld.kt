@@ -142,7 +142,7 @@ internal class ShootWorld(val spec: ShootSpec) {
     }
 
     fun roomsClear() = (0..6).count { cleared[it] }
-    fun showMsg(s: String, good: Boolean = true) { msg = s; msgT = 2.6f; msgGood = good }
+    fun showMsg(s: String, good: Boolean = true) { msg = s; msgT = max(2.6f, readTime(s, 999f)); msgGood = good }
 
     // ---------- the map ----------
     fun tile(c: Int, r: Int): Char = if (c in 0 until cols && r in 0 until rows) grid[r][c] else '#'
