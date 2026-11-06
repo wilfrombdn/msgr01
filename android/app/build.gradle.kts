@@ -82,12 +82,12 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3") // QR codes: show yours, scan a friend's
     implementation("com.google.firebase:firebase-messaging:24.1.0") // empty wake-up pings so calls ring a closed app
     implementation("androidx.fragment:fragment:1.8.5") // Firebase pulls an old one in; the camera screens' permission prompts need >= 1.3
-    implementation("org.signal:libsignal-android:0.105.0") // Signal's encryption (Double Ratchet, sender keys) // FileProvider, to open attachments in other apps
+    implementation("org.signal:libsignal-android:0.106.1") // Signal's encryption (Double Ratchet, sender keys) // FileProvider, to open attachments in other apps
     // Embedded Tor: the app reaches the relay's .onion through Tor, so there's no middleman that sees IPs.
     implementation("io.matthewnelson.kmp-tor:runtime:2.6.0")
     implementation("io.matthewnelson.kmp-tor:resource-exec-tor:409.5.0") // bundles the tor binary per ABI
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.signal:libsignal-client:0.105.0") // same library with desktop native code, for tests
+    testImplementation("org.signal:libsignal-client:0.106.1") // same library with desktop native code, for tests
     testImplementation("org.json:json:20240303")
     testImplementation("org.robolectric:robolectric:4.14.1")
 }
