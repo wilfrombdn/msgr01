@@ -5,6 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import kotlin.math.PI
 import kotlin.math.exp
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -43,7 +44,8 @@ internal object DeadLetterSfx {
         return out
     }
 
-    private fun make(name: String): ShortArray? = when (name) {
+    private fun make(name: String): ShortArray? = makeMore(name) ?: makeMain(name)
+    private fun makeMain(name: String): ShortArray? = when (name) {
         "simon0" -> tone(listOf(329.6f), 0.42f, 0.32f, 2.4f)        // E
         "simon1" -> tone(listOf(440f), 0.42f, 0.32f, 2.4f)          // A
         "simon2" -> tone(listOf(554.4f), 0.42f, 0.32f, 2.4f)        // C#
@@ -65,6 +67,9 @@ internal object DeadLetterSfx {
         "mic" -> { val a = noise(0.25f, 0.5f, 18f, 0.3f, 19); val b = tone(listOf(2350f, 2370f), 0.9f, 0.08f, 2.5f); ShortArray(b.size) { ((if (it < a.size) a[it] else 0) + b[it]).coerceIn(-32767, 32767).toShort() } }   // a thump on the mic, a thin whine of feedback
         "thud" -> { val a = noise(1.1f, 1f, 4f, 0.03f, 23); val b = tone(listOf(62f, 93f, 147f, 211f), 1.1f, 0.3f, 4.5f, square = true); ShortArray(a.size) { (a[it] + b[it]).coerceIn(-32767, 32767).toShort() } }   // something heavy slams the steel door
         "radiofire" -> radioFire()
+        else -> if (name.startsWith("voice:")) { val q = name.split(':'); voice(q[1].toInt(), q[2].toInt() / 1000f, q[3].toInt()) } else null
+    }
+    private fun makeMore(name: String): ShortArray? = when (name) {
         "breath" -> breath()
         "cough" -> { val a = noise(0.18f, 0.5f, 10f, 0.25f, 29); val b = noise(0.2f, 0.4f, 12f, 0.25f, 31); ShortArray(a.size + 2400 + b.size) { when { it < a.size -> a[it]; it < a.size + 2400 -> 0; else -> b[it - a.size - 2400] } } }
         "doorfall" -> { val k = noise(0.3f, 0.9f, 12f, 0.35f, 37); val f = noise(1.4f, 0.9f, 2.8f, 0.08f, 41); val ring = tone(listOf(118f, 177f, 266f), 1.4f, 0.25f, 3f, square = true); val off = (RATE * 0.32f).toInt()
@@ -92,6 +97,65 @@ internal object DeadLetterSfx {
             (v * 32767 * 0.8f).toInt().coerceIn(-32767, 32767).toShort()
         }
     }
+    /**
+     * A panicked man talking into a cheap radio mic, with no real words: fast syllables on a high, wavering, cracking voice through
+     * moving vowel sounds (two resonances), little gasps between bursts, then squeezed thin (radio band), clipped hard and hissing.
+     * [mood]: 0 broken, sobbing; 1 talking fast; 2 shouting. Exactly [sec] long; it stops dead at the end (the cut).
+     */
+    private fun voice(seed: Int, sec: Float, mood: Int): ShortArray {
+        val n = (RATE * sec).toInt(); val r = Random(1000 + seed); val out = FloatArray(n)
+        val vowels = arrayOf(floatArrayOf(800f, 1250f), floatArrayOf(520f, 1850f), floatArrayOf(320f, 2300f), floatArrayOf(560f, 950f), floatArrayOf(380f, 820f), floatArrayOf(680f, 1650f))
+        // a resonant band-pass (one formant)
+        class Res(var f: Float, val q: Float) { var y1 = 0f; var y2 = 0f
+            fun step(x: Float): Float { val w = (2 * PI * f / RATE).toFloat(); val rr = 1f - w / (2f * q); val c = 2f * rr * kotlin.math.cos(w); val y = (1f - rr) * x + c * y1 - rr * rr * y2; y2 = y1; y1 = y; return y } }
+        val f1 = Res(700f, 5f); val f2 = Res(1500f, 7f)
+        var i = 0; var phase = 0f; var noiseL = 0f
+        val base = when (mood) { 0 -> 230f; 1 -> 285f; else -> 340f }
+        while (i < n) {
+            // a burst of syllables, then a gasp or a sob
+            val burst = if (mood == 0) 1 + r.nextInt(3) else 3 + r.nextInt(6)
+            for (b in 0 until burst) {
+                if (i >= n) break
+                val len = (RATE * (if (mood == 0) 0.14f + r.nextFloat() * 0.18f else 0.07f + r.nextFloat() * 0.11f)).toInt()
+                val va = vowels[r.nextInt(vowels.size)]; val vb = vowels[r.nextInt(vowels.size)]
+                val crack = r.nextFloat() < (if (mood == 2) 0.35f else 0.15f)                 // the voice breaks up high
+                val p0 = base * (0.9f + r.nextFloat() * 0.25f) * (if (crack) 1.6f else 1f); val p1 = p0 * (if (mood == 0) 0.8f else 0.92f + r.nextFloat() * 0.2f)
+                val cons = r.nextInt(3)                                                       // a consonant at the start: none, hiss, pop
+                for (k in 0 until len) { if (i >= n) break
+                    val u = k / len.toFloat()
+                    val pitch = (p0 + (p1 - p0) * u) * (1f + 0.04f * sin(i * 2f * PI.toFloat() * 9f / RATE)) * (1f + (r.nextFloat() - 0.5f) * 0.03f)
+                    phase += pitch / RATE; if (phase >= 1f) phase -= 1f
+                    val src = (1f - 2f * phase) * 0.7f + (if (phase < 0.12f) 0.6f else 0f)       // a buzzy, raspy pulse
+                    f1.f = va[0] + (vb[0] - va[0]) * u; f2.f = va[1] + (vb[1] - va[1]) * u
+                    val breathy = (r.nextFloat() * 2f - 1f) * (if (mood == 0) 0.35f else 0.15f)
+                    var v = f1.step(src + breathy) * 1.0f + f2.step(src + breathy) * 0.7f
+                    val cl = (RATE * 0.03f).toInt()
+                    if (cons == 1 && k < cl) v = v * (k / cl.toFloat()) + (r.nextFloat() * 2f - 1f) * 0.5f * (1f - k / cl.toFloat())
+                    if (cons == 2 && k < cl / 3) v += (r.nextFloat() * 2f - 1f) * 0.9f
+                    val env = min(1f, k / (RATE * 0.012f)) * min(1f, (len - k) / (RATE * 0.025f))
+                    out[i] = v * env * (if (b == burst - 1 && mood == 2) 1.25f else 1f); i++ }
+                i += (RATE * (0.01f + r.nextFloat() * 0.04f)).toInt()
+            }
+            // between bursts: a sharp gasp, or (broken) a shaky sob
+            val gap = (RATE * (if (mood == 0) 0.25f + r.nextFloat() * 0.3f else 0.08f + r.nextFloat() * 0.2f)).toInt()
+            for (k in 0 until gap) { if (i >= n) break
+                val u = k / gap.toFloat(); noiseL += (r.nextFloat() * 2f - 1f - noiseL) * 0.35f
+                val shake = if (mood == 0) (0.5f + 0.5f * sin(u * 2f * PI.toFloat() * 5f)) else 1f
+                out[i] = noiseL * sin(PI.toFloat() * u) * 0.45f * shake; i++ }
+        }
+        // the radio: no lows, no highs, driven into clipping, with hiss
+        var hp = 0f; var lastIn = 0f; var lp = 0f
+        val res = ShortArray(n)
+        for (k in 0 until n) {
+            hp = 0.93f * (hp + out[k] - lastIn); lastIn = out[k]
+            lp += (hp - lp) * 0.55f
+            val driven = kotlin.math.tanh(lp * (if (mood == 2) 4.5f else 3.2f))
+            val hiss = (r.nextFloat() * 2f - 1f) * 0.05f
+            res[k] = ((driven * 0.62f + hiss) * 32767).toInt().coerceIn(-32767, 32767).toShort()
+        }
+        return res
+    }
+
     /** One heavy, ragged breath: in, then out. */
     private fun breath(): ShortArray {
         val n = (RATE * 1.3f).toInt(); val r = Random(67); var last = 0f
@@ -99,6 +163,10 @@ internal object DeadLetterSfx {
             val env = if (t < 0.5f) sin(PI * t / 0.5f).toFloat() * 0.6f else if (t < 0.6f) 0f else sin(PI * (t - 0.6f) / 0.7f).toFloat()
             (last * env * 0.55f * 32767 * 2f).toInt().coerceIn(-32767, 32767).toShort() }
     }
+
+    /** The samples of a sound (22050 Hz mono), for tests. */
+    internal fun pcm(name: String): ShortArray? = synchronized(cache) { cache.getOrPut(name) { make(name) ?: return null } }
+    internal const val SAMPLE_RATE = RATE
 
     fun play(name: String) {
         val pcm = synchronized(cache) { cache.getOrPut(name) { make(name) ?: return } }

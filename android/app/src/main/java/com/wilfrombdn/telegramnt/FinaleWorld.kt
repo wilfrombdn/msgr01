@@ -199,7 +199,12 @@ internal class FinaleWorld(seed: Int = 6) {
             Stage.INTRO -> { if (t in 4.7f..6.0f && (t * 4f).toInt() != (tPrev * 4f).toInt()) events += "type"; if (at(6.0f) || at(6.8f) || at(7.5f)) events += "clank" }
             Stage.EXECUTE -> { if (at(SHOT_T)) events += "shot"; if (at(5.2f)) events += "keys" }
             Stage.CONTROL -> if (at(6.5f)) events += "boom"
-            Stage.BROADCAST -> { if (at(1.2f)) events += "mic"; if (at(30.4f)) events += "thud"; if (at(32.2f)) events += "thud" }
+            Stage.BROADCAST -> {
+                // your voice: frantic radio babble for every line, as long as the line (the last one is cut off mid-word)
+                for ((li, l) in PLEA.withIndex()) if (at(l.first)) { val mood = if (l.third.contains("...") && !l.third.contains("!")) 0 else if (l.third.contains("!") || l.third.contains("fuck")) 2 else 1
+                    val ms = (((if (li == PLEA.size - 1) PLEA_S else l.second) - l.first) * 1000f).toInt() - (if (li == PLEA.size - 1) 0 else 60)
+                    events += "voice:$li:$ms:$mood" }
+                if (at(1.2f)) events += "mic"; if (at(30.4f)) events += "thud"; if (at(32.2f)) events += "thud" }
             Stage.END -> {
                 if (at(0.35f)) events += "radiofire"; if (at(2.0f)) events += "static"
                 for (b in floatArrayOf(5.0f, 6.6f, 8.1f, 9.5f, 12.0f, 13.6f, 18.2f)) if (at(b)) events += "breath"
