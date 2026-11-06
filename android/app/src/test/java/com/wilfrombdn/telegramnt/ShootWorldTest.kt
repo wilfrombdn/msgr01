@@ -32,9 +32,9 @@ class ShootWorldTest {
         assertTrue(w.hostage!!.dead); assertEquals(null, w.hostageLine())
         intoPlay(w)
         assertEquals(ShootWorld.Phase.PLAY, w.phase)
-        assertEquals(1, w.tipped.size)
-        val tb = w.tipped.first()
-        assertTrue("you land next to the table", hypot(w.px - (tb.first + 0.5f), w.py - (tb.second + 0.5f)) < 1.6f)
+        assertEquals(1, w.flipped.size)          // the whole desk goes over, not one square of it
+        assertTrue(w.tipped.size >= 1 && w.debris.isNotEmpty())
+        assertTrue("you land next to the table", w.tipped.minOf { tb -> hypot(w.px - (tb.first + 0.5f), w.py - (tb.second + 0.5f)) } < 1.6f)
         assertTrue(w.npcs.filter { !it.civ && !it.hostage }.all { it.state == ShootWorld.ENGAGE })
     }
 

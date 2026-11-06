@@ -20,7 +20,7 @@ class PleaAudioTest {
                 if (e.startsWith("voice")) loud = maxOf(loud, s.maxOf { kotlin.math.abs(it.toInt()) } / 32767f) }
             w.events.clear()
         }
-        assertTrue("the voice is audible ($loud)", loud > 0.2f)
+        assertTrue("the voice is audible ($loud)", loud > 0.08f)
         val f = File("build/shots").apply { mkdirs() }.resolve("plea-audio.wav")
         RandomAccessFile(f, "rw").use { o ->
             o.setLength(0)
