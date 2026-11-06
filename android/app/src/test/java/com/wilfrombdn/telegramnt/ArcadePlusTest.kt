@@ -116,6 +116,14 @@ class ArcadePlusTest {
         assertTrue("the flipper falls up", fl.y < 3f)
     }
 
+    @Test fun theHangarNeverTouchesTheStory() {
+        val saved = ArrayList<Int>()
+        val v = DeadDropView(RuntimeEnvironment.getApplication(), 5, false, { saved += it }, { }, { }, beaten = true)
+        v.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(2400, View.MeasureSpec.EXACTLY)); v.layout(0, 0, 1080, 2400)
+        v.openHangar(); v.debugTick(5f); v.skip(); v.restart(); v.debugTick(1f)
+        assertTrue(v.isHangar()); assertTrue("the story's place is never saved", saved.isEmpty()); assertEquals(5, v.debugLevelIdx())
+    }
+
     @Test fun theHangarSellsJetpacks() {
         val v = view()
         v.debugBank(800); v.openHangar(); assertTrue(v.isHangar())

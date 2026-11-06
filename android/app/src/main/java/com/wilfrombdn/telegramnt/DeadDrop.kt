@@ -87,7 +87,7 @@ internal class DeadDropView(
             "belt" -> { levelIdx = 2; load(false); belt = BeltWorld(BeltLevel.warehouseArcade); beltScene = BeltScene(belt!!) }
             "fly" -> { levelIdx = 2; load(false); startMg(1); fly = FlyWorld(FlySpec((System.nanoTime() % 1000).toInt(), 1_000_000, packNow, arcade = true)); flyScene = FlyScene(fly!!) }
             "hall" -> { levelIdx = 3; load(false); startMg(1); shoot?.arcade = true }
-            "tower" -> { levelIdx = 5; load(false); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.CLIMB) }
+            "tower" -> { levelIdx = 5; load(false); finale = FinaleWorld((System.nanoTime() % 100000).toInt()); finaleScene = FinaleScene(finale!!); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.CLIMB) }
             "uplink" -> { levelIdx = 5; load(false); finale = FinaleWorld((System.nanoTime() % 100000).toInt()); finaleScene = FinaleScene(finale!!); finale?.arcade = true; finale?.debugEnter(FinaleWorld.Stage.SIMON); finale?.let { fw -> fw.debugNewSeq() } }
         }
         fade = 0f; fadeDir = 0; cue = ""; applyCue()
@@ -876,7 +876,7 @@ internal class DeadDropView(
     init { load(false) }
 
     /** Start the level you are on again from the beginning. */
-    internal fun restart() { val a0 = arcadeId; if (a0 != null) startArcade(a0) else load(false) }
+    internal fun restart() { if (hangar || choosing) return; val a0 = arcadeId; if (a0 != null) startArcade(a0) else load(false) }
 
     /** Is a Spotted / Delivered style screen showing (so that any tap should dismiss it)? */
     private fun overlayUp(): Boolean = world.state != StealthWorld.State.PLAY || pac?.phase == PacWorld.Phase.CAUGHT || pac?.phase == PacWorld.Phase.WON
@@ -901,7 +901,7 @@ internal class DeadDropView(
      * level 6: beach > tower > climb > (skips the shot and the door) control room > uplink > broadcast > the end.
      */
     internal fun skip() {
-        if (arcadeId != null) return
+        if (arcadeId != null || hangar || choosing) return
         finale?.let { fw -> fw.skip(); return }
         shoot?.let { sw -> if (sw.phase != ShootWorld.Phase.FINALE && sw.phase != ShootWorld.Phase.DONE) { sw.skipToMayor(); return } }   // the shoot-out: to the mayor first
         val stages = stagesOf(spec)
@@ -951,7 +951,7 @@ internal class DeadDropView(
         override fun run() {
             if (!running) return
             val now = System.nanoTime()
-            if (choosing) { last = now; invalidate(); postOnAnimation(this); return }      // paused behind the "choose a letter" screen
+            if (choosing || hangar) { last = now; invalidate(); postOnAnimation(this); return }      // paused behind the "choose a letter" screen
             if (last != 0L) {
                 val raw = ((now - last) / 1e9f).coerceAtMost(0.05f)
                 var dt = raw

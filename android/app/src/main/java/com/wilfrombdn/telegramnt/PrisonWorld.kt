@@ -609,7 +609,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
                 if (countT > 6f && clipboards.all { it.path.isEmpty() }) { countStage = 2; countT = 0f; if (!onSpot) beatUp() }
             }
             2 -> {
-                if (!onSpot && grabStage < 0) beatUp()
+                if (!onSpot && grabStage < 0 && !lockedInSpot) beatUp()     // once dragged there, no second beating this count
                 var allDone = true
                 for (g in clipboards) {
                     val stops = (0..9).map { PrisonLevel.CX0 + 3 * it + 1 + 0.5f }
@@ -639,7 +639,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     }
     private val clipAt = HashMap<Int, Int>()
     private fun beatUp() {
-        if (grabStage >= 0) return
+        if (grabStage >= 0 || lockedInSpot) return
         heat += 10f
         say("YOU'RE NOT ON YOUR SQUARE. A GUARD IS COMING.", true)
         grab(roamers.filter { it !in clipboards }.minByOrNull { hypot(it.x - px, it.y - py) }, true, countSpot, "WHAT DID I SAY? ON YOUR SQUARE!") {

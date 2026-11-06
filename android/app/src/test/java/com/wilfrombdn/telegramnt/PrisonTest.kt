@@ -104,10 +104,10 @@ class PrisonTest {
         val w = PrisonWorld(PrisonLevel.rock()); repeat(90) { w.update(0.05f, 0f, 0f, 0f) }
         var g = 0f; while (!w.lockedInSpot && g < 40f) { w.update(0.05f, 0f, 0f, 0f); g += 0.05f }
         assertTrue(w.lockedInSpot && w.countStage >= 0)
-        run(w, PrisonWorld.STUN_S + 0.2f)
         val x0 = w.px; val y0 = w.py
-        repeat(10) { w.update(0.05f, 1f, 0f, 1f) }
-        assertTrue("you can walk again while the count goes on", kotlin.math.hypot(w.px - x0, w.py - y0) > 0.3f || w.grabStage >= 0)
+        repeat(((PrisonWorld.STUN_S + 4f) / 0.05f).toInt()) { w.update(0.05f, 1f, 0f, 1f) }     // the thumb never leaves the stick
+        assertTrue("you can walk again while the count goes on", kotlin.math.hypot(w.px - x0, w.py - y0) > 0.3f)
+        assertEquals("no second beating", PrisonWorld.HEARTS - 1, w.hearts); assertEquals(-1, w.grabStage)
     }
 
     /** One meal, one whole laundry load, and the supply boat comes for the laundry: get in the cart and you're away. */
