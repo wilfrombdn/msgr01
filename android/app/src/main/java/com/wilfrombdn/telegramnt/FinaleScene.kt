@@ -502,27 +502,70 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
     private fun door(c: Canvas, clock: Float) {
         val t = world.t
         c.drawBitmap(doorBg, 0f, 0f, plain)
-        val open = ((t - 0.8f) / 3.6f).coerceIn(0f, 1f); val e = open * open * (3 - 2 * open)
-        val dx0 = 70; val dx1 = 186; val dy0 = 60; val dy1 = 300
-        // the light behind the door
-        rect(c, dx0, dy0, dx1 - dx0, dy1 - dy0, K(0xFF020306))
+        val dx0 = 70; val dx1 = 186; val dy0 = 60; val dy1 = 300; val dw0 = dx1 - dx0
+        // the keys (1.0), the bolt (1.5), then it swings in, slow and heavy
+        val open = ((t - 1.8f) / 2.8f).coerceIn(0f, 1f); val e = open * open * (3 - 2 * open)
+        val flick = 0.85f + 0.15f * sin(clock * 9f) * sin(clock * 3.7f)                        // firelight never holds still
+        val siren = (clock * 2.4f).toInt() % 2 == 0
+        val warm = mix(K(0xFFFF8A3A), if (siren) K(0xFFFF4060) else K(0xFF6A8AFF), 0.25f)
+        // behind the door: the control room, lit by the burning city through its window
+        rect(c, dx0, dy0, dw0, dy1 - dy0, K(0xFF020306))
         if (e > 0f) {
-            val gap = ((dx1 - dx0) * e).toInt()
-            for (y in dy0 until dy1) for (x in dx1 - gap until dx1) { val k = (x - (dx1 - gap)) / max(1f, gap.toFloat()); val q = floor((0.55f + 0.45f * k) * e * 5f + dith(x, y)) / 5f; px(c, x, y, mix(K(0xFF2A4A6A), K(0xFFE8F2FF), q)) }
-            // the light spills onto the floor in a widening wedge
-            for (y in dy1 until H) { val spread = (y - dy1) * 0.9f; val x0 = (dx1 - gap - spread * 0.4f).toInt(); val x1 = (dx1 + spread * 0.2f).toInt(); for (x in x0 until x1) if (bayer[(y and 3) * 4 + (x and 3)] < (10 * e).toInt() + 2) px(c, x, y, a(K(0xFFA8C8F0), 0x90)) }
-            for (k in 0 until 14) { val mx = dx1 - (gap * ((hash(k, 1, 5) % 100) / 100f)).toInt(); val my = dy0 + (hash(k, 2, 5) % (dy1 - dy0)) + (sin(clock + k) * 6f).toInt(); px(c, mx, my, a(PX.W, 0xA0)) }
+            val gap = (dw0 * e).toInt()
+            for (y in dy0 until dy1) for (x in dx1 - gap until dx1) {
+                val k = (x - (dx1 - gap)) / max(1f, gap.toFloat()); val v = (y - dy0) / (dy1 - dy0).toFloat()
+                val q = floor(((0.35f + 0.65f * k) * (0.6f + 0.4f * v)) * e * flick * 5f + dith(x, y)) / 5f
+                px(c, x, y, mix(K(0xFF120608), warm, q))
+            }
+            // the window across the room, a red slab with the skyline cut into it
+            val wx0 = dx1 - gap + gap / 4; val ww = gap / 2
+            if (ww > 4) { rect(c, wx0, dy0 + 40, ww, 70, mix(K(0xFF3A0A10), warm, 0.6f * flick)); for (i in 0 until ww step 5) rect(c, wx0 + i, dy0 + 90 - hash(i, 1, 9) % 30, 4, 20 + hash(i, 1, 9) % 30, K(0xFF14080C)) }
+            // the light pours out across our floor in long rays, and our shadow stretches back from the doorway
+            for (r in 0 until 5) {
+                val spread = -0.5f + r * 0.28f
+                for (y in dy1 until H) { val dd = (y - dy1).toFloat(); val cx = dx1 - gap * 0.5f + spread * dd * 1.4f; val half = 4f + dd * 0.12f + gap * 0.08f
+                    for (x in (cx - half).toInt()..(cx + half).toInt()) if (bayer[(y and 3) * 4 + (x and 3)] < (7 * e * flick).toInt() + 1 - (dd / 30).toInt()) px(c, x, y, a(warm, 0x70)) }
+            }
+            val sx = dx1 - gap / 2; for (y in dy1 until H) { val dd = y - dy1; rect(c, sx - 4 - dd / 10, y, 8 + dd / 5, 1, a(PX.K, (0xA0 - dd * 2).coerceAtLeast(0))) }   // you, a long shadow
+            // dust turning in the light
+            for (k in 0 until 26) { val mx = dx1 - (gap * ((hash(k, 1, 5) % 100) / 100f)).toInt(); val my = dy0 + (hash(k, 2, 5) % (dy1 - dy0 + 60)) + (sin(clock * 0.7f + k) * 8f).toInt(); px(c, mx + (sin(clock * 0.4f + k * 2) * 3f).toInt(), my, a(K(0xFFFFE0C0), (0x40 + hash(k, 3, 5) % 0x80).coerceAtMost(0xC0))) }
         }
-        // the door itself, swinging in (seen narrower as it turns)
-        val dw = ((dx1 - dx0) * (1f - e)).toInt()
+        // the door: heavy steel, swinging away from us (seen narrower as it turns)
+        val dw = (dw0 * (1f - e)).toInt()
         if (dw > 0) {
-            rect(c, dx0, dy0, dw, dy1 - dy0, K(0xFF3A424E)); rect(c, dx0 + 2, dy0 + 2, max(0, dw - 4), dy1 - dy0 - 4, K(0xFF4E5866))
-            if (dw > 30) { rect(c, dx0 + dw / 2 - 18, dy0 + 40, 36, 8, K(0xFF14181E)); rect(c, dx0 + dw / 2 - 16, dy0 + 42, 32, 4, K(0xFF3A6AA0)) }   // CONTROL plate
-            rect(c, dx0 + dw - 8, dy0 + 120, 4, 14, K(0xFFB0A060))
+            val steel = K(0xFF3A424E); val steelL = K(0xFF566070); val steelD = K(0xFF262C36)
+            rect(c, dx0, dy0, dw, dy1 - dy0, steel); rect(c, dx0, dy0, dw, 2, steelL); rect(c, dx0, dy0, 2, dy1 - dy0, steelL); rect(c, dx0 + dw - 2, dy0, 2, dy1 - dy0, steelD)
+            for (pn in 0 until 3) { val py0 = dy0 + 10 + pn * 78; rect(c, dx0 + 8 * dw / dw0, py0, max(0, dw - 16 * dw / dw0), 66, K(0xFF323A46)); rect(c, dx0 + 8 * dw / dw0, py0, max(0, dw - 16 * dw / dw0), 1, steelD) }   // pressed panels
+            for (ry in dy0 + 6 until dy1 - 4 step 14) { px(c, dx0 + 3, ry, steelL); if (dw > 6) px(c, dx0 + dw - 4, ry, steelL) }   // rivets
+            if (dw > 40) {   // the plate, the warning and the scuffs
+                rect(c, dx0 + dw / 2 - 26, dy0 + 34, 52, 16, K(0xFF14181E)); rect(c, dx0 + dw / 2 - 24, dy0 + 36, 48, 12, K(0xFF8A2A1A))
+                p.typeface = android.graphics.Typeface.MONOSPACE; p.textSize = 9f; p.textAlign = Paint.Align.CENTER; p.color = K(0xFFE8D8B0); c.drawText("CONTROL", dx0 + dw / 2f, dy0 + 46f, p)
+                p.typeface = null
+                rect(c, dx0 + dw / 2 - 10, dy0 + 76, 20, 26, K(0xFF0A0C10)); for (gy in 0 until 26 step 4) rect(c, dx0 + dw / 2 - 10, dy0 + 76 + gy, 20, 1, K(0xFF1A2028))   // the wired window
+                if (t > 0.3f) rect(c, dx0 + dw / 2 - 9, dy0 + 77, 18, 24, a(warm, (0x40 * flick).toInt()))
+                for (k in 0 until 12) { val sx0 = dx0 + 6 + hash(k, 1, 13) % (dw - 12); rect(c, sx0, dy0 + 150 + hash(k, 2, 13) % 120, 3 + hash(k, 3, 13) % 8, 1, steelL) }
+            }
+            for (i in 0 until dw step 8) { rect(c, dx0 + i, dy1 - 14, min(4, dw - i), 12, K(0xFFD8B020)); rect(c, dx0 + i + 4, dy1 - 14, min(4, max(0, dw - i - 4)), 12, K(0xFF14141A)) }   // hazard stripes
+            // the lock and the handle
+            val lx = dx0 + dw - 16 * dw / dw0
+            rect(c, lx - 4, dy0 + 120, 10, 26, K(0xFF1A1E24)); rect(c, lx - 3, dy0 + 121, 8, 24, K(0xFF8A8A70))
+            val handleDown = t > 1.5f
+            if (handleDown) rect(c, lx - 1, dy0 + 140, 3, 16, K(0xFFB0A060)) else rect(c, lx - 14, dy0 + 140, 16, 3, K(0xFFB0A060))
         }
-        rect(c, dx0 - 6, dy0 - 6, dx1 - dx0 + 12, 6, K(0xFF2A303C)); rect(c, dx0 - 6, dy0 - 6, 6, dy1 - dy0 + 6, K(0xFF2A303C)); rect(c, dx1, dy0 - 6, 6, dy1 - dy0 + 6, K(0xFF2A303C))
-        // your hand on it
-        if (t < 3.4f) { val hx = dx0 + (dw * 0.85f).toInt(); rect(c, hx - 6, 186, 14, 10, PX.SKIN); rect(c, hx - 30, 190, 24, 8, you.shirt) }
+        rect(c, dx0 - 8, dy0 - 8, dw0 + 16, 8, K(0xFF2A303C)); rect(c, dx0 - 8, dy0 - 8, 8, dy1 - dy0 + 8, K(0xFF2A303C)); rect(c, dx1, dy0 - 8, 8, dy1 - dy0 + 8, K(0xFF2A303C))
+        rect(c, dx0 - 8, dy0 - 8, dw0 + 16, 1, K(0xFF4A5C86))
+        // your hand with the dead man's keys: in, a turn, the bolt
+        if (t < 2.2f) {
+            val lx = dx0 + dw - 16 * dw / dw0; val ky = dy0 + 128
+            val reach = ((t - 0.1f) / 0.6f).coerceIn(0f, 1f); val turn = ((t - 0.8f) / 0.35f).coerceIn(0f, 1f)
+            val hx = lx + 40 - (reach * 38).toInt()
+            rect(c, hx + 6, ky - 2, 60, 12, you.shirt); rect(c, hx + 6, ky - 2, 60, 2, lite0(you.shirt, 30))      // your sleeve
+            rect(c, hx - 4, ky - 4, 12, 14, PX.SKIN); rect(c, hx - 4, ky + 6, 12, 3, lite0(PX.SKIN, -30))       // your hand
+            c.save(); c.rotate(turn * 90f, hx - 6f, ky + 2f)
+            rect(c, hx - 12, ky + 1, 8, 2, K(0xFFC8C080)); rect(c, hx - 6, ky - 2, 4, 8, K(0xFFC8C080))           // the key in the lock
+            c.restore()
+            for (k in 0 until 3) { val sw = sin(clock * 9f + k) * (if (t in 0.8f..1.6f) 3f else 1f); rect(c, hx + (k * 4) - 2 + sw.toInt(), ky + 10 + k * 3, 3, 6, K(0xFFB8B070)) }   // the rest of the ring, swinging
+        }
     }
 
     // =====================================================================================================================
@@ -952,16 +995,24 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
     // =====================================================================================================================
     //  the end: back in the tower after the shots
     // =====================================================================================================================
-    private val YX = 168
+    private val YX = 150
+    private val PS = 1.5f      // the end is a wider shot: people a little smaller than in the rest of the tower
     private fun bloodPool(c: Canvas, cx: Int, cy: Int, rx: Float, ry: Float) {
         for (y in (cy - ry).toInt()..(cy + ry).toInt()) for (x in (cx - rx).toInt()..(cx + rx).toInt()) {
-            val d = ((x - cx) / rx) * ((x - cx) / rx) + ((y - cy) / ry) * ((y - cy) / ry)
+            val wob = 1f + 0.18f * sin(x * 0.7f + y * 1.3f)                  // a ragged edge, not a perfect oval
+            val d = (((x - cx) / rx) * ((x - cx) / rx) + ((y - cy) / ry) * ((y - cy) / ry)) / wob
             if (d > 1f) continue
-            px(c, x, y, if (d < 0.5f && (x + y) % 7 == 0) K(0xFF9A1A26) else if (d > 0.82f && bayer[(y and 3) * 4 + (x and 3)] < 8) K(0xFF3A0610) else K(0xFF5E0A14))
+            px(c, x, y, if (d < 0.45f && (x * 3 + y) % 9 == 0) K(0xFFB02232) else if (d < 0.6f && (x + y * 2) % 13 == 0) K(0xFFE06070) else if (d > 0.8f && bayer[(y and 3) * 4 + (x and 3)] < 8) K(0xFF3A0610) else K(0xFF5E0A14))
         }
     }
+    /** Blood thrown across the wall and the console by the shots through the door: drops flung out from [ox, oy], longer streaks and runs. */
+    private val splatter: List<IntArray> by lazy { List(150) { k -> val ang = -0.9f + (hash(k, 1, 31) % 100) / 100f * 1.3f; val r = 6f + (hash(k, 2, 31) % 100) / 100f * 58f; val sz = 1 + hash(k, 3, 31) % 3; intArrayOf((cos(ang) * r).toInt(), (sin(ang) * r * 0.7f).toInt(), sz, hash(k, 4, 31) % 14) } }
+    private fun wallBlood(c: Canvas, ox: Int, oy: Int, k: Float) {
+        for (s0 in splatter) { val n = (s0[2] * k).toInt().coerceAtLeast(1); rect(c, ox + s0[0], oy + s0[1], n, n, if (s0[3] < 4) K(0xFF7A0E1A) else K(0xFF5A0A14)); if (s0[3] == 0) rect(c, ox + s0[0], oy + s0[1], 1, 3 + s0[2] * 3, K(0xFF4A0810)) }   // a few run down
+        for (r in 0 until 5) { val x0 = ox + 4 + r * 3; for (i in 0 until 18) px(c, x0 + i, oy - 2 + r + (i * (0.3f + r * 0.05f)).toInt(), K(0xFF6A0C18)) }   // a heavy smear
+    }
     private fun guardWithRifle(c: Canvas, x: Int, y: Int, clock: Float, moving: Boolean) {
-        big(x, y) { folk(c, x, y, 1, if (moving) 1 + ((clock * 8f).toInt() % 2) else 0, police, false, false); rect(c, x + 1, y - 10, 9, 2, K(0xFF1A1A20)); rect(c, x - 2, y - 9, 4, 3, K(0xFF2A2A30)) }
+        big(x, y, PS) { swatman(c, x, y, 1, if (moving) 1 + ((clock * 8f).toInt() % 2) else 0); rect(c, x + 1, y - 10, 9, 2, K(0xFF1A1A20)); rect(c, x - 2, y - 9, 4, 3, K(0xFF2A2A30)); px(c, x + 10, y - 10, PX.RED) }
     }
 
     private fun endScene(c: Canvas, clock: Float) {
@@ -970,62 +1021,80 @@ internal class FinaleScene(private val world: FinaleWorld) : PixelSprites() {
         c.drawBitmap(roomBg, 0f, 0f, plain)
         cityNow(c, clock, -1f, world.sirens)
         screens(c, clock, if (hash(0, (clock * 3f).toInt(), 5) % 9 == 0) 2 else 3)
+        // the console: dead screens, one still sparking where a round went through it
         for (i in 0 until 10) if ((clock * 1.5f + i).toInt() % 4 == 0) px(c, 202 + i * 5, 272, PX.RED)
+        rect(c, 214, 266, 6, 4, K(0xFF05070C)); if (hash(1, (clock * 9f).toInt(), 7) % 5 == 0) { for (k in 0 until 5) px(c, 216 + (hash(k, (clock * 9f).toInt(), 8) % 9) - 4, 266 - hash(k, 2, 8) % 6, K(0xFFFFE8A0)) }
+        // the blood the shots through the door threw across the console and the wall behind where you knelt
+        wallBlood(c, YX + 26, FLOOR - 40, 1f)
         val fallen = ((t - FinaleWorld.DOOR_OFF) / 0.35f).coerceIn(0f, 1f)
-        roomDoor(c, 0, true, fallen)
+        val bang = (t in FinaleWorld.DOOR_OFF - 1.5f..FinaleWorld.DOOR_OFF - 1.3f) || (t in FinaleWorld.DOOR_OFF - 0.8f..FinaleWorld.DOOR_OFF - 0.6f)
+        roomDoor(c, if (bang) ((clock * 70f).toInt() % 3 - 1) * 3 else 0, true, fallen)
         if (fallen <= 0f) holeBeams(c, clock)
-        if (t in FinaleWorld.DOOR_OFF..FinaleWorld.DOOR_OFF + 1.5f) { val k = (t - FinaleWorld.DOOR_OFF) / 1.5f; for (i in 0 until 24) { val an = i * 0.7f; val r = 6f + k * 40f; px(c, RD_X + RD_W / 2 + (cos(an) * r * 1.4f).toInt(), FLOOR - 6 - (abs(sin(an)) * r * 0.6f).toInt(), a(K(0xFFB8B0A0), ((1f - k) * 0xC0).toInt())) } }   // dust
-        // your blood, spreading
+        if (t in FinaleWorld.DOOR_OFF..FinaleWorld.DOOR_OFF + 1.6f) { val k = (t - FinaleWorld.DOOR_OFF) / 1.6f; for (i in 0 until 36) { val an = i * 0.55f; val r = 6f + k * 52f; rect(c, RD_X + RD_W / 2 + (cos(an) * r * 1.4f).toInt(), FLOOR - 6 - (abs(sin(an)) * r * 0.6f).toInt(), 2, 2, a(K(0xFFB8B0A0), ((1f - k) * 0xD0).toInt())) } }   // dust and grit
+        // the floor: spent casings by the door, papers, the mic where you dropped it, a chair on its side
+        for (k in 0 until 9) px(c, RD_X + RD_W + 4 + hash(k, 1, 41) % 40, FLOOR + 2 + hash(k, 2, 41) % 14, K(0xFFC8A040))
+        for (k in 0 until 7) { val qx = 70 + hash(k, 3, 41) % 150; val qy = FLOOR + 6 + hash(k, 4, 41) % 30; rect(c, qx, qy, 6, 4, K(0xFFD8D4C8)); rect(c, qx, qy + 3, 6, 1, K(0xFF9A968C)); if (k % 2 == 0) px(c, qx + 2, qy + 1, K(0xFF5E0A14)) }
+        rect(c, 236, FLOOR - 10, 12, 2, K(0xFF2A2A30)); rect(c, 238, FLOOR - 8, 2, 10, K(0xFF2A2A30)); rect(c, 246, FLOOR - 8, 2, 10, K(0xFF2A2A30)); rect(c, 236, FLOOR - 22, 2, 12, K(0xFF2A2A30))   // the chair, knocked over
+        rect(c, YX - 22, FLOOR + 4, 4, 3, K(0xFF8A929A)); cable(c, YX - 20f, FLOOR + 5f)
+        // your blood: a big pool where you kneel, spreading; a trail where you dragged yourself from the mic
         val down = ((t - FinaleWorld.PUSH) / (FinaleWorld.DOWN - FinaleWorld.PUSH)).coerceIn(0f, 1f)
         val grow = ((t - FinaleWorld.FADE_IN) / 14f).coerceIn(0f, 1f)
-        bloodPool(c, YX + (down * 18f).toInt(), FLOOR + 1, 12f + grow * 10f + down * 10f, 3.5f + grow * 2f + down * 2f)
+        for (i in 0 until 14) rect(c, YX + 24 + i * 3, FLOOR + 1 + (i % 2), 3, 2, K(0xFF4A0810))
+        bloodPool(c, YX + 4 + (down * 26f).toInt(), FLOOR + 2, 20f + grow * 12f + down * 10f, 5f + grow * 2.5f + down * 2f)
         // the guards burst in and spread out, rifles on you
         if (t > FinaleWorld.DOOR_OFF + 0.1f) for (g in 0 until 3) {
-            val k = ((t - FinaleWorld.DOOR_OFF - 0.1f - g * 0.25f) / 1.0f).coerceIn(0f, 1f); if (t < FinaleWorld.DOOR_OFF + 0.1f + g * 0.25f) continue
-            val gx = (32f + (62f + g * 26f - 32f) * k).roundToInt(); guardWithRifle(c, gx, FLOOR - 10 + g * 2, clock, k < 1f)
+            if (t < FinaleWorld.DOOR_OFF + 0.1f + g * 0.25f) continue
+            val k = ((t - FinaleWorld.DOOR_OFF - 0.1f - g * 0.25f) / 0.9f).coerceIn(0f, 1f)
+            val gx = (RD_X + 16f + (58f + g * 22f - RD_X - 16f) * k).roundToInt(); guardWithRifle(c, gx, FLOOR - 8 + g * 2, clock, k < 1f)
         }
-        // the man in the mask: walks over slowly, pushes you over with his boot, the shotgun
-        var mx = -100
-        if (t > FinaleWorld.MASK_IN) {
-            val k = ((t - FinaleWorld.MASK_IN) / (FinaleWorld.MASK_AT - FinaleWorld.MASK_IN)).coerceIn(0f, 1f)
-            val step = ((t - FinaleWorld.DOWN) / 0.8f).coerceIn(0f, 1f)
-            mx = (32f + (YX - 22f - 32f) * k + step * 14f).roundToInt()
-            val walking = k < 1f || step in 0.01f..0.99f
-            val boot = when { t < FinaleWorld.PUSH - 0.8f -> 0f; t < FinaleWorld.PUSH -> (t - (FinaleWorld.PUSH - 0.8f)) / 0.8f; t < FinaleWorld.DOWN -> 1f + down * 0.6f; t < FinaleWorld.DOWN + 0.4f -> 1.6f * (1f - (t - FinaleWorld.DOWN) / 0.4f); else -> 0f }
-            big(mx, FLOOR) {
-                folk(c, mx, FLOOR, 1, if (walking) 1 + ((t * 2.8f).toInt() % 2) else 0, masked, false, false)
-                px(c, mx + 2, FLOOR - 15, K(0xFFB8B8C0))                                                        // one eye through the mask
-                rect(c, mx - 4, FLOOR - 18, 1, 16, a(K(0xFFFFE8C0), 0xA0)); rect(c, mx - 3, FLOOR - 19, 4, 1, a(K(0xFFFFE8C0), 0x80))   // the corridor light catching his back
-                if (boot > 0f) { val bl = (boot * 5f).toInt(); rect(c, mx + 2, FLOOR - 6, 2 + bl, 3, masked.pants); rect(c, mx + 3 + bl, FLOOR - 7, 3, 4, PX.K) }
+        // you: on your knees, your back to the door, breathing (barely); pushed over onto your face; then still
+        val headX = YX + 26; val headY = FLOOR - 5
+        if (t < FinaleWorld.PUSH) {
+            val heave = if (((t * 0.55f) % 1f) < 0.4f) 1 else 0
+            big(YX, FLOOR, PS) { kneeling(c, YX, FLOOR, you, 1, heave, false) }
+        } else if (t < FinaleWorld.DOWN) {
+            val e = down * down * (3f - 2f * down)
+            c.save(); c.rotate(e * 86f, YX.toFloat(), FLOOR.toFloat()); big(YX, FLOOR, PS) { kneeling(c, YX, FLOOR, you, 1, 0, false) }; c.restore()
+        } else {
+            big(YX + 14, FLOOR, PS) {
+                lying(c, YX + 14, FLOOR, you, false, false)
+                rect(c, YX + 18, FLOOR - 7, 7, 6, you.hair)                                                   // face down: the back of your head
+                if (((t - FinaleWorld.DOWN) * 0.6f) % 1f < 0.3f && t < FinaleWorld.BLAM) rect(c, YX + 9, FLOOR - 8, 8, 1, lite0(you.shirt, 20))   // a shallow breath
             }
         }
-        // you: on your knees in your own blood, breathing hard, clutching the mic; then pushed over; then on the floor
-        val heave = if (t < FinaleWorld.PUSH && ((t * 1.6f) % 1f) < 0.45f) 1 else 0
-        if (t < FinaleWorld.PUSH) { cable(c, YX + 1f, FLOOR - 14f); big(YX, FLOOR) { kneeling(c, YX, FLOOR, you, 2, heave, true) }
-            if (t in 7.3f..7.9f) for (k in 0 until 4) px(c, YX - 2 + k * 2, FLOOR - 22 + ((t - 7.3f) * 30f).toInt() + k, K(0xFF9A1A26)) }   // coughing blood
-        else if (t < FinaleWorld.DOWN) {
-            val e = down * down * (3f - 2f * down)
-            c.save(); c.rotate(e * 88f, YX.toFloat(), FLOOR.toFloat()); big(YX, FLOOR) { kneeling(c, YX, FLOOR, you, 2, 0, true) }; c.restore()
-        } else {
-            big(YX + 12, FLOOR) { lying(c, YX + 12, FLOOR, you, false, false) }
-            rect(c, YX + 10, FLOOR + 3, 3, 2, K(0xFF8A929A)); cable(c, YX + 12f, FLOOR + 4f)                  // the mic, dropped
-            if (((t - FinaleWorld.DOWN) * 1.3f) % 1f < 0.4f && t < FinaleWorld.BLAM) rect(c, YX + 2, FLOOR - 9, 10, 1, a(PX.K, 0x40))   // still breathing
+        // the man in the mask: walks over slowly, puts his boot in your back, then the shotgun to the back of your head
+        if (t > FinaleWorld.MASK_IN) {
+            val k = ((t - FinaleWorld.MASK_IN) / (FinaleWorld.MASK_AT - FinaleWorld.MASK_IN)).coerceIn(0f, 1f)
+            val step = ((t - FinaleWorld.DOWN - 0.1f) / 1.2f).coerceIn(0f, 1f)
+            val mx = (RD_X + 16f + (YX - 16f - RD_X - 16f) * k + step * 16f).roundToInt()
+            val walking = k in 0.01f..0.99f || step in 0.01f..0.99f
+            val boot = when { t < FinaleWorld.PUSH - 0.7f -> 0f; t < FinaleWorld.PUSH -> (t - (FinaleWorld.PUSH - 0.7f)) / 0.7f; t < FinaleWorld.DOWN -> 1f + down * 0.5f; t < FinaleWorld.DOWN + 0.4f -> 1.5f * (1f - (t - FinaleWorld.DOWN) / 0.4f); else -> 0f }
+            big(mx, FLOOR, PS) {
+                folk(c, mx, FLOOR, 1, if (walking) 1 + ((t * 2.6f).toInt() % 2) else 0, masked, false, false)
+                px(c, mx + 2, FLOOR - 15, K(0xFFB8B8C0))
+                rect(c, mx - 4, FLOOR - 18, 1, 16, a(K(0xFFFFE8C0), 0x90))                                   // the corridor light on his back
+                if (boot > 0f) { val bl = (boot * 5f).toInt(); rect(c, mx + 2, FLOOR - 7, 2 + bl, 3, masked.pants); rect(c, mx + 3 + bl, FLOOR - 8, 3, 4, PX.K) }
+            }
+            if (t > FinaleWorld.GUN_OUT) {   // the shotgun: off his shoulder, racked, then down, the muzzle against the back of your head
+                val hx = mx + 9f; val hy = FLOOR - 21f
+                val aim = ((t - (FinaleWorld.AIM - 0.7f)) / 0.7f).coerceIn(0f, 1f)
+                val across = -0.7f; val downA = atan2(headY - 1f - hy, headX - hx)
+                val ang = across + (downA - across) * aim
+                val len = if (aim >= 1f) hypot(headX - hx, headY - 1f - hy) else 22f
+                val ex = hx + cos(ang) * len; val ey = hy + sin(ang) * len
+                for (i in 0..len.toInt() + 6) { val q = i / (len + 6f); val bx = (hx - cos(ang) * 6f + (ex - hx + cos(ang) * 6f) * q).roundToInt(); val by = (hy - sin(ang) * 6f + (ey - hy + sin(ang) * 6f) * q).roundToInt(); rect(c, bx, by, 2, 2, if (q < 0.25f) K(0xFF5A3A22) else K(0xFF24242A)) }
+                val pump = if (t in FinaleWorld.GUN_OUT + 0.75f..FinaleWorld.GUN_OUT + 1.0f) -3f else 0f
+                rect(c, (hx + cos(ang) * (10f + pump)).roundToInt(), (hy + sin(ang) * (10f + pump)).roundToInt() - 1, 4, 3, K(0xFF3A2A1A))
+                if (t >= FinaleWorld.BLAM) {
+                    c.drawBitmap(flashBurst, ex - 12f, ey - 12f, plain)
+                    for (k in 0 until 40) { val an = k * 0.157f; val r = 4f + (hash(k, 9, 3) % 30); rect(c, (headX + cos(an) * r).toInt(), (headY - abs(sin(an)) * r * 0.5f).toInt(), 2, 2, K(0xFF8A1020)) }
+                    p.style = Paint.Style.FILL; p.color = a(PX.W, 0xC8); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p)
+                }
+            }
         }
-        // the shotgun: off his back, racked, then down at your head
-        if (t > FinaleWorld.GUN_OUT && mx > 0) {
-            val hx = mx + 6f; val hy = FLOOR - 22f
-            val aim = ((t - (FinaleWorld.AIM - 0.5f)) / 0.5f).coerceIn(0f, 1f)
-            val headX = YX + 34f; val headY = FLOOR - 8f
-            val across = -0.9f; val down2 = atan2(headY - 4f - hy, headX - hx)
-            val ang = across + (down2 - across) * aim
-            val len = 26f
-            val ex = hx + cos(ang) * len; val ey = hy + sin(ang) * len
-            for (i in 0..len.toInt()) { val k = i / len; val bx = (hx - cos(ang) * 8f + (ex - hx + cos(ang) * 8f) * k).roundToInt(); val by = (hy - sin(ang) * 8f + (ey - hy + sin(ang) * 8f) * k).roundToInt(); rect(c, bx, by, 2, 2, if (k < 0.28f) K(0xFF5A3A22) else K(0xFF24242A)) }
-            val pump = if (t in FinaleWorld.GUN_OUT + 0.75f..FinaleWorld.GUN_OUT + 1.0f) -3f else 0f
-            rect(c, (hx + cos(ang) * (12f + pump)).roundToInt(), (hy + sin(ang) * (12f + pump)).roundToInt() - 1, 4, 3, K(0xFF3A2A1A))
-            if (t >= FinaleWorld.BLAM) { c.drawBitmap(flashBurst, ex - 12f, ey - 12f, plain); p.style = Paint.Style.FILL; p.color = a(PX.W, 0xE0); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
-        }
-        sirenWash(c, clock, 0.45f)
+        // smoke hanging in the light
+        for (k in 0 until 5) { val ph = (clock * 0.04f + k * 0.2f) % 1f; c.drawBitmap(haze, 20f + ph * 210f - 40f, 250f + sin(clock * 0.25f + k) * 14f - 40f, plain) }
+        sirenWash(c, clock, 0.4f)
         letterbox(c)
         if (world.blackout > 0f) { p.style = Paint.Style.FILL; p.color = a(PX.K, (world.blackout * 255).toInt()); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), p) }
     }

@@ -926,6 +926,13 @@ internal class PrisonScene(private val world: PrisonWorld) : PixelSprites() {
                     "sleeper" -> { val (hc, hr) = n.home; lying(c, hc * S + 9, (hr - 1) * S + 12, o, true, false); if ((clock * 0.7f).toInt() % 2 == 0) rect(c, hc * S + 12, (hr - 1) * S - 2, 3, 1, a(PX.W, 0xB0)) }
                     else -> {
                         folk(c, fx, fy, dirOf(n.face), fr, o, false, false)
+                        if (n.carrying) bag(c, fx, fy, PrisonWorld.Carry.DIRTY)
+                        when (act) {
+                            "work:LAUNDRY" -> { val up = (clock * 1.4f + n.id).toInt() % 2 == 0; rect(c, fx + 4, fy - (if (up) 13 else 10), 3, 2, o.skin) }                               // loading, unloading
+                            "work:KITCHEN" -> { rect(c, fx + 4, fy - 9, 6, 2, K(0xFF2A2A30)); for (k in 0..1) px(c, fx + 6 + k * 2, fy - 12 - ((clock * 6f + k * 3 + n.id).toInt() % 5), a(PX.W, 0x90)) }   // a pan, steaming
+                            "work:LIBRARY" -> { val up = (clock * 0.9f + n.id).toInt() % 2 == 0; rect(c, fx + 4, fy - (if (up) 16 else 12), 3, 5, K(0xFF7A2A2A)) }                        // shelving books
+                            "work:RECREATION YARD" -> { rect(c, fx + 6, fy - 12, 1, 12, K(0xFF8A6A3A)); rect(c, fx + 4 + ((clock * 3f + n.id).toInt() % 2), fy - 1, 6, 2, K(0xFFC8B070)) }   // sweeping
+                        }
                         if (act == "sweeper" || (!n.guard && n.persona?.activity == "sweeper")) { rect(c, fx + 6, fy - 12, 1, 12, K(0xFF8A6A3A)); rect(c, fx + 4, fy - 1, 6, 2, K(0xFFC8B070)) }   // a broom
                     }
                 }

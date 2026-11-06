@@ -171,6 +171,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         var door: String? = null  // a guard standing at this room's door, checking people in
         var patrol: List<Pair<Int, Int>>? = null; var patrolAt = 0   // walking a loop (round the dining tables at meals)
         var seat: Pair<Int, Int>? = null                             // an inmate's place at the table this meal
+        var job: String? = null; var jobAt = 0; var carrying = false // his work in a shift: "LAUNDRY", "KITCHEN", "LIBRARY" or "RECREATION YARD"
         var glanceT = 0f          // standing still: when he next looks somewhere else
         var px0 = 0f; var py0 = 0f   // where he was last frame (his facing follows how he actually moved)
     }
@@ -257,6 +258,8 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
     private val myCell = PrisonLevel.CX0 + 3 * PrisonLevel.MY_CELL + 1
     /** The seats at the dining tables (the floor just above or below a table), and which way you face sitting there. */
     val seats = ArrayList<Pair<Int, Int>>()
+    /** Where the men work in each place during a shift: the floor in front of the carts, machines, stoves, counters and shelves. */
+    private val jobSpots = HashMap<String, ArrayList<Pair<Int, Int>>>()
     fun seatFacesDown(s: Pair<Int, Int>) = tile(s.first, s.second + 1) == 'T'
 
     init {
@@ -285,6 +288,12 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         for ((i, s) in posts.withIndex()) npcs += Npc(100 + i, s.first + 0.5f, s.second + 0.5f, true).also { it.wait = 1f + rnd.nextFloat() * 4f }
         // a guard on every room's door
         for ((i, dp) in DOOR_POSTS.withIndex()) npcs += Npc(200 + i, dp.second.first + 0.5f, dp.second.second + 0.5f, true).also { it.door = dp.first; it.post = dp.second; it.face = atan2(dp.third.second - dp.second.second.toFloat(), dp.third.first - dp.second.first.toFloat()) }
+        for (r in 0 until rows) for (c in 0 until cols) {
+            val ch = tile(c, r); val z = PrisonLevel.zoneName(spec, c, r)
+            val job = when { ch in "UMYFC" -> "LAUNDRY"; ch in "Kk" && (z == "KITCHEN" || PrisonLevel.zoneName(spec, c + 1, r) == "KITCHEN") -> "KITCHEN"; ch == 'r' && z == "LIBRARY" -> "LIBRARY"; else -> null } ?: continue
+            for ((dc, dr) in listOf(0 to 1, 1 to 0, -1 to 0, 0 to -1)) { val f = (c + dc) to (r + dr); if (tile(f.first, f.second) == '.') { jobSpots.getOrPut(job) { ArrayList() } += f; break } }
+        }
+        jobSpots["RECREATION YARD"] = ArrayList(spots["RECREATION YARD"]?.filter { it.second in 42..45 } ?: emptyList())
         for (tr in intArrayOf(10, 13, 16, 22, 25)) for (c in 10..20) if (c != 15) for (sr in intArrayOf(tr - 1, tr + 1)) if (tile(c, sr) == '.' && (c to sr) !in seats) seats += c to sr
         // the first morning: everyone's at roll call by their cells
         for (n in npcs) if (!n.guard) { n.x = n.home.first + 0.5f; n.y = n.home.second + 0.5f; n.stay = true }
@@ -727,9 +736,12 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         val d = hypot(g.x - px, g.y - py)
         val p = period
         val there = atPlace(p.place)                        // already where you're meant to be: he just follows on
-        g.hold = d > 3.2f && !there                         // otherwise he waits for you to catch up
-        if (d > 6f && !there) { heat += 5f * dt; if (g.sayT <= 0f) speak(g, "KEEP UP, TELLEM.") }
-        if (d > 12f && !atPlace(p.place)) {                 // too far: he comes back and walks you there by the arm
+        // ahead of him on the way there is fine; only lagging behind counts
+        val goal = escortGoal; val behind = goal == null || hypot(goal.first + 0.5f - px, goal.second + 0.5f - py) > hypot(goal.first + 0.5f - g.x, goal.second + 0.5f - g.y) + 1f
+        g.hold = behind && d > 3.2f && !there               // he waits for you to catch up
+        if (behind && d > 6f && !there) { heat += 3f * dt; if (g.sayT <= 0f) speak(g, "KEEP UP, TELLEM.") }
+        val late = periodMin - graceFrom > graceMin
+        if (late && d > 12f && !there) {                    // out of time and nowhere near: he comes back and walks you there by the arm
             val goal = escortGoal; escort = null; g.escorting = false; g.hold = false
             heat += 10f; punish(); say("THE GUARD COMES BACK FOR YOU.", true)
             grab(g, false, goal, "THAT'S IT. YOU'RE COMING WITH ME.") { say("WALKED TO THE ${p.place}.", true) }
@@ -1090,7 +1102,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
 
     /** Sends the inmates where the routine says (their cells, the dining hall, work, the showers) or lets them roam in free time. */
     private fun routineForNpcs(p: Period) {
-        for (n in npcs) if (!n.guard) n.seat = null
+        for (n in npcs) if (!n.guard) { n.seat = null; n.job = null; n.carrying = false }
         for (n in npcs) {
             if (n.guard) continue
             val target: Pair<Int, Int>? = when (p) {
@@ -1101,7 +1113,10 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
                     n.seat = s0; s0
                 }
                 Period.SHOWERS -> spot("SHOWERS")
-                Period.WORK_AM, Period.WORK_PM -> when (n.id % 5) { 0 -> spot("KITCHEN"); 1 -> spot("LIBRARY"); 2 -> spot("LAUNDRY"); else -> spot("RECREATION YARD") }
+                Period.WORK_AM, Period.WORK_PM -> {   // each man to his job; once there he keeps busy
+                    n.job = when (n.id % 5) { 0 -> "KITCHEN"; 1 -> "LIBRARY"; 2, 3 -> "LAUNDRY"; else -> "RECREATION YARD" }
+                    n.jobAt = n.id; jobSpots[n.job]?.let { it[n.jobAt % it.size] }
+                }
                 Period.FREE -> freeSpot(n)
             }
             if (target == null) { n.stay = false; n.wait = rnd.nextFloat() * 4f; continue }
@@ -1123,7 +1138,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         else -> null
     }
     /** What an inmate is doing where he stands (the scene draws it): push-ups, weights, reading, cards, sleeping... */
-    fun activityOf(n: Npc): String = if (!n.guard && meal && n.seat != null && n.path.isEmpty() && floor(n.x).toInt() == n.seat!!.first && floor(n.y).toInt() == n.seat!!.second) "eating" else if (!n.guard && n.stay && n.path.isEmpty() && period == Period.FREE) n.persona?.activity ?: "" else if (!n.guard && n.persona?.activity == "sleeper" && night) "sleeper" else ""
+    fun activityOf(n: Npc): String = if (!n.guard && period.work && n.job != null && n.path.isEmpty()) "work:" + n.job else if (!n.guard && meal && n.seat != null && n.path.isEmpty() && floor(n.x).toInt() == n.seat!!.first && floor(n.y).toInt() == n.seat!!.second) "eating" else if (!n.guard && n.stay && n.path.isEmpty() && period == Period.FREE) n.persona?.activity ?: "" else if (!n.guard && n.persona?.activity == "sleeper" && night) "sleeper" else ""
 
     private fun updateNpc(n: Npc, dt: Float) {
         n.sayT = max(0f, n.sayT - dt); n.heard = max(0f, n.heard - dt)
@@ -1136,6 +1151,19 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
             if (walkable(goal.first, goal.second)) n.path = arrayListOf(goal)
         }
         if (n.path.isEmpty() && !n.guard && n.persona?.activity == "sweeper" && period == Period.FREE) n.stay = false
+        if (n.path.isEmpty() && n.job != null && period.work) {   // at work: stay at a station a while, then on to the next (laundry: the bag goes with him)
+            n.wait -= dt
+            if (n.wait <= 0f) {
+                val js = jobSpots[n.job]
+                if (!js.isNullOrEmpty()) {
+                    n.jobAt++
+                    val next = if (n.job == "LAUNDRY") js[(n.jobAt * 3 + n.id) % js.size] else js[(n.jobAt * 2 + n.id) % js.size]
+                    n.path = route(floor(n.x).toInt() to floor(n.y).toInt(), next)
+                    if (n.job == "LAUNDRY") n.carrying = !n.carrying
+                    n.wait = 2.2f + rnd.nextFloat() * 2.5f
+                }
+            }
+        }
         if (n.path.isEmpty() && n.patrol != null) {   // walking his loop round the tables
             val loop = n.patrol!!; n.patrolAt = (n.patrolAt + 1) % loop.size
             n.path = route(floor(n.x).toInt() to floor(n.y).toInt(), loop[n.patrolAt])

@@ -93,7 +93,8 @@ class FinaleTest {
         step(1.05f); save(s.render(t), "l6-execute-shot")
         step(1.9f); save(s.render(t), "l6-execute-keys")
         step(1.6f); save(s.render(t), "l6-execute-door")
-        w.debugEnter(FinaleWorld.Stage.DOOR); step(2.6f); save(s.render(t), "l6-door")
+        w.debugEnter(FinaleWorld.Stage.DOOR); var dt0 = 0f
+        for (at in listOf(0.5f, 1.0f, 1.6f, 2.6f, 3.4f, 4.6f)) { step(at - dt0); dt0 = at; save(s.render(t), "l6-door-${(at * 10).toInt()}") }
         w.debugEnter(FinaleWorld.Stage.CONTROL); step(3f); save(s.render(t), "l6-control-walk")
         step(3.7f); save(s.render(t), "l6-control-bomb")
         step(0.5f); save(s.render(t), "l6-control-stumble")
@@ -102,6 +103,6 @@ class FinaleTest {
         w.debugEnter(FinaleWorld.Stage.BROADCAST); var bt = 0f
         for (at in listOf(0.5f, 1.4f, 2.6f, 6.5f, 11f, 15f, 17f, 21f, 26f, 30.2f, 30.5f, 31.6f, 34f, 38f, 42f, 44.5f)) { step(at - bt); bt = at; save(s.render(t), "l6-plea-${(at * 10).toInt()}") }
         w.debugEnter(FinaleWorld.Stage.END); var et = 0f
-        for (at in listOf(5.4f, 7.5f, 10.15f, 11.2f, 13.0f, 15.4f, 16.3f, 17.4f, 18.4f, 19.6f, 20.02f)) { step(at - et); et = at; save(s.render(t), "l6-end-${(at * 100).toInt()}") }
+        for (at in listOf(6.6f, 9.0f, 9.75f, 11.35f, 12.4f, 14.5f, 16.6f, 17.6f, 18.6f, 19.8f, 20.8f, 21.22f)) { step(at - et); et = at; save(s.render(t), "l6-end-${(at * 100).toInt()}") }
     }
 }

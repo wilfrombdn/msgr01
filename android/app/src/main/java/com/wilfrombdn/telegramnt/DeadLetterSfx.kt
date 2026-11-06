@@ -72,10 +72,13 @@ internal object DeadLetterSfx {
     private fun makeMore(name: String): ShortArray? = when (name) {
         "breath" -> breath()
         "cough" -> { val a = noise(0.18f, 0.5f, 10f, 0.25f, 29); val b = noise(0.2f, 0.4f, 12f, 0.25f, 31); ShortArray(a.size + 2400 + b.size) { when { it < a.size -> a[it]; it < a.size + 2400 -> 0; else -> b[it - a.size - 2400] } } }
-        "doorfall" -> { val k = noise(0.3f, 0.9f, 12f, 0.35f, 37); val f = noise(1.4f, 0.9f, 2.8f, 0.08f, 41); val ring = tone(listOf(118f, 177f, 266f), 1.4f, 0.25f, 3f, square = true); val off = (RATE * 0.32f).toInt()
+        "doorfall" -> { val k = noise(0.3f, 1.6f, 10f, 0.35f, 37); val f = noise(1.8f, 1.6f, 2.2f, 0.06f, 41); val ring = tone(listOf(118f, 177f, 266f), 1.8f, 0.5f, 2.6f, square = true); val off = (RATE * 0.32f).toInt()
             ShortArray(off + f.size) { val i2 = it - off; ((if (it < k.size) k[it] else 0) + (if (i2 >= 0) f[i2] + ring[i2] else 0)).coerceIn(-32767, 32767).toShort() } }   // the kick, then the door crashing down
+        "doorbang" -> { val a = noise(0.7f, 1.6f, 5f, 0.05f, 71); val b = tone(listOf(70f, 104f, 158f, 233f), 0.7f, 0.5f, 5f, square = true); val c2 = noise(0.08f, 1.4f, 40f, 0.8f, 73); ShortArray(a.size) { (a[it] + b[it] + (if (it < c2.size) c2[it] else 0)).coerceIn(-32767, 32767).toShort() } }   // a boot on the steel door
+        "breathsoft" -> { val b = breath(); ShortArray(b.size) { (b[it] * 0.45f).toInt().toShort() } }
+        "creak" -> { val n = (RATE * 2.6f).toInt(); val r = Random(79); var ph = 0.0; ShortArray(n) { val tt = it / RATE.toFloat(); val f = 55f + 30f * sin(tt * 1.7f) + (r.nextFloat() - 0.5f) * 8f; ph += 2 * PI * f / RATE; val g = if (sin(ph * 0.5) > 0.6) 1f else 0.3f; (sin(ph).toFloat() * g * 0.22f * (1f - tt / 2.6f) * 32767).toInt().toShort() } }   // a heavy door on dry hinges
         "pump" -> { val a = noise(0.08f, 0.7f, 40f, 0.7f, 43); val gap = (RATE * 0.16f).toInt(); val b = noise(0.08f, 0.8f, 40f, 0.7f, 47); ShortArray(a.size + gap + b.size) { when { it < a.size -> a[it]; it < a.size + gap -> 0; else -> b[it - a.size - gap] } } }   // shk-shk
-        "shotgun" -> { val a = noise(2.4f, 1f, 2.2f, 0.12f, 53); val b = noise(0.15f, 1f, 25f, 0.9f, 59); ShortArray(a.size) { (a[it] + (if (it < b.size) b[it] else 0)).coerceIn(-32767, 32767).toShort() } }
+        "shotgun" -> { val a = noise(3.0f, 1.6f, 1.7f, 0.1f, 53); val b = noise(0.2f, 1.6f, 18f, 0.9f, 59); val lo = tone(listOf(42f, 55f), 3.0f, 0.9f, 1.4f); ShortArray(a.size) { (a[it] + (if (it < b.size) b[it] else 0) + lo[it]).coerceIn(-32767, 32767).toShort() } }   // a crack, a deep boom, the room ringing
         "keys" -> tone(listOf(2100f, 2900f, 3600f), 0.25f, 0.12f, 14f, square = true)
         else -> null
     }
@@ -85,7 +88,7 @@ internal object DeadLetterSfx {
         val n = (RATE * 1.7f).toInt(); val out = FloatArray(n); val r = Random(61)
         var at = 0
         while (at < n - RATE / 5) {
-            val shot = noise(0.12f, 1f, 30f, 0.55f, r.nextInt(1000))
+            val shot = noise(0.12f, 1.5f, 26f, 0.55f, r.nextInt(1000))
             for (i in shot.indices) if (at + i < n) out[at + i] += shot[i] / 32767f
             at += (RATE * (0.055f + r.nextFloat() * 0.07f)).toInt()
         }
@@ -93,8 +96,8 @@ internal object DeadLetterSfx {
         return ShortArray(n) {
             val hiss = (r.nextFloat() * 2f - 1f) * 0.12f
             hp = 0.6f * (hp + out[it] - lastIn); lastIn = out[it]                                // thin, like a radio
-            val v = (hp * 2.2f).coerceIn(-0.85f, 0.85f) + hiss                                      // clipped hard
-            (v * 32767 * 0.8f).toInt().coerceIn(-32767, 32767).toShort()
+            val v = (hp * 3.4f).coerceIn(-0.95f, 0.95f) + hiss                                      // clipped hard
+            (v * 32767 * 1.0f).toInt().coerceIn(-32767, 32767).toShort()
         }
     }
     /**

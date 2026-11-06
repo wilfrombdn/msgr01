@@ -59,10 +59,10 @@ internal class FinaleWorld(seed: Int = 6) {
         const val CONTROL_S = 15.5f
         const val VIGNETTE_S = 3.4f
         const val VIGNETTES = 5
-        const val END_TITLE = 22.6f
-        const val END_TAP = 25.6f
+        const val END_TITLE = 23.8f
+        const val END_TAP = 26.8f
         /** How long the plea runs before it's cut off. */
-        const val PLEA_S = 46.0f
+        const val PLEA_S = 45.0f
         /** The plea's shots: when each starts, and what's on screen (-1 you take the mic, -2 pacing, -3 the thud on the door, -4 breaking down; 0..4 the places listening). */
         val PLEA_SHOTS = listOf(0f to -1, 5.0f to 0, 9.4f to 1, 13.4f to -2, 19.0f to 2, 23.4f to 3, 29.6f to -3, 35.6f to 4, 40.6f to -4)
         /** What you say into the mic, and when. */
@@ -87,20 +87,20 @@ internal class FinaleWorld(seed: Int = 6) {
             Triple(35.8f, 37.4f, "Sarah's dead... Chen..."),
             Triple(37.5f, 40.4f, "they shot the cop in cold blood right in front of me,"),
             Triple(40.8f, 42.9f, "I got his blood all over—"),
-            Triple(43.3f, 44.7f, "I tried..."),
-            Triple(44.9f, PLEA_S, "I fucking tri—"),
+            Triple(43.3f, 44.8f, "I tried..."),
         )
         // the end, after the cut
-        const val RED_OFF = 3.4f        // the red words go
-        const val FADE_IN = 4.6f        // back into the tower
-        const val DOOR_OFF = 10.0f      // the door is kicked off its hinges
-        const val MASK_IN = 11.6f       // the masked man walks in
-        const val MASK_AT = 14.8f       // ...and stands over you
-        const val PUSH = 15.8f          // his boot pushes you over
-        const val DOWN = 17.0f          // you're on the floor
-        const val GUN_OUT = 17.6f       // the shotgun
-        const val AIM = 19.0f           // aimed at your head; a second
-        const val BLAM = 20.0f
+        const val RED_ON = 0.8f         // black, a beat, then the red words (and the last of his voice, cut off)
+        const val RED_OFF = 4.6f        // the red words go
+        const val FADE_IN = 5.8f        // back into the tower
+        const val DOOR_OFF = 11.2f      // the door is kicked off its hinges
+        const val MASK_IN = 12.8f       // the masked man walks in
+        const val MASK_AT = 16.0f       // ...and stands behind you
+        const val PUSH = 17.0f          // his boot pushes you over, onto your face
+        const val DOWN = 18.2f          // you're on the floor
+        const val GUN_OUT = 18.8f       // the shotgun
+        const val AIM = 20.2f           // pressed to the back of your head; a second
+        const val BLAM = 21.2f
         const val SIMON_GOAL = 8
 
         // the tower: six slanted catwalks (0 at the bottom) and a flat top platform (6)
@@ -181,7 +181,7 @@ internal class FinaleWorld(seed: Int = 6) {
 
     // ---------------------------------------------------------------------------------------------------------------- end
     /** True while the room is silent after the transmission cuts out (the music stops). */
-    val silent get() = stage == Stage.END || (stage == Stage.EXECUTE && t >= GUN_T) || stage == Stage.DOOR || stage == Stage.CONTROL
+    val silent get() = stage == Stage.SIMON || stage == Stage.BROADCAST || stage == Stage.END || (stage == Stage.EXECUTE && t >= GUN_T) || stage == Stage.DOOR || stage == Stage.CONTROL
     val over get() = stage == Stage.END && t >= END_TAP
 
     fun update(dt: Float, ix: Float = 0f, iy: Float = 0f, mag: Float = 0f) {
@@ -198,6 +198,7 @@ internal class FinaleWorld(seed: Int = 6) {
             Stage.BEACH -> if (at(KICK_T)) events += "kick"
             Stage.INTRO -> { if (t in 4.7f..6.0f && (t * 4f).toInt() != (tPrev * 4f).toInt()) events += "type"; if (at(6.0f) || at(6.8f) || at(7.5f)) events += "clank" }
             Stage.EXECUTE -> { if (at(SHOT_T)) events += "shot"; if (at(5.2f)) events += "keys" }
+            Stage.DOOR -> { if (at(0.9f)) events += "keys"; if (at(1.4f)) events += "clank"; if (at(1.9f)) events += "creak" }
             Stage.CONTROL -> if (at(6.5f)) events += "boom"
             Stage.BROADCAST -> {
                 // your voice: frantic radio babble for every line, as long as the line (the last one is cut off mid-word)
@@ -206,9 +207,10 @@ internal class FinaleWorld(seed: Int = 6) {
                     events += "voice:$li:$ms:$mood" }
                 if (at(1.2f)) events += "mic"; if (at(30.4f)) events += "thud"; if (at(32.2f)) events += "thud" }
             Stage.END -> {
-                if (at(0.35f)) events += "radiofire"; if (at(2.0f)) events += "static"
-                for (b in floatArrayOf(5.0f, 6.6f, 8.1f, 9.5f, 12.0f, 13.6f, 18.2f)) if (at(b)) events += "breath"
-                if (at(7.3f)) events += "cough"
+                if (at(RED_ON)) events += "voice:99:850:2"
+                if (at(RED_ON + 0.85f)) events += "radiofire"; if (at(RED_ON + 2.6f)) events += "static"
+                for (b in floatArrayOf(6.4f, 8.6f, 10.6f, 13.6f, 15.8f, 19.6f)) if (at(b)) events += "breathsoft"
+                if (at(DOOR_OFF - 1.5f) || at(DOOR_OFF - 0.8f)) events += "doorbang"
                 if (at(DOOR_OFF)) events += "doorfall"
                 if (at(GUN_OUT + 0.8f)) events += "pump"
                 if (at(BLAM)) events += "shotgun"
@@ -458,7 +460,7 @@ internal class FinaleWorld(seed: Int = 6) {
         return Triple(PLEA_SHOTS[i].second, t - start, end - start)
     }
     /** The big red words on black right after the cut. */
-    val redText get() = if (stage == Stage.END && t < RED_OFF) "I FUCKING TRI—" else ""
+    val redText get() = if (stage == Stage.END && t >= RED_ON && t < RED_OFF) "I FUCKING TRI—" else ""
     /** How strong the red and blue in the window are (they close in as the plea goes on). */
     val sirens get() = when (stage) { Stage.BROADCAST -> (t / PLEA_S * 0.7f).coerceIn(0f, 0.7f); Stage.END -> 0.55f; else -> 0f }
     /** Black over the tower at the end: the cut, the fade back in, and the shot. */

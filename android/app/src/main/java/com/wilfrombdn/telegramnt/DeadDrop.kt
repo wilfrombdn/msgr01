@@ -495,7 +495,7 @@ internal class DeadDropView(
                 if (fw.redText.isNotEmpty()) {
                     p.style = Paint.Style.FILL; p.color = Color.BLACK; c.drawRect(0f, 0f, w, h, p)
                     val f = if (fw.t > FinaleWorld.RED_OFF - 0.4f) ((FinaleWorld.RED_OFF - fw.t) / 0.4f).coerceIn(0f, 1f) else 1f
-                    val jx = if (fw.t in 0.35f..2.0f) ((fw.clock * 47f).toInt() % 3 - 1) * 2f * d else 0f
+                    val jx = if (fw.t in FinaleWorld.RED_ON + 0.85f..FinaleWorld.RED_ON + 2.6f) ((fw.clock * 47f).toInt() % 3 - 1) * 3f * d else 0f
                     p.textAlign = Paint.Align.CENTER; p.typeface = monoBold; p.letterSpacing = 0.05f; p.textSize = 30f * d
                     while (p.measureText(fw.redText) > w - 32f * d && p.textSize > 14f * d) p.textSize -= 1f * d
                     p.color = a(0xFFE0182C.toInt(), (f * 255).toInt()); c.drawText(fw.redText, w / 2 + jx, h / 2, p)
