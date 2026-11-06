@@ -856,7 +856,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         val g = escort
         if (g != null && !escortArrived && !escortComing) return "FOLLOW THE GUARD" to (floor(g.x).toInt() to floor(g.y).toInt())
         if (meal && seated) return (if (attended) "PUSH THE STICK TO GET UP" else "EATING... (A SPOON, WHEN THEY LOOK AWAY?)") to null
-        if (meal) return (if (atPlace("DINING HALL")) "EAT IF YOU LIKE. TALK TO THE MEN" else "CHOW (OPTIONAL): THE MEN TALK AT THE TABLES") to null
+        if (meal) return (if (atPlace("DINING HALL")) "EAT IF YOU LIKE, OR TALK" else "OPTIONAL. GOOD TIME TO TALK") to null
         if (p.work && excused) return "DRAGGED HERE. NO NEED TO FINISH" to null
         if (p.work && !shiftDone) {
             if (!atPlace("LAUNDRY")) return "GO TO THE LAUNDRY" to goalFor(p)
@@ -877,7 +877,7 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
             p == Period.FREE -> "FREE TIME. LOOK AROUND, TALK, PLAN." to null
             p == Period.LIGHTS_OUT -> "LIGHTS OUT" to null
             p.work -> "LOAD DONE. KEEP YOUR HEAD DOWN." to null
-            else -> "DONE. SLIP AWAY WHEN NOBODY'S LOOKING." to null
+            else -> "DONE. SLIP OFF IF NOBODY LOOKS" to null
         }
     }
 
@@ -1385,7 +1385,8 @@ internal class PrisonWorld(val spec: PrisonSpec, seed: Int = 5) {
         if (dead) {
             if (deadT < DEAD_S) return
             dead = false; hearts = HEARTS; heat = 20f; missedLoads = 0; grabStage = -1; enforcer = null; beatT = -1f; seated = false
-            if (evNow != null) { clearEvent(); firedDay = 0 }                                  // the same day again: it can happen again
+            if (evNow != null) clearEvent()
+            if (doneDay == day) doneDay = 0; firedDay = 0                                         // the same day again: today's event hasn't happened yet
             clock = ((day - 1) * 1440 + Period.ROLL_AM.start).toFloat(); lastPeriod = Period.ROLL_AM
             px = spec.startX; py = spec.startY; doorOpen = 0f; doorTarget = 0f; workTonight = null; carry = Carry.NONE; folding = -1f
             for (n in npcs) if (n.guard && n.door == null) { n.path.clear(); n.patrol = null; n.post = null; n.escorting = false }

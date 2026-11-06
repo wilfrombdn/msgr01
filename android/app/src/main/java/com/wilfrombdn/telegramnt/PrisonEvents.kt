@@ -95,8 +95,8 @@ internal object PrisonEvents {
         return out
     }
 
-    /** The prison is on high alert: the two days after an escape (the guards see further and never look away). */
-    fun alertOn(day: Int): Boolean = on(day) == PrisonEvent.ESCAPE || on(day - 1) == PrisonEvent.ESCAPE
+    /** The prison is on high alert from the morning the escape is found through the next two days (the guards see further and never look away). */
+    fun alertOn(day: Int): Boolean = on(day) == PrisonEvent.ESCAPE || on(day - 1) == PrisonEvent.ESCAPE || on(day - 2) == PrisonEvent.ESCAPE
 
     /** The event the men are talking about today: today's (once it has happened) or yesterday's. */
     fun talkedAbout(day: Int, doneToday: Boolean): PrisonEvent? = on(day)?.takeIf { doneToday } ?: on(day - 1)

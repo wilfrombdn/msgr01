@@ -406,7 +406,7 @@ class PrisonTest {
         assertTrue("Numbers missing at the count", PrisonEvents.marks(6, false)["NUMBERS"]?.contains("gone") == true)
         assertTrue(PrisonEvents.marks(7, false)["NUMBERS"]?.contains("gone") == true)
         assertEquals(setOf("bruised"), PrisonEvents.marks(8, false)["NUMBERS"])
-        assertFalse(PrisonEvents.alertOn(5)); assertTrue(PrisonEvents.alertOn(6)); assertTrue(PrisonEvents.alertOn(7)); assertFalse(PrisonEvents.alertOn(8))
+        assertFalse(PrisonEvents.alertOn(5)); assertTrue(PrisonEvents.alertOn(6)); assertTrue(PrisonEvents.alertOn(7)); assertTrue(PrisonEvents.alertOn(8)); assertFalse(PrisonEvents.alertOn(9))
         assertEquals(10, (2..20 step 2).map { PrisonEvents.on(it) }.toSet().size)
         assertEquals(null, PrisonEvents.on(3))
     }

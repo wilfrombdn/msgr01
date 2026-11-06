@@ -42,4 +42,20 @@ class PrisonViewTest {
         for (y in 0 until 2400) { val c = bmp.getPixel(30, y); val lum = ((c shr 16) and 255) + ((c shr 8) and 255) + (c and 255); if (y > 200 && lum > 150 && firstLit < 0) { firstLit = y } }
         assertTrue("the shower room shows below the title area (first lit row at $firstLit)", firstLit > 400)
     }
+
+    /** The long intercom line when the escape is found fits on the screen (two lines). */
+    @Test fun aLongMessageWraps() {
+        val v = DeadDropView(RuntimeEnvironment.getApplication(), 4, false, { }, { }, { })
+        v.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(2400, View.MeasureSpec.EXACTLY)); v.layout(0, 0, 1080, 2400)
+        v.debugLevel(4)
+        val w = v.debugPrison()!!
+        var g = 0f; while (w.countStage < 1 && g < 10f) { v.debugMgAdvance(0.05f); g += 0.05f }
+        w.px = w.countSpot.first + 0.5f; w.py = w.countSpot.second + 0.5f
+        while (w.countStage >= 0 && g < 70f) { v.debugMgAdvance(0.05f); g += 0.05f }
+        w.debugDay(6)
+        g = 0f; while (w.evNow == null && g < 20f) { v.debugMgAdvance(0.05f); g += 0.05f }
+        v.debugMgAdvance(0.3f)
+        shot(v, "full-l5-escape-msg")
+        assertTrue(w.msg.startsWith("INTERCOM: INMATE MISSING"))
+    }
 }

@@ -414,7 +414,7 @@ internal class DeadDropView(
         beltScene?.let { it.resize(ceil(h / fillW(it.W)).toInt()) }
         flyScene?.let { it.resize(ceil(h / fillW(it.W)).toInt()) }
         shootScene?.let { it.resize(ceil(h / fillW(it.W)).toInt()) }
-        prisonScene?.let { val k = max(1, (w / 256f).roundToInt()); it.resize(ceil(w / k).toInt(), ceil(h / k).toInt()); it.hudTop = ((max(barH + 30f * d, 0f) + 70f * d - (h - it.H * k) / 2f) / k).toInt(); it.topPad = ((barH + 30f * d + 64f * d - (h - it.H * k) / 2f) / k).toInt().coerceAtLeast(0) }
+        prisonScene?.let { val k = max(1, (w / 256f).roundToInt()); it.resize(ceil(w / k).toInt(), ceil(h / k).toInt()); it.hudTop = ((max(barH + 30f * d, 0f) + 70f * d - (h - it.H * k) / 2f) / k).toInt(); it.topPad = ((barH + 30f * d + 80f * d - (h - it.H * k) / 2f) / k).toInt().coerceAtLeast(0) }
         val bmp = beltScene?.render(clock) ?: flyScene?.render(clock) ?: cine?.render(clock) ?: shootScene?.render(clock) ?: prisonScene?.render(clock) ?: finaleScene?.render(clock)
         if (bmp != null) {
             val grows = beltScene != null || flyScene != null || shootScene != null || prisonScene != null
@@ -466,8 +466,15 @@ internal class DeadDropView(
                     mgText(c, now, w / 2f, hy + 26f * d, 11f, if (due != null && !pw.period.work) 0xFFFFD84D.toInt() else a(Color.WHITE, 0xCC))
                     if (pw.msgT > 0f) {
                         val al = (min(1f, pw.msgT * 2f) * 0xEE).toInt()
-                        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, al * 2 / 3); c.drawRect(0f, hy + 36f * d, w, hy + 62f * d, p)
-                        mgText(c, pw.msg, w / 2f, hy + 54f * d, 10.5f, a(if (pw.msgBad) 0xFFFF6A6A.toInt() else 0xFF3BFF9A.toInt(), al))
+                        // a long message goes onto two lines instead of running off the screen
+                        p.typeface = monoBold; p.textSize = 10.5f * d; p.letterSpacing = 0.05f
+                        val lines = if (p.measureText(pw.msg) <= w - 24f * d) listOf(pw.msg) else {
+                            val mid = pw.msg.length / 2; val cut = (0..mid).map { listOf(mid - it, mid + it) }.flatten().firstOrNull { it in 1 until pw.msg.length && pw.msg[it] == ' ' } ?: mid
+                            listOf(pw.msg.substring(0, cut).trim(), pw.msg.substring(cut).trim())
+                        }
+                        p.letterSpacing = 0f
+                        p.style = Paint.Style.FILL; p.color = a(Color.BLACK, al * 2 / 3); c.drawRect(0f, hy + 36f * d, w, hy + 62f * d + (lines.size - 1) * 16f * d, p)
+                        for ((i, ln) in lines.withIndex()) mgText(c, ln, w / 2f, hy + 54f * d + i * 16f * d, 10.5f, a(if (pw.msgBad) 0xFFFF6A6A.toInt() else 0xFF3BFF9A.toInt(), al))
                     }
                     if (invOpen) drawInventory(c, w, h, pw)
                     else if (pw.phase == PrisonWorld.Phase.PLAY && pw.t < 40f) mgText(c, "SWIPE UP FOR YOUR THINGS", w / 2f, hb - 4f * d, 9f, a(Color.WHITE, 0x77), false)
