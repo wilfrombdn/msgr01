@@ -30,7 +30,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y fakeroot rpm binutils
       - name: Build installers
         run: bash ./gradlew packageDistributionForCurrentOS --console=plain
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tellem-desktop-${{ runner.os }}
           path: |
